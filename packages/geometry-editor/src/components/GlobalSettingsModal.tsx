@@ -32,6 +32,7 @@ import {
   fhsBedroomCountIssue,
   globalSettingsFieldSection,
   METADATA_INPUT_LABELS,
+  smartMeterGuidIssue,
   type TargetInputRow,
   targetBuildTypes,
   buildTypeHasStoreyRows,
@@ -2397,6 +2398,18 @@ export function GlobalSettingsModal({
                       />
 
                       {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
+                      {requiredRows.has("HasElectricitySmartMeter") && (complianceSettings.HasElectricitySmartMeter === true || complianceSettings.ElectricitySmartMeterGUID) ? (
+                        <StandardInput
+                          type="text"
+                          label={complianceFieldLabel("Smart meter GUID", "ElectricitySmartMeterGUID")}
+                          value={complianceSettings.ElectricitySmartMeterGUID ?? ""}
+                          onChange={(event) => setComplianceSettings({ ElectricitySmartMeterGUID: event.target.value.trim() || undefined })}
+                          placeholder="e.g. 0A1B2C3D4E5F6071"
+                          error={complianceSettings.ElectricitySmartMeterGUID ? smartMeterGuidIssue(complianceSettings, requiredRows)?.replace(/^Global Settings: /, "").replace(" Enter it in Global Settings.", "") : undefined}
+                          variant="ghost"
+                          size="md"
+                        />
+                      ) : null}
                       {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G compliance")} /> : (
                       <label
                         style={{

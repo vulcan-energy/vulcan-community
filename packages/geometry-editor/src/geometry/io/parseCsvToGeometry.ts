@@ -194,6 +194,7 @@ export type ComplianceSettings = {
   KitchenExtractorHoodExternal?: boolean;
   /** Metadata rows only some targets take (TARGET_INPUT_ROWS); unset means the file has no row. */
   HasElectricitySmartMeter?: boolean;
+  ElectricitySmartMeterGUID?: string;
   IsExistingBuilding?: boolean;
   Ventilation_cross_vent_possible?: boolean;
   Appliances_has_dryer?: boolean;
@@ -695,6 +696,11 @@ export const parseCsvToGeometry = (
       const value = line.split(',')[1]?.trim().toUpperCase();
       // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
       if (value === 'TRUE' || value === 'FALSE') complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith('ElectricitySmartMeterGUID,')) {
+      const value = metadataFields[1]?.trim();
+      if (value) complianceSettings.ElectricitySmartMeterGUID = value;
       continue;
     }
     if (hostMetadataKey && TARGET_INPUT_ROW_SET.has(hostMetadataKey)) {

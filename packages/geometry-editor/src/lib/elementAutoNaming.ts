@@ -4,6 +4,7 @@
 import type { Element, System } from '../geometry/types';
 
 export const SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS: Record<System['subcategory'], string> = {
+  HeatSourceWarmAir: 'Warm air heater',
   HeatSourceWet: 'Heat source wet',
   HotWaterSource: 'Hot water',
   HotWaterDemand: 'Hot water demand',
@@ -45,6 +46,7 @@ export const normalizeAutoNameTypeToken = (raw: string): string => {
 };
 
 const SYSTEM_EXTRA_JSON_FAMILY_KEYS: Array<System['subcategory']> = [
+  'HeatSourceWarmAir',
   'HeatSourceWet',
   'HotWaterSource',
   'HotWaterDemand',

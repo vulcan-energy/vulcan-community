@@ -1248,6 +1248,7 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_building",
     "IsExistingBuilding",
     "HasElectricitySmartMeter",
+    "ElectricitySmartMeterGUID",
     crate::epc_products::RADIATOR_SETTING,
     crate::epc_products::UFH_SETTING,
     crate::epc_products::RADIATOR_LENGTH_SETTING,
@@ -1289,6 +1290,7 @@ const METADATA_INPUT_FIELD_NAMES: &[&str] = &[
     "General_storeys_in_building",
     "IsExistingBuilding",
     "HasElectricitySmartMeter",
+    "ElectricitySmartMeterGUID",
 ];
 
 const COLD_WATER_SOURCE_MAINS: &str = "mains water";
@@ -2268,6 +2270,7 @@ impl JSONBuilder {
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
             crate::epc_products::check_product_fuels(result, db, &mut errors);
             crate::epc_products::derive_zone_frac_convective(result, db, &slots, &mut errors);
+            crate::epc_products::derive_zone_frac_convective_cooling(result, &mut errors);
             let rows = self.slot_rows.borrow();
             *self.product_slots.borrow_mut() = slots
                 .into_iter()
@@ -2291,6 +2294,13 @@ impl JSONBuilder {
         }
         if self.profile.checks_party_wall_lining() {
             crate::epc_mappings::check_party_wall_lining(result, &mut errors);
+        }
+        if self
+            .profile
+            .required_metadata_rows()
+            .contains(&"HasElectricitySmartMeter")
+        {
+            crate::epc_mappings::check_smart_meter_guid(result, &mut errors);
         }
         if self.profile.uses_solar_absorption_coeff() {
             crate::epc_mappings::check_solar_absorption(
@@ -5549,7 +5559,13 @@ impl JSONBuilder {
                         // Handle string fields. NB. `Location` is a recognised Metadata row but
                         // is Vulcan-only (no HEM consumer reads it) — it stays in the CSV and is
                         // deliberately not written into the merged JSON.
-                        else if name == "HeatingControlType" {
+                        else if name == "HeatingControlType"
+                            || (name == "ElectricitySmartMeterGUID"
+                                && self
+                                    .profile
+                                    .required_metadata_rows()
+                                    .contains(&"HasElectricitySmartMeter"))
+                        {
                             if let Some(str_val) = val.as_str() {
                                 if !str_val.is_empty() {
                                     result_obj.insert(

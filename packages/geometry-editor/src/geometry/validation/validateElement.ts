@@ -2431,6 +2431,7 @@ export const validateElementCore = (
     case 'System': {
       const sysElement = element as System;
       const validSubcategories = [
+        'HeatSourceWarmAir',
         'HeatSourceWet',
         'HotWaterSource',
         'HotWaterDemand',

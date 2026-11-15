@@ -2383,6 +2383,10 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     if let Some(vents) = systems::host_vents(ctx, e.name) {
         w["mechanical_vents"] = vents;
     }
+    // Stated by the user (optional; HEMIE takes none as no trickle vent).
+    if e.flag("has_trickle_vent") {
+        w["has_trickle_vent"] = json!(true);
+    }
     // Derived from the model: Vulcan's security_risk flag.
     if let Some(risk) = e.get("security_risk").and_then(Value::as_bool) {
         w["is_security_risk"] = json!(risk);
@@ -4490,6 +4494,25 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                         .contains("'Roof S', 'Roof N' (mass distribution class I")),
             "{notices:#?}"
         );
+    }
+
+    #[test]
+    fn a_window_states_its_trickle_vent() {
+        let window = |extra: &str| {
+            let (model, errors, _) = run(&window_house(extra, ""));
+            assert!(errors.is_empty(), "{errors:#?}");
+            model["Zone"]["building_parts"]["Main"]["walls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|w| w["windows"].get(0).cloned())
+                .expect("window")
+        };
+        assert_eq!(
+            window(r#","has_trickle_vent":true"#)["has_trickle_vent"],
+            true
+        );
+        assert!(window("").get("has_trickle_vent").is_none());
     }
 
     #[test]

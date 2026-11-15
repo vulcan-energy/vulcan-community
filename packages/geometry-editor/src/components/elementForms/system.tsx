@@ -173,12 +173,11 @@ const SYSTEM_TYPE_LABELS: Record<string, string> = {
   SolidFuelBoiler: 'Solid fuel boiler',
   StorageTank: 'Hot water cylinder',
   WarmAir: 'Warm air',
+  WarmAirCombustion: 'Combustion warm-air heater',
+  WarmAirElectric: 'Electric warm-air heater',
   WarmAirDistribution: 'Warm air distribution',
   WetDistribution: 'Wet distribution',
 };
-
-/** Types whose schema requires an entry the editor has no category to create (a warm-air heat source). */
-const TYPES_NEEDING_AN_UNCREATABLE_ENTRY = new Set(['WarmAirDistribution']);
 
 export function formatSystemPresetName(preset: string): string {
   return preset.replace(/_/g, ' ');
@@ -236,6 +235,8 @@ export interface SystemFormState {
   handleSystemTypeChange: (type: string) => void;
   /** The type is offered only for a row holding no plant or one. */
   systemPlantCount: number;
+  /** The categories the target schema takes (a warm-air heater only where it has one). */
+  systemCategoryOptions: Array<{ value: string; label: string }>;
 }
 
 function useFormState(ctx: ElementFormStateCtx): SystemFormState {
@@ -721,8 +722,15 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   const systemTypeOptions = useMemo(() => {
     if (!isSystemElementType || !systemSubcategory || ctx.schemaPort.availability !== 'available') return [];
     return systemPlantTypes(ctx.schemaPort.getRootSchema(ctx.schemaMode), systemSubcategory)
-      .flatMap((value) => (TYPES_NEEDING_AN_UNCREATABLE_ENTRY.has(value) ? [] : [{ value, label: SYSTEM_TYPE_LABELS[value] ?? value }]));
+      .map((value) => ({ value, label: SYSTEM_TYPE_LABELS[value] ?? value }));
   }, [isSystemElementType, systemSubcategory, ctx.schemaPort, ctx.schemaMode]);
+
+  const systemCategoryOptions = useMemo(() => {
+    const warmAir = ctx.schemaPort.availability === 'available'
+      && systemPlantTypes(ctx.schemaPort.getRootSchema(ctx.schemaMode), 'HeatSourceWarmAir').length > 0;
+    return ['HeatSourceWet', ...(warmAir ? ['HeatSourceWarmAir'] : []), 'HotWaterSource', 'SpaceCoolSystem', 'SpaceHeatSystem']
+      .map((value) => ({ value, label: SYSTEM_SUBCATEGORY_LABELS[value] }));
+  }, [ctx.schemaPort, ctx.schemaMode]);
 
   // The row holds one plant, named for the row. A row with several plants keeps them: no type is offered.
   const selectedPlants = readRecord(readRecord(selectedSystemElementFull?.extra_json)[systemSubcategory]);
@@ -848,6 +856,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     systemPlantType,
     handleSystemTypeChange,
     systemPlantCount: plantCount,
+    systemCategoryOptions,
   };
 }
 
@@ -917,6 +926,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       systemPlantType,
       handleSystemTypeChange,
       systemPlantCount,
+      systemCategoryOptions,
     } = state;
     const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager, selectedElement } = ctx;
     const sizing = <HeatingSizingBlock element={selectedElement} elements={Object.values(elementsById)} />;
@@ -970,12 +980,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
               <StandardDropdown
                 value={systemSubcategory}
                 onChange={handleSystemSubcategoryChange}
-                options={[
-                  { value: 'HeatSourceWet', label: SYSTEM_SUBCATEGORY_LABELS.HeatSourceWet },
-                  { value: 'HotWaterSource', label: SYSTEM_SUBCATEGORY_LABELS.HotWaterSource },
-                  { value: 'SpaceCoolSystem', label: SYSTEM_SUBCATEGORY_LABELS.SpaceCoolSystem },
-                  { value: 'SpaceHeatSystem', label: SYSTEM_SUBCATEGORY_LABELS.SpaceHeatSystem },
-                ]}
+                options={systemCategoryOptions}
                 variant="ghost"
                 size="md"
               />

@@ -136,6 +136,7 @@ const SYSTEM_PRESET_ICONS: Record<string, IconNode> = {
 };
 
 const SYSTEM_SUBCATEGORY_ICONS: Record<SystemSubcategory, IconNode> = {
+  HeatSourceWarmAir: Flame,
   HeatSourceWet: Flame,
   HotWaterSource: Cylinder,
   HotWaterDemand: ShowerHead,

@@ -84,6 +84,12 @@ const CASES: Case[] = [
   { name: 'EPC rows save as typed', requires: EPC_ROWS, edit: withMetadata(EPC_ROW_CELLS), defaults: true,
     allows: ['Electricity smart meter is not set', 'Has a dishwasher is not set', 'Cross ventilation possible is not set'],
     saves: Object.fromEntries(EPC_ROW_CELLS.map(([key, value]) => [`Metadata|${key}`, value])) },
+  // DESNZ requires the smart meter GUID when the dwelling has one; it saves as typed.
+  { name: 'a smart meter needs its GUID', requires: EPC_ROWS, edit: withMetadata(EPC_ROW_CELLS), defaults: true,
+    blocks: ['Smart meter GUID is not set'] },
+  { name: 'a smart meter GUID saves as typed', requires: EPC_ROWS, defaults: true,
+    edit: withMetadata([...EPC_ROW_CELLS, ['ElectricitySmartMeterGUID', '0123456789ABCDEF']]),
+    allows: ['Smart meter GUID'], saves: { 'Metadata|ElectricitySmartMeterGUID': '0123456789ABCDEF' } },
   { name: 'EPC rows also save as typed for an FHS target', edit: withMetadata(EPC_ROW_CELLS),
     saves: Object.fromEntries(EPC_ROW_CELLS.map(([key, value]) => [`Metadata|${key}`, value])) },
   { name: 'an FHS model writes no EPC row and needs none', defaults: true, edit: (csv) => csv,

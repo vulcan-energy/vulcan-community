@@ -121,6 +121,32 @@ describe("GlobalSettingsModal target-required rows", () => {
   });
 });
 
+describe("GlobalSettingsModal smart meter GUID", () => {
+  it("asks for the GUID once the dwelling has a smart meter, and checks its format", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ requiredMetadataRows: ["HasElectricitySmartMeter"] }) }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="HasElectricitySmartMeter" />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    const meter = await screen.findByLabelText("Electricity smart meter");
+    expect(screen.queryByLabelText("Smart meter GUID")).not.toBeInTheDocument();
+    await user.selectOptions(meter, "Yes");
+    expect(screen.getAllByText(/Smart meter GUID is not set/).length).toBeGreaterThan(0);
+    await user.type(screen.getByLabelText("Smart meter GUID"), "01-23-45");
+    expect(screen.getAllByText(/must be 16 hexadecimal characters/).length).toBeGreaterThan(0);
+    await user.type(screen.getByLabelText("Smart meter GUID"), "-67-89-ab-cd-ef");
+    expect(screen.queryByText(/must be 16 hexadecimal characters/)).not.toBeInTheDocument();
+    expect(store.getState().complianceSettings.ElectricitySmartMeterGUID).toBe("01-23-45-67-89-ab-cd-ef");
+  });
+});
+
 describe("GlobalSettingsModal existing building", () => {
   it("asks it with the target, before the dwelling details, without opening a section", async () => {
     render(
