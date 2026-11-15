@@ -13,6 +13,7 @@ import {
 } from './groundExposedPerimeter';
 import { usesGroundThermalTransmWallsAutofill } from './groundFloorSubtype';
 import type { DefaultsLookup } from './defaultsCache';
+import { targetSchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import { deriveAutomaticGroundTotalAreas } from './groundFloorArea';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
 import {
@@ -570,8 +571,9 @@ function groundSyncInputsChanged(next: Record<string, Element>, previous: Record
 
 /**
  * Fills the suspended-floor defaults that are blank when a ground becomes a suspended floor in an
- * edit (a floor type change, alone or across a selection, or a new suspended floor). Selection and
- * loading never fill them.
+ * edit (a floor type change, alone or across a selection, or a new suspended floor), and on load
+ * before the saved baseline (without `previous`), so an older file exports them and the U-value
+ * does not read them as 0. Selection never fills them.
  */
 export function fillSuspendedFloorDefaults(
   elementsById: Record<string, Element>,
@@ -602,6 +604,14 @@ export function fillSuspendedFloorDefaults(
     }
     if (JSON.stringify(next) !== JSON.stringify(extra)) updateElement(ground.id, { extra_json: next });
   }
+}
+
+/** Whether the target's suspended floor takes `shield_fact_location`. */
+export function acceptsSuspendedShieldLocation(schemaPort: GeometrySchemaPort): boolean {
+  if (schemaPort.availability !== 'available') return false;
+  const properties = schemaPort.getElementSubschema(targetSchemaMode(schemaPort), 'BuildingElementGround', 'Suspended_floor')
+    ?.properties as Record<string, unknown> | undefined;
+  return properties?.shield_fact_location != null && properties.shield_fact_location !== false;
 }
 
 export interface GroundFabricFollower {

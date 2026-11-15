@@ -148,8 +148,9 @@ describe('ground fabric edits in the store', () => {
     store.getState().updateElement(id, { thickness_walls: 0.3, extra_json: { thermal_resistance_floor_construction: 0.2 } } as never);
     const u = (store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value;
     expect(u).toBeGreaterThan(0);
-    const { u_value: _cleared, ...rest } = store.getState().elementsById[id]!.extra_json as Record<string, unknown>;
-    store.getState().updateElement(id, { extra_json: rest });
+    const cleared = { ...(store.getState().elementsById[id]!.extra_json as Record<string, unknown>) };
+    delete cleared.u_value;
+    store.getState().updateElement(id, { extra_json: cleared });
     expect((store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value).toBe(u);
   });
 
@@ -161,4 +162,23 @@ describe('ground fabric edits in the store', () => {
     // Unlinked, the copy's drawing gives its 25.8 m outline: the stated 30 m stays.
     expect(copy.perimeter).toBe(30);
   });
+});
+
+it('an older file with a blank suspended floor opens clean, and the export carries the defaults', () => {
+  const builder = openedModel();
+  builder.getState().updateElement(idOf(builder, 'Floor'), { floor_type: 'Suspended_floor' } as never);
+  // As an older file has it: the floor type stated, its defaults blank.
+  const csv = builder.getState().generateCSV({ allowUnresolvedMigration: true })
+    .replace(/""height_upper_surface"":[^,}]*,?/, '')
+    .replace(/""area_per_perimeter_vent"":[^,}]*,?/, '')
+    .replace(/,""shield_fact_location"":""[A-Za-z]*""/, '');
+  expect(csv).toContain('Suspended_floor');
+  expect(csv).not.toContain('height_upper_surface');
+
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  store.getState().loadFromCSV(csv);
+  const exported = store.getState().getDocumentCsv();
+  expect(exported).toBe(store.getState().lastSavedCsv);
+  expect(exported).toContain('""height_upper_surface"":0.15');
+  expect(exported).toContain('""area_per_perimeter_vent""');
 });

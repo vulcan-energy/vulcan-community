@@ -49,6 +49,7 @@ import {
 } from '../../../lib/openingSegmentOutward';
 import { getParentOrientation360 } from '../../../lib/parentOrientation';
 import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
+import { acceptsSuspendedShieldLocation, fillSuspendedFloorDefaults } from '../../../lib/groundSuspendedFabricSync';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -2423,6 +2424,22 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
 
     // Round-trip through the canonical serializer after all synchronous load
     // normalization, before control returns to callers that may edit immediately.
+    // Blank suspended-floor defaults are filled before the baseline: the model opens clean and the
+    // export carries them (the U-value reads a missing one as 0).
+    const suspendedDefaults: Record<string, Partial<Element>> = {};
+    fillSuspendedFloorDefaults(
+      get().elementsById,
+      (id, patch) => { suspendedDefaults[id] = patch; },
+      acceptsSuspendedShieldLocation(options.schemaPort),
+    );
+    if (Object.keys(suspendedDefaults).length > 0) {
+      set((current) => ({
+        elementsById: {
+          ...current.elementsById,
+          ...Object.fromEntries(Object.entries(suspendedDefaults).map(([id, patch]) => [id, { ...current.elementsById[id], ...patch } as Element])),
+        },
+      }));
+    }
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);

@@ -209,6 +209,7 @@ import {
 import {
   applyGroundThicknessWallsManualTracking,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
+  acceptsSuspendedShieldLocation,
   followGroundFabricOnEdit,
   type GroundFabricFollower,
 } from '../lib/groundSuspendedFabricSync';
@@ -7843,12 +7844,7 @@ export const createGeometryStore = (
   const schemaPort = options.schemaPort ?? unavailableGeometrySchemaPort;
   const follower = followGroundFabricOnEdit(store, {
     constructionBands: (state) => targetRules(schemaPort, state.complianceSettings).constructionBands,
-    acceptsShieldLocation: () => {
-      if (schemaPort.availability !== 'available') return false;
-      const properties = schemaPort.getElementSubschema(targetSchemaMode(schemaPort), 'BuildingElementGround', 'Suspended_floor')
-        ?.properties as Record<string, unknown> | undefined;
-      return properties?.shield_fact_location != null && properties.shield_fact_location !== false;
-    },
+    acceptsShieldLocation: () => acceptsSuspendedShieldLocation(schemaPort),
   });
   rawSetState({ asDocumentLoad: follower.asDocumentLoad, withCopySources: follower.withCopySources });
   return store;
