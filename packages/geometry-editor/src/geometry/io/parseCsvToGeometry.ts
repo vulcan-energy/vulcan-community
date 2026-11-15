@@ -53,6 +53,7 @@ import {
 } from './csvSectionRows';
 import { ingestGeometryTabularSections, NUMBER_CELL } from './ingestGeometryTabularSections';
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
+import { parseProvenanceMetadataValue, PROVENANCE_METADATA_KEY, type ProvenanceSource } from '../../lib/provenance';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
 import { METADATA_INPUT_LABELS, metadataSettingKey, TARGET_INPUT_ROW_SET, type TargetInputRow } from '../../lib/globalSettingsValidation';
@@ -245,6 +246,8 @@ export type ParsedCsvMetadata = {
   provenanceMarkersVersion?: number;
   /** Original legacy row value, retained only for saving an unupgraded source. */
   legacyProvenanceMarkersVersion?: number;
+  /** The `Provenance` row: recorded field sources by `e:<zone or global type>/<name>`. */
+  provenance?: Record<string, Record<string, ProvenanceSource>>;
   schemaProfile?: ModelSchemaProfile;
   defaultsPath?: string;
   hostDocumentMetadata: Readonly<Record<string, string>>;
@@ -309,6 +312,8 @@ export const parseCsvToGeometry = (
 
   let globalOffset = 0;
   let detectedProvenanceMarkersVersion: number | undefined;
+  let detectedProvenance: Record<string, Record<string, ProvenanceSource>> | undefined;
+  const provenanceWarnings: string[] = [];
   let detectedVulcanCsvVersion: string | undefined;
   let detectedDefaultsPath: string | undefined;
   const targetBundleId = csvMetadataValue(csvContent, 'TargetBundleId') || undefined;
@@ -383,6 +388,14 @@ export const parseCsvToGeometry = (
       const rawVersion = metadataFields[1]?.trim() ?? '';
       if (/^\d+$/.test(rawVersion)) {
         detectedProvenanceMarkersVersion = Number.parseInt(rawVersion, 10);
+      }
+      continue;
+    }
+    if (hostMetadataKey === PROVENANCE_METADATA_KEY) {
+      try {
+        detectedProvenance = parseProvenanceMetadataValue(metadataFields[1] ?? '');
+      } catch (error) {
+        provenanceWarnings.push(`The Provenance row could not be read (${error instanceof Error ? error.message : String(error)}), so entered values that equal their defaults show as defaults. Saving removes the row.`);
       }
       continue;
     }
@@ -713,7 +726,7 @@ export const parseCsvToGeometry = (
     if (settingValues[metadataSettingKey(key)] === undefined) (complianceSettings.unreadMetadataRows ??= {})[key] = cell;
   }
 
-  const warnings: string[] = [...retiredRows];
+  const warnings: string[] = [...retiredRows, ...provenanceWarnings];
   const arealHeatCapacityInput = documentArealHeatCapacity(targetBundleId, options.arealHeatCapacityForPin);
   if (!arealHeatCapacityInput) {
     warnings.push(`This editor does not know the target this file pins (${targetBundleId}), so areal heat capacity values stay as saved: a class means what that target reads it as.`);
@@ -840,6 +853,7 @@ export const parseCsvToGeometry = (
       modelVersion: detectedModelVersion,
       provenanceMarkersVersion: authorityVersion,
       legacyProvenanceMarkersVersion: detectedProvenanceMarkersVersion,
+      ...(detectedProvenance ? { provenance: detectedProvenance } : {}),
       schemaProfile: detectedSchemaProfile,
       defaultsPath: detectedDefaultsPath,
       hostDocumentMetadata: detectedHostDocumentMetadata,

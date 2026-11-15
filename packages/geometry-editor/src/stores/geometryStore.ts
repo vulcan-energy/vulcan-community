@@ -3068,6 +3068,7 @@ const createGeometryState = (
     set((state) => ({
       sourceCsvVersion: 3,
       sourceProvenanceMarkersVersion: undefined,
+      provenance: {},
       csvUpgradeRequested: false,
       targetBundleId: undefined,
       zones: [],

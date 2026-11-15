@@ -135,6 +135,7 @@ import {
   projectOverrideMarkersForExport,
   promoteOverrideMarkersOnImport,
 } from '../../../lib/overrideProvenance';
+import { PROVENANCE_METADATA_KEY, provenanceMetadataValue, provenanceTableFromMetadata } from '../../../lib/provenance';
 export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
@@ -1083,6 +1084,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       lines.push(`DetailedBridgePsiProfileId,${escapeCSV(state.detailedBridgePsiProfile.profileId)},,,,,,,,,,,,,`);
       lines.push(`DetailedBridgePsiProfileLabel,${escapeCSV(state.detailedBridgePsiProfile.label)},,,,,,,,,,,,,`);
     }
+    const provenance = provenanceMetadataValue(
+      state.provenance,
+      exportElements,
+      new Map(state.zones.map((zone) => [zone.id, zone.name])),
+      state.defaultsJson ? state.defaultsLookup : null,
+    );
+    if (provenance) lines.push(`${PROVENANCE_METADATA_KEY},${escapeCSV(provenance)},,,,,,,,,,,,,`);
 
     const compliance = state.complianceSettings;
 
@@ -2365,6 +2373,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       elementIds,
       spaceLabelsById,
       spaceLabelIds,
+      provenance: provenanceTableFromMetadata(
+        metadata.provenance,
+        Object.values(elementsById),
+        new Map(zonesForStore.map((zone) => [zone.id, zone.name])),
+      ),
       // A newly opened model starts with nothing selected: the inspector must not show the last model's element.
       ...(replace ? {} : { canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1, selection: null, selectedElementIds: [] }),
     });

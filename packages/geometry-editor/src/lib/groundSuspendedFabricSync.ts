@@ -649,6 +649,7 @@ export function followGroundFabricOnEdit<
     updateElement: (id: string, patch: Partial<Element>) => void;
     getDefaultsLookup: () => Pick<DefaultsLookup, 'getDefaultValueForElementField'>;
     writeIntent: () => string;
+    writeAs: <T>(intent: 'derived', write: () => T) => T;
   },
 >(
   store: { subscribe: (listener: (state: S, previous: S) => void) => () => void; getState: () => S },
@@ -664,10 +665,13 @@ export function followGroundFabricOnEdit<
     try {
       const { updateElement } = state;
       const before = previous.elementsById;
-      // Defaults first: the wall U and the U-value of a new suspended floor read them.
-      fillSuspendedFloorDefaults(state.elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
-      syncSuspendedGroundFabricFromWalls(store.getState().elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
-      syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources);
+      // A derived write: it rides in the user's step and records no source for the fields it fills.
+      state.writeAs('derived', () => {
+        // Defaults first: the wall U and the U-value of a new suspended floor read them.
+        fillSuspendedFloorDefaults(state.elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
+        syncSuspendedGroundFabricFromWalls(store.getState().elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
+        syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources);
+      });
     } finally {
       syncing = false;
     }

@@ -331,7 +331,7 @@ describe('CSV document history', () => {
     });
 
     it('a user or preset write marks the model dirty and is an undo step', () => {
-      for (const intent of ['user', 'preset'] as const) {
+      for (const intent of ['user', 'preset:Test'] as const) {
         const store = loadedStore();
         store.getState().writeAs(intent, () => coldWater(store, 'header tank'));
         settle();
