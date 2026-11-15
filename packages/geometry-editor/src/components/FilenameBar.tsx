@@ -253,6 +253,8 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const showLastSaveValidationFailure =
     migrationIssues.length === 0 &&
     lastSaveValidationFailed
+    // A draft never saved has no saved file to have failed validation.
+    && documentSnapshot.document.persistedRevision !== null
     && !hasBuildIssues
     && !showSaveErrorIndicator
     && currentSaveStatus !== 'saving';

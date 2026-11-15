@@ -13,7 +13,7 @@ import {
   GeometryStoreProvider,
 } from '../../stores/geometryStore';
 
-function documentHostHarness(): GeometryDocumentHostPort {
+function documentHostHarness(persistedRevision: number | null = 0): GeometryDocumentHostPort {
   const completed = async () => Object.freeze({ status: 'completed' as const });
   const document = Object.freeze({
     fileName: 'Model.csv',
@@ -21,7 +21,7 @@ function documentHostHarness(): GeometryDocumentHostPort {
     derivedResources: Object.freeze([]),
     sourceFiles: Object.freeze([]),
     revision: 0,
-    persistedRevision: 0,
+    persistedRevision,
     isDirty: false,
   });
   const snapshot = Object.freeze({
@@ -85,6 +85,34 @@ describe('FilenameBar validation readiness', () => {
 
     expect(screen.getByRole('button', { name: 'Build Error (1)' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
+  });
+
+  it('does not show Not validated for a draft that was never saved', () => {
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ scenariosBaseModelEnabled: false });
+    render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness(null)} saveStatus="idle" saveError={null} />
+      </GeometryStoreProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a data-loss load warning on the red chip without blocking Save', () => {
+    render(
+      <GeometryStoreProvider store={createGeometryStore()}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null}
+          buildError="Loaded with 1 data warning(s)"
+          buildErrorItems={[
+            { source: 'build', severity: 'warning', message: 'Opening the model updated 1 value.' },
+            { source: 'build', message: 'Wall 1: extra_json was malformed and its overrides were dropped.' },
+          ]} />
+      </GeometryStoreProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Build Error (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
   it('shows no chip beside Save when there are only notices', () => {
