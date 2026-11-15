@@ -805,7 +805,7 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(input('U Value')).toHaveValue('');
     expect(input('Thermal Resistance Construction')).not.toBeDisabled();
     expect(input('Thermal Resistance Construction')).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: 'Mass Distribution Class' }))
+    expect(screen.getByRole('combobox', { name: 'Mass distribution' }))
       .not.toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Areal Heat Capacity' }))
       .not.toBeDisabled();

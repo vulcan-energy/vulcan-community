@@ -266,7 +266,9 @@ export const targetValidationIssues = (
   if (!validation?.items) return { elements, zones };
   const hem = `HEM ${validation.hemVersion}`;
   for (const row of displayBuildErrorRows(validation.items, (path) => resolveIssueTarget(path, model))) {
-    const { elementId, zoneId, fieldKey } = row.target;
+    const { elementId, zoneId } = row.target;
+    // A missing required field is that field's issue, though the path names its row.
+    const fieldKey = row.target.fieldKey ?? /"([^"]+)" is a required property/.exec(row.item.message)?.[1];
     const owner = elementId
       ? { map: elements, id: elementId }
       : zoneId && row.pathSegments[2] !== 'BuildingElement' ? { map: zones, id: zoneId } : undefined;

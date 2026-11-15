@@ -16,6 +16,15 @@ export const MASS_CLASS_MEANINGS: Record<'D' | 'I' | 'E' | 'IE' | 'M', string> =
   M: 'Mass near the middle (insulation both sides of the structural leaf).',
 };
 
+/** Short option labels for the `MassDistributionClass` values, which do not fit a dropdown. */
+export const MASS_CLASS_LABELS: Record<FhsMassDistributionClass, string> = {
+  'I: Mass concentrated at internal side': 'I: Internal side',
+  'E: Mass concentrated at external side': 'E: External side',
+  'IE: Mass divided over internal and external side': 'IE: Both sides',
+  'D: Mass equally distributed': 'D: Evenly spread',
+  'M: Mass concentrated inside': 'M: Middle',
+};
+
 /** TP-07-style commentary keyed by the exact FHS `MassDistributionClass` string. */
 export const FHS_MASS_CLASS_COMMENTARY: Record<FhsMassDistributionClass, string> = {
   'I: Mass concentrated at internal side': MASS_CLASS_MEANINGS.I,

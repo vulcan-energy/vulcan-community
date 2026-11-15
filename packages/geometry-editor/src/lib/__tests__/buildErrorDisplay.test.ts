@@ -45,6 +45,17 @@ describe('targetValidationIssues', () => {
     expect(withTargetIssues(local, elements.get('pw')).issues.map((issue) => issue.message)).toEqual(['U-value required', 'HEM 0.13.2: Check the wall.']);
   });
 
+  it('gives a missing required field to that field, so a field the editor flags shows once', () => {
+    const pv = { zones: [], elements: [{ id: 'pv', name: 'PV South' }] };
+    const { elements } = targetValidationIssues({
+      hemVersion: '0.13.2',
+      items: [{ source: 'schema', code: 'E_TARGET_INPUT', path: '/OnSiteGeneration/PV South', message: `On-Site Generation row 'PV South': "mounting_type" is a required property. There is no default; state it on its row.` }],
+    }, pv);
+    expect(elements.get('pv')?.[0]?.fieldKey).toBe('mounting_type');
+    const local = { hasIssues: true, issues: [{ message: 'Mounting type is not set', fieldKey: 'mounting_type', source: 'geometry' as const }], hasWarnings: false, warnings: [] };
+    expect(withTargetIssues(local, elements.get('pv')).issues.map((issue) => issue.message)).toEqual(['Mounting type is not set']);
+  });
+
   it('keeps a target warning a warning: it neither blocks nor absorbs the element errors', () => {
     const { elements } = targetValidationIssues({
       hemVersion: '1.0.0a8',

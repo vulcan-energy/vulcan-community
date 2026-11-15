@@ -282,7 +282,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'window_security_risk',
-    label: 'Security Risk',
+    label: 'Security risk',
     field: 'security_risk',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',

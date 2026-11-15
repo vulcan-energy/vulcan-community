@@ -276,7 +276,7 @@ export function renderServiceLineCoreFields(
         />
         <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('length', lengthInput.value)} issue={getFieldValidationIssue('length', lengthInput.value) || undefined} />
       </div>
-      {renderFieldLabel(mode === 'plan' ? 'Z (m):' : 'Z at line start (m):', elementType)}
+      {renderFieldLabel(mode === 'plan' ? 'Height:' : 'Height at line start:', elementType)}
       <div className="element-input" ref={registerBaseFieldRefs(z0Key)}>
         <StandardInput
           {...decimalInputProps(tbZ0Input)}
@@ -289,7 +289,7 @@ export function renderServiceLineCoreFields(
       </div>
       {mode !== 'plan' && (
         <>
-          {renderFieldLabel('Z at line end (m):', elementType)}
+          {renderFieldLabel('Height at line end:', elementType)}
           <div className="element-input" ref={registerBaseFieldRefs(z1Key)}>
             <StandardInput
               {...decimalInputProps(tbZ1Input)}

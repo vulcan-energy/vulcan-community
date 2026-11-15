@@ -215,11 +215,17 @@ export function groundExposedPerimeterManualFlag(extra: Record<string, unknown>)
   return extra[GROUND_EXPOSED_PERIMETER_MANUAL_KEY] === true;
 }
 
+/**
+ * Writes the calculated ground U-value unless the user owns it. With construction bands (an
+ * existing building) the age band applies unless the user states a U-value, so nothing is
+ * written: the calculator writes only when the user applies it.
+ */
 export function applyComputedGroundUValueAutofill(
   extra: Record<string, unknown>,
   computedUValue: number | null | undefined,
+  constructionBands: boolean,
 ): { extra: Record<string, unknown>; changed: boolean } {
-  if (extra[GROUND_U_VALUE_MANUAL_KEY] === true) {
+  if (constructionBands || extra[GROUND_U_VALUE_MANUAL_KEY] === true) {
     return { extra, changed: false };
   }
   if (computedUValue == null || !Number.isFinite(computedUValue) || computedUValue <= 0) {
@@ -360,6 +366,7 @@ export function syncSuspendedGroundFabricFromWalls(
 export function syncGroundExposedPerimetersFromWalls(
   elementsById: Record<string, Element>,
   updateElement: (id: string, patch: Partial<Element>) => void,
+  constructionBands: boolean,
 ): void {
   const grounds = Object.values(elementsById).filter(
     (element): element is Extract<Element, { type: 'BuildingElementGround' }> =>
@@ -395,6 +402,7 @@ export function syncGroundExposedPerimetersFromWalls(
           totalArea: effectiveTotalArea,
           perimeter,
         }),
+        constructionBands,
       );
       nextExtra = uSync.extra;
     }

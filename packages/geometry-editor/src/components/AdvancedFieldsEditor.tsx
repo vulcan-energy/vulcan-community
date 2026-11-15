@@ -418,10 +418,26 @@ function loadCompensationUnread(extraJson: unknown): boolean {
  * Heat pump fields HEM reads only for some source types: the heat network's supply and
  * temperature for a heat network source, the integrated ventilation for an exhaust air source.
  */
-function unusedHeatPumpFields(extraJson: unknown): ReadonlySet<string> {
-  const sources = Object.values(readExtraJsonRecord(readExtraJsonRecord(extraJson).HeatSourceWet)).map(readExtraJsonRecord);
+/** The heat sources the model's space cooling systems name, one per line. */
+function cooledHeatSources(elementsById: Readonly<Record<string, Element>>): string {
+  const names: string[] = [];
+  for (const element of Object.values(elementsById)) {
+    for (const system of Object.values(readExtraJsonRecord(readExtraJsonRecord(element.extra_json).SpaceCoolSystem))) {
+      const name = readExtraJsonRecord(system).HeatSourceWet;
+      if (typeof name === 'string' && name) names.push(name);
+    }
+  }
+  return names.sort().join('\n');
+}
+
+/** A heat pump's cooling fields are read only when a space cooling system names the heat pump. */
+function unusedHeatPumpFields(extraJson: unknown, cooled: string): ReadonlySet<string> {
+  const heatSourceWet = readExtraJsonRecord(readExtraJsonRecord(extraJson).HeatSourceWet);
+  const sources = Object.values(heatSourceWet).map(readExtraJsonRecord);
   const types = sources.map((source) => String(source.source_type ?? ''));
   const drop = new Set<string>();
+  const cooledNames = cooled.split('\n');
+  if (!Object.keys(heatSourceWet).some((name) => cooledNames.includes(name))) drop.add('nominal_eer').add('nominal_cooling_capacity');
   if (!types.some((type) => type === 'HeatNetwork')) drop.add('EnergySupply_heat_network').add('temp_distribution_heat_network');
   if (!types.some((type) => type.startsWith('ExhaustAir'))) drop.add('integrated_ventilation_system');
   return drop;
@@ -454,15 +470,23 @@ const SUPPLY_LABELS: Readonly<Record<string, string>> = {
   'smokeless fuel': 'Smokeless fuel',
 };
 
+/** Systems that run on electricity only: their EnergySupply picks an electricity supply. */
+const ELECTRIC_ONLY_TYPES = new Set([
+  'DirectElectricBoiler', 'WarmAirElectric', 'InstantElecShower', 'DryElectricUnderfloorHeating',
+  'ImmersionHeater', 'ElecStorageHeater', 'InstantElecHeater',
+]);
+
 // eslint-disable-next-line react-refresh/only-export-components -- schema helper shared with tests.
 export function applyEcodesignControlClassEnum(
   schema: Record<string, unknown>,
-  { weatherCurves, existing = false, supplyNames = [], dropKeys, pvDiverter = false }: {
+  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], dropKeys, pvDiverter = false }: {
     /** The target's weather compensation curves: the curve field picks one. */
     weatherCurves?: WeatherCurves;
     existing?: boolean;
     /** The model's energy supplies: a system's EnergySupply picks one of them. */
     supplyNames?: readonly string[];
+    /** The model's electricity supplies: an electric-only system picks one of them. */
+    electricSupplyNames?: readonly string[];
     /** Fields nothing reads for this model, left out of the form. */
     dropKeys?: ReadonlySet<string>;
     /** An immersion heater may state that its electricity supply's PV diverter feeds it (EPC). */
@@ -502,7 +526,8 @@ export function applyEcodesignControlClassEnum(
         const hasObjectBranch = Array.isArray(readExtraJsonRecord(child).anyOf)
           && (readExtraJsonRecord(child).anyOf as unknown[]).some((branch) => readExtraJsonRecord(branch).type === 'object');
         if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
-          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: supplyNames.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
+          const names = ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
+          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: names.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
           delete picker.anyOf;
           nextProperties[key] = picker;
           changed = true;
@@ -951,12 +976,15 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields, hemDatabaseProducts } = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts, constructionBands } = useTargetRules();
   // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
   const defaultsJson = useGeometryStore((state) => state.defaultsJson);
-  const energySupplyNames = useMemo(() => (hemDatabaseProducts ? Object.keys(readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply)) : []), [hemDatabaseProducts, defaultsJson]);
+  const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
+  const energySupplyNames = useMemo(() => Object.keys(energySupplies), [energySupplies]);
+  const electricSupplyNames = useMemo(() => energySupplyNames.filter((name) => readExtraJsonRecord(energySupplies[name]).fuel === 'electricity'), [energySupplies, energySupplyNames]);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   const systemDefaults = useGeometryStore((state) => state.targetValidation?.systemDefaults);
+  const cooled = useGeometryStore((state) => cooledHeatSources(state.elementsById));
   // Fields Advanced does not show: those the standard form owns, and those the target hides.
   const getBaseFields = useCallback(
     (type: string): readonly string[] => [
@@ -1502,6 +1530,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         weatherCurves: systemDefaults?.weatherCurves,
         existing: existingBuilding,
         supplyNames: energySupplyNames,
+        electricSupplyNames,
         // The curve picker sets the curve coefficients, so their own fields stay hidden.
         dropKeys: new Set([...(loadCompensationUnread(advancedFieldsData) ? LOAD_COMPENSATION_FIELDS : []), ...(systemDefaults?.weatherCurves?.length && !statesWeatherCoefficients(advancedFieldsData) ? ['weather_comp_a', 'weather_comp_b', 'weather_comp_c'] : [])]),
       }) as typeof result;
@@ -1514,7 +1543,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     if (elementType === 'System' && subtype !== 'SpaceHeatSystem' && result && hemDatabaseProducts) {
       result = applyEcodesignControlClassEnum(result as Record<string, unknown>, {
         supplyNames: energySupplyNames,
-        dropKeys: unusedHeatPumpFields(advancedFieldsData),
+        electricSupplyNames,
+        dropKeys: unusedHeatPumpFields(advancedFieldsData, cooled),
         pvDiverter: subtype === 'HotWaterSource',
       }) as typeof result;
     }
@@ -1577,6 +1607,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     existingBuilding,
     systemDefaults,
     energySupplyNames,
+    electricSupplyNames,
+    cooled,
     hemDatabaseProducts,
   ]);
 
@@ -2228,7 +2260,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         const nextRounded = Number.isFinite(nextNum) ? Number(nextNum.toFixed(4)) : null;
         const compRounded =
           computed != null && Number.isFinite(computed) && computed > 0 ? Number(computed.toFixed(4)) : null;
-        if (compRounded != null && nextRounded != null && Math.abs(compRounded - nextRounded) <= 1e-5) {
+        // With construction bands every U-value here is stated: it replaces the age band.
+        if (!constructionBands && compRounded != null && nextRounded != null && Math.abs(compRounded - nextRounded) <= 1e-5) {
           delete ex[GROUND_U_VALUE_MANUAL_KEY];
         } else if (nextRounded != null) {
           ex[GROUND_U_VALUE_MANUAL_KEY] = true;

@@ -9,6 +9,8 @@ import { deriveFloorsFromElements, editorFloorsAndElementsForParsedCsv } from '.
 import { validateElementCore } from '../../validation/validateElement';
 import { unavailableGeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProvenance';
+import { computeGroundUValueFromElementModel } from '../../../lib/groundUValueCalculator';
+import { GROUND_U_VALUE_MANUAL_KEY } from '../../../lib/groundSuspendedFabricSync';
 import type { Element, Floor } from '../../types';
 
 const wall = (id = 'p'): Element => ({ id, name: `Party ${id}`, type: 'BuildingElementPartyWall', zoneId: 'z', width: 2, height: 3, area: 6, parent_element: null, coordinates: [], extra_json: { u_value: .25, advanced: 'keep' } });
@@ -456,5 +458,49 @@ describe('CSV-side validation matches the editor', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('calculated floor U-value on an existing building', () => {
+  const floorCsv = (extra: Record<string, unknown>) => `Metadata,,
+VulcanCsvVersion,3
+IsExistingBuilding,TRUE
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Zone 1,Zone,50,20,2.5,FALSE
+
+Ground Elements,,
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,parent_element,coords,extra_json
+Floor,Zone 1,BuildingElementGround,20,0,0,18,Slab_no_edge_insulation,,0.3,,"0,0,0|5,0,0|5,4,0|0,4,0","${JSON.stringify({ thermal_resistance_floor_construction: 1.5, ...extra }).replace(/"/g, '""')}"
+`;
+  const calculated = Number(computeGroundUValueFromElementModel({ total_area: 20, perimeter: 18, thickness_walls: 0.3 }, { thermal_resistance_floor_construction: 1.5 }, 'Slab_no_edge_insulation')!.toFixed(4));
+  // Construction bands come from the target: an EPC existing building has them, an FHS model with a stale flag does not.
+  const load = (extra: Record<string, unknown>, constructionBands = true) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...unavailableGeometrySchemaPort, targetRules: () => ({ constructionBands }) } });
+    const result = store.getState().loadFromCSV(floorCsv(extra));
+    const floor = Object.values(store.getState().elementsById).find((el) => el.name === 'Floor')!;
+    return { result, extra: floor.extra_json ?? {} };
+  };
+
+  it('removes a U-value the editor wrote on its own, with a load notice, so the age band applies', () => {
+    const { result, extra } = load({ u_value: calculated });
+    expect(extra.u_value).toBeUndefined();
+    expect(result.upgraded).toBe(true);
+    expect(result.warnings).toContain('Calculated floor U-value removed, so the age band applies: Floor. To use a calculated value, open Calculate U-value and apply it.');
+  });
+
+  it('keeps a U-value the user applied, one that differs from the calculation, and one from an applied assembly (marking it stated)', () => {
+    expect(load({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true }).extra.u_value).toBe(calculated);
+    expect(load({ u_value: 0.45 }).extra.u_value).toBe(0.45);
+    const assembly = load({ u_value: calculated, vulcan_assembly_v1: { schemaVersion: 1 } });
+    expect(assembly.extra).toMatchObject({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true });
+    expect(assembly.result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
+  });
+
+  it('leaves an FHS model with a stale existing-building flag alone', () => {
+    const { result, extra } = load({ u_value: calculated }, false);
+    expect(extra.u_value).toBe(calculated);
+    expect(result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
   });
 });
