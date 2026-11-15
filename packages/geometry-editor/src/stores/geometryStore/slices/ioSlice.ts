@@ -18,7 +18,6 @@ import {
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
 import { resolveEffectiveVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
-import { isExistingBuilding } from '../../../lib/windowOpenings';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import {
   CURRENT_VULCAN_CSV_VERSION,
@@ -2426,7 +2425,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
-    const calculatedGroundU = isExistingBuilding(get())
+    const calculatedGroundU = targetRules(options.schemaPort, get().complianceSettings).constructionBands
       ? dropCalculatedGroundUValues(loadedElements)
       : { elements: loadedElements, names: [] };
     const upgradedElements = rederiveContextShadingFromDrawing(
@@ -2446,7 +2445,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
     const calculatedGroundUNotice = calculatedGroundU.names.length
-      ? [`Calculated floor U-value removed, so the age band applies: ${calculatedGroundU.names.join(', ')}. To use a calculated value, apply it in the U-value calculator.`]
+      ? [`Calculated floor U-value removed, so the age band applies: ${calculatedGroundU.names.join(', ')}. To use a calculated value, open Calculate U-value and apply it.`]
       : [];
     return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed), ...calculatedGroundUNotice], upgraded };
   }

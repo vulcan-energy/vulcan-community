@@ -462,9 +462,9 @@ describe('CSV-side validation matches the editor', () => {
 });
 
 describe('calculated floor U-value on an existing building', () => {
-  const floorCsv = (existing: boolean, extra: Record<string, unknown>) => `Metadata,,
+  const floorCsv = (extra: Record<string, unknown>) => `Metadata,,
 VulcanCsvVersion,3
-IsExistingBuilding,${existing ? 'TRUE' : 'FALSE'}
+IsExistingBuilding,TRUE
 
 Zone,,
 Name,Type,volume,floor_area,height,simplified thermal bridging
@@ -474,24 +474,33 @@ Ground Elements,,
 Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,parent_element,coords,extra_json
 Floor,Zone 1,BuildingElementGround,20,0,0,18,Slab_no_edge_insulation,,0.3,,"0,0,0|5,0,0|5,4,0|0,4,0","${JSON.stringify({ thermal_resistance_floor_construction: 1.5, ...extra }).replace(/"/g, '""')}"
 `;
-  const calculated = computeGroundUValueFromElementModel({ total_area: 20, perimeter: 18, thickness_walls: 0.3 }, { thermal_resistance_floor_construction: 1.5 }, 'Slab_no_edge_insulation')!;
-  const load = (existing: boolean, extra: Record<string, unknown>) => {
-    const store = createGeometryStore({ defaultDefaultsPath: null });
-    const result = store.getState().loadFromCSV(floorCsv(existing, extra));
+  const calculated = Number(computeGroundUValueFromElementModel({ total_area: 20, perimeter: 18, thickness_walls: 0.3 }, { thermal_resistance_floor_construction: 1.5 }, 'Slab_no_edge_insulation')!.toFixed(4));
+  // Construction bands come from the target: an EPC existing building has them, an FHS model with a stale flag does not.
+  const load = (extra: Record<string, unknown>, constructionBands = true) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...unavailableGeometrySchemaPort, targetRules: () => ({ constructionBands }) } });
+    const result = store.getState().loadFromCSV(floorCsv(extra));
     const floor = Object.values(store.getState().elementsById).find((el) => el.name === 'Floor')!;
-    return { result, uValue: floor.extra_json?.u_value };
+    return { result, extra: floor.extra_json ?? {} };
   };
 
   it('removes a U-value the editor wrote on its own, with a load notice, so the age band applies', () => {
-    const { result, uValue } = load(true, { u_value: Number(calculated.toFixed(4)) });
-    expect(uValue).toBeUndefined();
+    const { result, extra } = load({ u_value: calculated });
+    expect(extra.u_value).toBeUndefined();
     expect(result.upgraded).toBe(true);
-    expect(result.warnings).toContain('Calculated floor U-value removed, so the age band applies: Floor. To use a calculated value, apply it in the U-value calculator.');
+    expect(result.warnings).toContain('Calculated floor U-value removed, so the age band applies: Floor. To use a calculated value, open Calculate U-value and apply it.');
   });
 
-  it('keeps a U-value the user applied, one that differs from the calculation, and any value on a new build', () => {
-    expect(load(true, { u_value: Number(calculated.toFixed(4)), [GROUND_U_VALUE_MANUAL_KEY]: true }).uValue).toBe(Number(calculated.toFixed(4)));
-    expect(load(true, { u_value: 0.45 }).uValue).toBe(0.45);
-    expect(load(false, { u_value: Number(calculated.toFixed(4)) }).uValue).toBe(Number(calculated.toFixed(4)));
+  it('keeps a U-value the user applied, one that differs from the calculation, and one from an applied assembly (marking it stated)', () => {
+    expect(load({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true }).extra.u_value).toBe(calculated);
+    expect(load({ u_value: 0.45 }).extra.u_value).toBe(0.45);
+    const assembly = load({ u_value: calculated, vulcan_assembly_v1: { schemaVersion: 1 } });
+    expect(assembly.extra).toMatchObject({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true });
+    expect(assembly.result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
+  });
+
+  it('leaves an FHS model with a stale existing-building flag alone', () => {
+    const { result, extra } = load({ u_value: calculated }, false);
+    expect(extra.u_value).toBe(calculated);
+    expect(result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
   });
 });

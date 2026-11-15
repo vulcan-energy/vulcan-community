@@ -976,7 +976,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields, hemDatabaseProducts } = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts, constructionBands } = useTargetRules();
   // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
   const defaultsJson = useGeometryStore((state) => state.defaultsJson);
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
@@ -2260,8 +2260,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         const nextRounded = Number.isFinite(nextNum) ? Number(nextNum.toFixed(4)) : null;
         const compRounded =
           computed != null && Number.isFinite(computed) && computed > 0 ? Number(computed.toFixed(4)) : null;
-        // On an existing building every U-value here is stated: it replaces the age band.
-        if (!existingBuilding && compRounded != null && nextRounded != null && Math.abs(compRounded - nextRounded) <= 1e-5) {
+        // With construction bands every U-value here is stated: it replaces the age band.
+        if (!constructionBands && compRounded != null && nextRounded != null && Math.abs(compRounded - nextRounded) <= 1e-5) {
           delete ex[GROUND_U_VALUE_MANUAL_KEY];
         } else if (nextRounded != null) {
           ex[GROUND_U_VALUE_MANUAL_KEY] = true;

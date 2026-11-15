@@ -2165,8 +2165,7 @@ export const validateElementCore = (
         issues.push(geo('Height must be between 0 and 100 m', 'height'));
       }
       // An existing building's panels state their mounting type: it has no default.
-      if (isExistingBuildingContext(context) && targetRules(context.schemaPort, context.complianceSettings ?? {}).hemDatabaseProducts
-        && !onSiteElement.extra_json?.mounting_type) {
+      if (targetRules(context.schemaPort, context.complianceSettings ?? {}).constructionBands && !onSiteElement.extra_json?.mounting_type) {
         issues.push(geo('Mounting type is not set', 'mounting_type'));
       }
       if (
