@@ -2236,6 +2236,7 @@ impl JSONBuilder {
                 &mut self.product_candidates.borrow_mut(),
             );
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
+            crate::epc_products::check_product_fuels(result, db, &mut errors);
             crate::epc_products::derive_zone_frac_convective(
                 result,
                 db,

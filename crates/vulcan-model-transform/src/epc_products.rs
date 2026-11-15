@@ -946,6 +946,64 @@ pub(crate) fn apply_weather_curves(
     }
 }
 
+/// The supply's fuel is what the assessor observed, and the Orchestrator prices, and counts CO2
+/// and primary energy, by it (it never reads the product's fuel). A picked product that burns
+/// another fuel fails only where the pinned data has a product of the supply's fuel to pick
+/// instead; with none, the supply's fuel stands. Single-product types and rules that already
+/// list products by the supply's fuel (boilers) are not checked again. A back boiler's supply is
+/// on its integrated room heater.
+pub(crate) fn check_product_fuels(
+    model: &Value,
+    db: &ProductDatabase,
+    errors: &mut Vec<ValidationError>,
+) {
+    let same = |a: &str, b: &str| a == b || a.starts_with("LPG") && b.starts_with("LPG");
+    for section in ["HeatSourceWet", "HeatSourceWarmAir", "SpaceHeatSystem"] {
+        for (name, system) in model[section].as_object().into_iter().flatten() {
+            let Some(object) = system.as_object() else {
+                continue;
+            };
+            let back_boiler = system["type"] == "BackBoiler";
+            let holder = if back_boiler {
+                &system["integrated_space_heat_system"]
+            } else {
+                system
+            };
+            let (Some(burns), Some(has)) = (
+                system["product_id"]
+                    .as_u64()
+                    .and_then(|id| db.products.get(&id))
+                    .and_then(|p| p.fields.get("fuel")),
+                holder["EnergySupply"]
+                    .as_str()
+                    .and_then(|supply| model["EnergySupply"][supply]["fuel"].as_str()),
+            ) else {
+                continue;
+            };
+            if same(burns, has) {
+                continue;
+            }
+            let pattern = format!("{section}/*");
+            let Some(rule) = rule(&pattern, text(object, "type"), name, object, model) else {
+                continue;
+            };
+            let Rule::Pick { filter, .. } = &rule else {
+                continue;
+            };
+            if filter.as_ref().is_some_and(|(field, _)| *field == "fuel")
+                || !rule
+                    .candidates(db)
+                    .iter()
+                    .any(|p| p.fields.get("fuel").is_some_and(|f| same(f, has)))
+            {
+                continue;
+            }
+            let path = json_pointer(&[section, name, "product_id"]);
+            errors.push(error("E_EPC_SUPPLY_FUEL", path, format!("'{name}': its product burns {}, but its energy supply is {}. Pick a product that burns {}.", burns.replace('_', " "), has.replace('_', " "), has.replace('_', " "))));
+        }
+    }
+}
+
 /// The convective fraction each product table gives the system it is substituted into.
 const FRAC_CONVECTIVE_FIELDS: [(&str, &str); 5] = [
     ("ConvectorRadiator", "convectiveHeatingRadiation"),

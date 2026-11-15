@@ -1171,22 +1171,6 @@ const SYSTEM_REFERENCES: [SystemReference; 7] = [
     ),
 ];
 
-/// The fuels of the pinned schema's energy supplies (`OtherFuelProperties`, electricity). The EPC
-/// defaults file gives one supply per fuel, named by the fuel in words.
-const SUPPLY_FUELS: [&str; 11] = [
-    "electricity",
-    "mains_gas",
-    "LPG_bulk",
-    "LPG_bottled",
-    "LPG_condition_11F",
-    "wood_logs",
-    "wood_pellets",
-    "wood_chips",
-    "house_coal",
-    "anthracite",
-    "smokeless_fuel",
-];
-
 /// A cylinder's immersion heater that states `pv_diverter` true takes surplus PV through a
 /// diverter on its electricity supply (`EnergySupply.<supply>.diverter`). Another heat source,
 /// or a second diverter on one supply, is an error naming it.
@@ -1326,54 +1310,6 @@ pub(crate) fn check_system_catalogue(
                 format!("{}/EnergySupply_aux", json_pointer(&segments)),
                 format!("Room heater '{name}': its product gives auxiliary power fields, so state EnergySupply_aux on its Systems row."),
             ));
-        }
-    }
-    // A product that burns a fuel takes an energy supply of that fuel: the supply's fuel sets
-    // the price, CO2 and primary energy, and the product's own fuel is not read. A back boiler's
-    // supply is on its integrated room heater.
-    for section in ["HeatSourceWet", "HeatSourceWarmAir", "SpaceHeatSystem"] {
-        for (name, system) in model[section].as_object().into_iter().flatten() {
-            let holder = if system["type"] == "BackBoiler" {
-                &system["integrated_space_heat_system"]
-            } else {
-                system
-            };
-            let Some(burns) = system["product_id"]
-                .as_u64()
-                .and_then(|id| db.products.get(&id))
-                .and_then(|p| p.fields.get("fuel"))
-                .filter(|f| !f.is_empty() && *f != "NULL")
-            else {
-                continue;
-            };
-            let Some(supply) = holder["EnergySupply"].as_str() else {
-                continue;
-            };
-            let has = model["EnergySupply"][supply]["fuel"]
-                .as_str()
-                .unwrap_or_default();
-            let lpg = |f: &str| f.starts_with("LPG");
-            if has == burns || lpg(has) && lpg(burns) {
-                continue;
-            }
-            let fuel = burns.replace('_', " ");
-            let fix = match burns.as_str() {
-                "electricity" => "Choose the 'mains elec' energy supply.".to_string(),
-                f if lpg(f) => "Choose an LPG energy supply (LPG bulk, LPG bottled or LPG condition 11F).".to_string(),
-                f if SUPPLY_FUELS.contains(&f) => format!("Choose the '{fuel}' energy supply."),
-                _ => format!("HEM:EPC has no {fuel} energy supply yet, so pick a product that burns a fuel it takes."),
-            };
-            let path = if std::ptr::eq(holder, system) {
-                json_pointer(&[section, name, "EnergySupply"])
-            } else {
-                json_pointer(&[
-                    section,
-                    name,
-                    "integrated_space_heat_system",
-                    "EnergySupply",
-                ])
-            };
-            errors.push(error("E_EPC_SUPPLY_FUEL", path, format!("'{name}': its product burns {fuel}, but its energy supply '{supply}' is {}. {fix}", if has.is_empty() { "not defined".to_string() } else { has.replace('_', " ") })));
         }
     }
     for name in model["InfiltrationVentilation"]["CombustionAppliances"]
