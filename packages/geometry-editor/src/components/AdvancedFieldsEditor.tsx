@@ -121,6 +121,7 @@ const EXTRA_JSON_UI_KEY_SET = new Set<string>(EXTRA_JSON_UI_KEYS);
 
 const EMPTY_ADVANCED_FIELDS: Record<string, unknown> = Object.freeze({});
 const MVHR_FIXED_ENERGY_SUPPLY = 'mains elec' as const;
+const COLLAPSED_ENGINE_FIELDS: ReadonlySet<string> = new Set(['areal_heat_capacity', 'mass_distribution_class', 'solar_absorption_coeff']);
 const PARTY_WALL_HALF_CONSTRUCTION_NOTE =
   'Enter dwelling-side half-construction values: U from the half build-up, half areal heat capacity, and the matching mass class. If using construction R, enter half R. Set cavity treatment separately.';
 const INTERNAL_HALF_CONSTRUCTION_NOTE =
@@ -479,7 +480,7 @@ const ELECTRIC_ONLY_TYPES = new Set([
 // eslint-disable-next-line react-refresh/only-export-components -- schema helper shared with tests.
 export function applyEcodesignControlClassEnum(
   schema: Record<string, unknown>,
-  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], dropKeys, pvDiverter = false }: {
+  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], coldWaterNames = [], allElectric = false, dropKeys, pvDiverter = false }: {
     /** The target's weather compensation curves: the curve field picks one. */
     weatherCurves?: WeatherCurves;
     existing?: boolean;
@@ -487,6 +488,10 @@ export function applyEcodesignControlClassEnum(
     supplyNames?: readonly string[];
     /** The model's electricity supplies: an electric-only system picks one of them. */
     electricSupplyNames?: readonly string[];
+    /** The model's cold water sources: a cylinder picks one of them. */
+    coldWaterNames?: readonly string[];
+    /** Every EnergySupply in the schema is electric-only (fans, PV). */
+    allElectric?: boolean;
     /** Fields nothing reads for this model, left out of the form. */
     dropKeys?: ReadonlySet<string>;
     /** An immersion heater may state that its electricity supply's PV diverter feeds it (EPC). */
@@ -511,9 +516,12 @@ export function applyEcodesignControlClassEnum(
           const childRecord = child as Record<string, unknown>;
           const childWithoutEnum = { ...childRecord };
           delete childWithoutEnum.enum;
+          // EPC states the class as a nullable reference: the nullable wrapper would hide the worded options, so keep null in the type.
+          const nullable = Array.isArray(childWithoutEnum.anyOf) && childWithoutEnum.anyOf.some((branch) => readExtraJsonRecord(branch).type === 'null');
+          delete childWithoutEnum.anyOf;
           nextProperties[key] = {
             ...childWithoutEnum,
-            type: 'integer',
+            type: nullable ? ['integer', 'null'] : 'integer',
             description: typeof childRecord.description === 'string'
               ? `${childRecord.description} ${ECODESIGN_CONTROL_CLASS_DESCRIPTION}`
               : ECODESIGN_CONTROL_CLASS_DESCRIPTION,
@@ -526,8 +534,15 @@ export function applyEcodesignControlClassEnum(
         const hasObjectBranch = Array.isArray(readExtraJsonRecord(child).anyOf)
           && (readExtraJsonRecord(child).anyOf as unknown[]).some((branch) => readExtraJsonRecord(branch).type === 'object');
         if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
-          const names = ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
+          const names = allElectric || ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
           const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: names.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
+          delete picker.anyOf;
+          nextProperties[key] = picker;
+          changed = true;
+          continue;
+        }
+        if (key === 'ColdWaterSource' && coldWaterNames.length && child && typeof child === 'object' && !Array.isArray(child)) {
+          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: coldWaterNames.map((name) => ({ const: name, title: name === 'mains water' ? 'Mains water' : name === 'header tank' ? 'Header tank' : name })) };
           delete picker.anyOf;
           nextProperties[key] = picker;
           changed = true;
@@ -982,6 +997,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
   const energySupplyNames = useMemo(() => Object.keys(energySupplies), [energySupplies]);
   const electricSupplyNames = useMemo(() => energySupplyNames.filter((name) => readExtraJsonRecord(energySupplies[name]).fuel === 'electricity'), [energySupplies, energySupplyNames]);
+  const coldWaterNames = useMemo(() => (hemDatabaseProducts ? Object.keys(readExtraJsonRecord(readExtraJsonRecord(defaultsJson).ColdWaterSource)) : []), [hemDatabaseProducts, defaultsJson]);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   const systemDefaults = useGeometryStore((state) => state.targetValidation?.systemDefaults);
   const cooled = useGeometryStore((state) => cooledHeatSources(state.elementsById));
@@ -1066,7 +1082,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     mechanicalVentilationVentType !== 'MVHR';
   const shouldRenderMechanicalVentilationFixedEnergySupply =
     currentDataElementType === 'MechanicalVentilation' &&
-    mechanicalVentilationVentType === 'MVHR';
+    mechanicalVentilationVentType === 'MVHR' &&
+    !hemDatabaseProducts;
   const inferredMechanicalVentilationFanInputMode = useMemo<MechanicalVentilationFanInputMode>(
     () => inferMechanicalVentilationFanInputMode(advancedFieldsRecord as Record<string, unknown>),
     [advancedFieldsRecord],
@@ -1496,8 +1513,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       result.required = mechanicalVentilationRequiredFields;
     }
 
-    if (elementType === 'MechanicalVentilation' && result && hemDatabaseProducts) {
-      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { supplyNames: energySupplyNames }) as typeof result;
+    if ((elementType === 'MechanicalVentilation' || elementType === 'OnSiteGeneration') && result && hemDatabaseProducts) {
+      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { supplyNames: energySupplyNames, electricSupplyNames, allElectric: true }) as typeof result;
     }
 
     if (elementType === 'System' && subtype) {
@@ -1544,6 +1561,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       result = applyEcodesignControlClassEnum(result as Record<string, unknown>, {
         supplyNames: energySupplyNames,
         electricSupplyNames,
+        coldWaterNames,
         dropKeys: unusedHeatPumpFields(advancedFieldsData, cooled),
         pvDiverter: subtype === 'HotWaterSource',
       }) as typeof result;
@@ -1608,6 +1626,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     systemDefaults,
     energySupplyNames,
     electricSupplyNames,
+    coldWaterNames,
     cooled,
     hemDatabaseProducts,
   ]);
@@ -1842,6 +1861,17 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return classifyOpaqueFabricVariantFromElement((currentData ?? {}) as Record<string, unknown>);
   }, [elementType, currentData]);
 
+  // A plant whose product the target chooses by default shows that product as its Product Id placeholder, by the field's own path.
+  const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
+  const selectedName = useGeometryStore((state) => (state.selection?.type === 'element' ? state.elementsById[state.selection.id]?.name : undefined));
+  const defaultProducts = useMemo(() => Object.fromEntries(
+    (productSlots ?? []).flatMap((slot) => (
+      slot.row === selectedName && slot.source === 'default' && slot.product_id != null
+        ? [[`${slot.path}/product_id`, slot.label ?? slot.product_id]]
+        : []
+    )),
+  ), [productSlots, selectedName]);
+
   const advancedFieldsConfig = useMemo<Record<string, unknown>>(
     () =>
       ({
@@ -1888,7 +1918,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         $defs: subschema?.$defs || getActiveRootSchema()?.$defs,
         systemSampleMode: systemSampleBaselineAvailable,
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
+        // An existing building takes these from the DESNZ-defined construction tables: keep them out of the way.
+        collapsedEngineFields: existingBuilding && hemDatabaseProducts && elementType !== 'System' ? COLLAPSED_ENGINE_FIELDS : undefined,
         derivedDefaults: elementType === 'System' ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding) : undefined,
+        defaultProducts: elementType === 'System' ? defaultProducts : undefined,
       }),
     [
       flat,
@@ -1915,6 +1948,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       systemSampleBaselineAvailable,
       systemSampleBaselineExtraJson,
       systemDefaults,
+      defaultProducts,
+      hemDatabaseProducts,
       advancedFieldsData,
       existingBuilding,
       getActiveRootSchema,
@@ -2111,7 +2146,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       if (mechanicalVentilationVentType === 'MVHR') {
         const nextRecord = { ...(nextExtra as Record<string, unknown>) };
         deleteProperties(nextRecord, MECHANICAL_VENTILATION_FLAT_POSITION_FIELDS);
-        nextRecord.EnergySupply = MVHR_FIXED_ENERGY_SUPPLY;
+        if (!hemDatabaseProducts) nextRecord.EnergySupply = MVHR_FIXED_ENERGY_SUPPLY;
         nextExtra = nextRecord;
       }
     }
@@ -2847,7 +2882,7 @@ export function SystemModelContext({ extraJson, subtype, useFHSSchema, elementsB
   return <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: 10 }}>
     {useFHSSchema && subtype === 'SpaceHeatSystem' && <div title="Whole-dwelling setting, shared with Global Settings">
       <StandardDropdown label={renderFieldLabelWithTooltip('Heating Control Type', 'System', true)} aria-label="Heating control type (whole dwelling)" value={control ?? ''} onChange={(value) => setComplianceSettings({ HeatingControlType: value as 'SeparateTempControl' | 'SeparateTimeAndTempControl' })} options={[
-        { value: 'SeparateTempControl', label: 'Separate Temperature Control' },
+        { value: 'SeparateTempControl', label: 'Separate temperature control' },
         { value: 'SeparateTimeAndTempControl', label: 'Separate Time and Temperature Control' },
       ]} placeholder="Select control type…" variant="ghost" size="md" />
     </div>}

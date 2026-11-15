@@ -83,6 +83,8 @@ type RendererConfig = {
   derivedDefaults?: Readonly<Record<string, unknown>>;
   systemSampleMode?: boolean;
   systemSamplePathSegments?: string[];
+  /** Default products the target picks, by the model pointer of the plant's `product_id`. */
+  defaultProducts?: Readonly<Record<string, unknown>>;
   useFHSSchemaForValidation?: boolean;
 };
 
@@ -665,6 +667,10 @@ function getAdvancedDefaultValue(
       floorStoreyInputs(config?.floors),
     );
   }
+  if (config?.defaultProducts && config.systemSamplePathSegments) {
+    const own = config.defaultProducts[`/${config.systemSamplePathSegments.map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`];
+    if (own !== undefined) return own;
+  }
   if (config?.derivedDefaults && config.derivedDefaults[propKey] !== undefined) return config.derivedDefaults[propKey];
   // R4.6b-2: `path` is gone from this signature. It carried exactly one thing into
   // `getDefaultValue` — the leaf key — which this function was already being handed
@@ -1186,7 +1192,7 @@ function renderAdvancedFieldResetToSourceButton(
           e.preventDefault();
           handleChange(path, uRounded);
         }}
-        label="Use Calc"
+        label="Use calculated"
         title="Set U-value to the ISO 13370 result from current floor geometry and advanced inputs (same as calculator)"
         ariaLabel="Use calculator result for ground U-value"
       />
@@ -2456,6 +2462,8 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   }
 
   const isReadOnly = uiOptions(uischema).readOnly === true || enabled === false;
+  // Two values that read the same (a null and 'unknown' both "Not known") are one choice.
+  options = options.filter((o, i) => options.findIndex((x) => x.label === o.label) === i || o.value === valueString);
   const selectedLabel = options.find((o) => o.value === valueString)?.label ?? valueString;
   const selectedOptionDescription = optionDescriptions.get(valueString);
   // The value actually shown as "the default" -- prefers a resolved `fieldSource`

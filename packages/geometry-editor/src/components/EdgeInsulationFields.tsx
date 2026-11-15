@@ -83,7 +83,6 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
             step="any"
             size="md"
             variant="ghost"
-            placeholder={existing ? 'Default: 25 mm mineral wool' : undefined}
             value={form[type].edgeThermalResistance}
             onChange={(e) => apply({ ...form, [type]: { ...form[type], edgeThermalResistance: e.target.value } })}
           />

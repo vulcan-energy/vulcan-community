@@ -702,8 +702,8 @@ export function useDormerBundleEditor(args: {
           }}
           elementType={elementType}
           zoneId={elementZoneId}
-          placeholder="Select the sloped roof hosting this dormer"
-          only={(parent) => parent.type === 'BuildingElementOpaque' && typeof parent.pitch === 'number' && parent.pitch > 0 && parent.pitch < 90}
+          placeholder="Select the roof"
+          only={(parent) => parent.type === 'BuildingElementOpaque' && typeof parent.pitch === 'number' && parent.pitch > 0 && parent.pitch < 90 && (!getDormerBundleInfo(parent) || getDormerBundleInfo(parent)?.bundle_id !== (selection.type === 'element' ? getDormerBundleInfo(elementsById[selection.id])?.bundle_id : undefined))}
           selfId={selection.type === 'element' ? selection.id : undefined}
         />
         <div style={INLINE_FIELD_NOTE_STYLE}>
@@ -796,7 +796,7 @@ export function useDormerBundleEditor(args: {
           </div>
         </>
       )}
-      {renderFieldLabel('Unheated Pitched Roof', elementType)}
+      {renderFieldLabel('Unheated pitched roof', elementType)}
       <div className="element-input">
         <label className="checkbox-container">
           <input
@@ -864,7 +864,7 @@ export function useDormerBundleEditor(args: {
       )}
       {!constructionBands && (
         <>
-          {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
+          {renderFieldLabel('Window frame area fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
           <div className="element-input">
             <StandardInput
               {...decimalInputProps(dormerFrameAreaFractionInput)}

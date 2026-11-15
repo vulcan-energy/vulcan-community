@@ -2983,7 +2983,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             )}
             {activeOpaqueSurfaceMode === 'sloped' && (
               renderSelectRow(
-                'Unheated Pitched Roof',
+                'Unheated pitched roof',
                 opaqueUnheatedRoofSummary,
                 activeOpaqueSurfaceIds.length > 0,
                 BOOLEAN_SELECT_OPTIONS,
@@ -3214,7 +3214,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderNumberRow(
           'frameAreaFraction',
-          'Frame Area Fraction',
+          'Frame area fraction',
           frameAreaFractionSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.25',
@@ -3550,7 +3550,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             {renderExtraJsonNumberRow('pipeInsulationConductivity', 'Insulation Conductivity', pipeInsulationConductivitySummary, true, 'e.g. 0.04', (el, value) => isWaterPipework(el) ? { insulation_thermal_conductivity: value } : null, undefined, LIVE_NUMBER_BOUNDS.pipeInsulationConductivity)}
             {renderExtraJsonNumberRow('pipeInsulationThickness', 'Insulation Thickness (mm)', pipeInsulationThicknessSummary, true, 'e.g. 10', (el, value) => isWaterPipework(el) ? { insulation_thickness_mm: value } : null, undefined, LIVE_NUMBER_BOUNDS.pipeInsulationThickness)}
             {renderSelectRow(
-              'Surface Reflectivity',
+              'Reflective pipe surface',
               pipeReflectivitySummary,
               true,
               BOOLEAN_SELECT_OPTIONS,
@@ -3575,7 +3575,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               ventParentOptions,
               (value) => applyElementPatches((el) => (isVent(el) ? { parent_element: value || null } as Partial<Element> : null)),
             )}
-            {renderNumberRow('ventMidHeight', 'Mid Height Air Flow Path (m)', ventMidHeightSummary, true, 'e.g. 1.50', (el, value) => isVent(el) ? { mid_height_air_flow_path: value } : null, undefined, LIVE_NUMBER_BOUNDS.ventMidHeight)}
+            {renderNumberRow('ventMidHeight', 'Mid height air flow path (m)', ventMidHeightSummary, true, 'e.g. 1.50', (el, value) => isVent(el) ? { mid_height_air_flow_path: value } : null, undefined, LIVE_NUMBER_BOUNDS.ventMidHeight)}
             {renderNumberRow('ventAreaCm2', 'Area (cm²)', ventAreaSummary, true, 'e.g. 4000', (el, value) => isVent(el) ? { area_cm2: value } : null, undefined, LIVE_NUMBER_BOUNDS.ventAreaCm2)}
           </div>
         )}
@@ -3852,7 +3852,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               constructionFieldScopeKey,
               constructionTargetIds,
               'areal',
-              'Areal Heat Capacity',
+              'Heat capacity per area',
               constructionArealSummary,
               arealBandOptions.map((value) => ({ value, label: value })),
               (_el, value) => ({ areal_heat_capacity: value }),

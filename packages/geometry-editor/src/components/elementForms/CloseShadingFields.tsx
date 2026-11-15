@@ -37,7 +37,7 @@ export function CloseShadingFields({ windowName, kinds, elementsById, updateElem
     const stated = typeof extra[kind] === 'string' ? extra[kind] as string : '';
     const placeholder = feature ? `Drawn${depth === undefined ? '' : ` ${depth} m`}: choose what it is` : 'None';
     return <div key={kind} style={{ display: 'contents' }}>
-      <div className="element-label">{`Window ${label.toLowerCase()}:`}</div>
+      <div className="element-label">{`Window ${label.toLowerCase()}`}</div>
       <div className="element-input" style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)' }}>
         <StandardDropdown aria-label={`${windowName} ${label.toLowerCase()}`} value={stated} placeholder={placeholder}
           options={closeShadingOptions(kind, depth)} onChange={(value) => write(kind, value)} variant="ghost" size="md" />

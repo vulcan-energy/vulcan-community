@@ -50,7 +50,7 @@ export const ParentElementDropdown: React.FC<ParentElementDropdownProps> = ({
           size="md"
         />
       </div>
-      {value && (
+      {value && !only && (
         <button
           type="button"
           className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"

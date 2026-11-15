@@ -958,6 +958,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
   const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = useTargetRules();
+  const defaultsJson = useGeometryStore((s) => s.defaultsJson);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
@@ -3265,6 +3266,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       }
 
       const elementData = buildNewElementDataRef.current();
+      // A new fan or PV array on a model with one electricity supply takes it; opening an element never writes.
+      const saved = selection.id ? getElementById(selection.id) : undefined;
+      if ((!saved || saved.isPlaceholder) && hemDatabaseProducts && (elementType === 'MechanicalVentilation' || elementType === 'OnSiteGeneration')) {
+        const supplies = readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply);
+        const electric = Object.keys(supplies).filter((name) => readExtraJsonRecord(supplies[name]).fuel === 'electricity');
+        const extra = readExtraJsonRecord(elementData.extra_json);
+        if (electric.length === 1 && extra.EnergySupply === undefined) elementData.extra_json = { ...extra, EnergySupply: electric[0] };
+      }
       if ((selection.type === 'element' || selection.type === 'global') && selection.id) {
         const existingElement = getElementById(selection.id);
         if (existingElement && existingElement.isPlaceholder) {
