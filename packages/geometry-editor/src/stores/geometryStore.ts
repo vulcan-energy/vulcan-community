@@ -209,6 +209,7 @@ import {
 import {
   applyGroundThicknessWallsManualTracking,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
+  followGroundFabricOnEdit,
 } from '../lib/groundSuspendedFabricSync';
 import {
   SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS,
@@ -7819,6 +7820,10 @@ export const createGeometryStore = (
       return withPrecomputedDefaultsLookup(state, update, options.schemaPort ?? unavailableGeometrySchemaPort);
     }, replace as false);
   }) as typeof store.setState;
+  followGroundFabricOnEdit(
+    store,
+    (state) => targetRules(options.schemaPort ?? unavailableGeometrySchemaPort, state.complianceSettings).constructionBands,
+  );
   return store;
 };
 

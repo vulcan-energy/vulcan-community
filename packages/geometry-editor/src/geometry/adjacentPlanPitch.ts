@@ -9,7 +9,7 @@ export const HORIZONTAL_ADJACENT_POLYGON_Z_SPAN_M = 0.03;
  * horizontal (plan) polygon must use 0° / 180° in FHS. If pitch is 90 and vertices are
  * coplanar in Z within {@link HORIZONTAL_ADJACENT_POLYGON_Z_SPAN_M}, use 0°.
  *
- * Used on CSV parse, CSV export, and in the element editor for self-heal.
+ * Used on CSV parse, CSV export, and for the pitch the element editor shows.
  */
 export function normalizeHorizontalAdjacentPlanPitch(
   pitch: number | undefined,

@@ -384,16 +384,17 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
       && previous != null
       && Math.abs(next - previous) > 0.005
       && (current == null || Math.abs(current - previous) <= 0.005);
+    // An existing window is never rewritten on selection: the store derives these on geometry
+    // edits, and only a8/a9 moves an authored value here (above). The rest covers a new window.
+    const existingWindow = isExistingElementSelection();
     const shouldSyncMid =
       !midHeightInput.isEditing &&
-      (authoredWindow
-        ? movedWithGeometry(currentMid, prevMid, nextMid)
+      (existingWindow
+        ? authoredWindow && movedWithGeometry(currentMid, prevMid, nextMid)
         : (currentMid == null || currentMid <= 0 || prevMid == null || Math.abs(currentMid - prevMid) <= 0.005));
     if (nextMid > 0 && shouldSyncMid && (currentMid == null || Math.abs(currentMid - nextMid) > 0.005)) {
       midHeightInputSetValueRef.current(nextMid);
-      // Repair legacy/stale saved values when the editor first opens. Normal edits are already
-      // canonicalized in the store, so this branch is otherwise a no-op for existing elements.
-      if (isExistingElementSelection()) {
+      if (existingWindow) {
         commitOpeningField('mid_height')(nextMid);
       }
     }
@@ -406,8 +407,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     const shouldSyncOpenArea =
       !maxWindowOpenAreaInput.isEditing &&
       freeAreaHeightInput.value !== '' &&
-      (authoredWindow
-        ? movedWithGeometry(currentOpenArea, prevOpenArea, nextOpenArea)
+      (existingWindow
+        ? authoredWindow && movedWithGeometry(currentOpenArea, prevOpenArea, nextOpenArea)
         : (
             currentOpenArea == null ||
             (nextOpenArea > 0 && currentOpenArea <= 0) ||
@@ -419,7 +420,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
       (currentOpenArea == null || Math.abs(currentOpenArea - nextOpenArea) > 0.005)
     ) {
       maxWindowOpenAreaInputSetValueRef.current(nextOpenArea);
-      if (isExistingElementSelection()) {
+      if (existingWindow) {
         commitOpeningField('max_window_open_area')(nextOpenArea);
       }
     }

@@ -79,12 +79,9 @@
 // ElementCreator.tsx import the same definition; see formPrimitives.ts's own
 // comment for the full writeup.
 //
-// hasReliableGroundExposedPerimeter, numbersClose: grep-verified their
-// ElementCreator definitions had ZERO callers outside what moved here, so
-// these DID move (deleted from ElementCreator) rather than duplicate;
-// `numbersClose` was a stateless `useCallback(fn, [])` there — demoted to
-// a plain module-scope function here, since it closes over nothing and a
-// hook wrapper was never buying it anything.
+// hasReliableGroundExposedPerimeter: grep-verified its ElementCreator
+// definition had ZERO callers outside what moved here, so it DID move
+// (deleted from ElementCreator) rather than duplicate.
 //
 // selectedGroundElement/selectedGroundShape are local, Ground-narrowed
 // re-derivations of ElementCreator's own generic `selectedElement`/
@@ -112,18 +109,16 @@ import {
   groundTotalAreaMismatch,
 } from '../../lib/groundFloorArea';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../lib/overrideProvenance';
-import { useTargetRules } from '../../hooks/useTargetRules';
 import {
   computeWeightedExternalWallAssemblyThicknessDetailsForGroundElement,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
-  applyComputedGroundUValueAutofill,
   groundExposedPerimeterManualFlag,
+  groundDrawingPerimeter,
   GROUND_EXPOSED_PERIMETER_MANUAL_KEY,
   THICKNESS_WALLS_MANUAL_KEY,
   type SuspendedWallThicknessAutofillResult,
 } from '../../lib/groundSuspendedFabricSync';
 import {
-  computeGroundUValueFromElementModel,
   defaultSuspendedAreaPerPerimeterVent,
   GROUND_FLOOR_TYPE_LABELS,
   parseWindShieldLocation,
@@ -175,14 +170,6 @@ function hasReliableGroundExposedPerimeter(
   return details.shapePerimeterM > 0 && details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05);
 }
 
-// Moved verbatim from ElementCreator.tsx (grep-verified zero other callers;
-// was a stateless `useCallback(fn, [])` there — see module header note).
-function numbersClose(a: number | null | undefined, b: number | null | undefined, eps = 1e-6): boolean {
-  if (a == null && b == null) return true;
-  if (a == null || b == null) return false;
-  return Math.abs(a - b) <= eps;
-}
-
 const EMPTY_WALL_THICKNESS_AUTOFILL: SuspendedWallThicknessAutofillResult = {
   valueM: null,
   areaTotalM2: 0,
@@ -223,10 +210,10 @@ export interface BuildingElementGroundFormState {
    * floor_type — same precedent as MechanicalVentilationTerminal's
    * getCurrentTerminal. */
   getPersistedFloorType: () => string | undefined;
+  withSuspendedFloorDefaults: (patch: Partial<Element>, nextFloorType: GroundFloorType) => Partial<Element>;
 }
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState {
-  const { constructionBands } = useTargetRules();
   const { schemaPort } = ctx;
   const schemaMode = ctx.schemaMode;
   const suspendedProperties = schemaPort.availability === 'available'
@@ -447,10 +434,15 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     return computeGroundExposedPerimeterDetails(ctx.elementsById, selectedGroundElement);
   }, [selectedGroundElement, ctx.elementsById]);
 
+  // Entered: marked so, or a stated value that differs from the drawing. Older files carry no
+  // marker, so differing reads as entered and is never overwritten.
   const groundPerimeterManual = useMemo((): boolean => {
     if (!selectedGroundElement) return false;
-    return groundExposedPerimeterManualFlag(readExtraJsonRecord(selectedGroundElement.extra_json));
-  }, [selectedGroundElement]);
+    if (groundExposedPerimeterManualFlag(readExtraJsonRecord(selectedGroundElement.extra_json))) return true;
+    const stated = readFiniteNumber(selectedGroundElement.perimeter);
+    const drawing = groundDrawingPerimeter(ctx.elementsById, selectedGroundElement);
+    return stated != null && drawing != null && Math.abs(stated - drawing) > 0.005;
+  }, [selectedGroundElement, ctx.elementsById]);
 
   const derivedGroundPerimeter = useMemo((): number => {
     if (!selectedGroundElement) return 0;
@@ -506,111 +498,27 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays).
   }, [selectedGroundElement, groundPerimeterDetails, ctx.updateElement]);
 
-  // Keep U-value / extra_json autofills (suspended-floor defaults, computed
-  // u_value) and the total_area/perimeter/area store sync aligned with the
-  // live derived values.
-  useEffect(() => {
-    if (ctx.selection?.type !== 'element') return;
-    const current = ctx.getElementById(ctx.selection.id);
-    if (!current || current.type !== 'BuildingElementGround') return;
-
-    const floorTypeForCalc = floorType || current.floor_type || undefined;
-    const extra = readExtraJsonRecord(current.extra_json);
-    let nextExtra: Record<string, unknown> = { ...extra };
-    let changed = false;
-
-    if (floorTypeForCalc === 'Suspended_floor') {
-      // Defaults only when fields are missing (JsonForms often stores numbers as strings — use readFiniteNumber).
-      if (readFiniteNumber(nextExtra.height_upper_surface) == null) {
-        nextExtra.height_upper_surface = SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M;
-        changed = true;
-      }
-      const parsedShield = parseWindShieldLocation(nextExtra.shield_fact_location);
-      if (supportsShieldLocation && nextExtra.shield_fact_location !== parsedShield) {
-        nextExtra.shield_fact_location = parsedShield;
-        changed = true;
-      }
-      // Treat 0 as unset: JsonForms often shows 0 while the field was never meaningfully filled; Part F default should apply.
-      const apv = readFiniteNumber(nextExtra.area_per_perimeter_vent);
-      if (apv == null || apv === 0) {
-        const derivedDefault = defaultSuspendedAreaPerPerimeterVent(derivedGroundArea, derivedGroundPerimeter);
-        if (derivedDefault != null) {
-          // Must not use roundToTwoDecimals: 0.0015 m²/m (Part F minimum) rounds to 0 and retriggers this effect forever.
-          const roundedVent = roundToFourDecimals(derivedDefault);
-          if (!numbersClose(apv, roundedVent)) {
-            nextExtra.area_per_perimeter_vent = roundedVent;
-            changed = true;
-          }
-        }
-      }
+  // Suspended-floor defaults fill blanks when the user picks the floor type, never on selection.
+  // The wall-driven fields (perimeter, total area, U-value) follow edits in the store
+  // (`followGroundFabricOnEdit`).
+  const withSuspendedFloorDefaults = (patch: Partial<Element>, nextFloorType: GroundFloorType): Partial<Element> => {
+    if (nextFloorType !== 'Suspended_floor' || !selectedGroundElement) return patch;
+    const extra = readExtraJsonRecord(selectedGroundElement.extra_json);
+    const nextExtra: Record<string, unknown> = { ...extra };
+    if (readFiniteNumber(nextExtra.height_upper_surface) == null) {
+      nextExtra.height_upper_surface = SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M;
     }
-
-    const depthBasementFloor = readFiniteNumber(current.depth_basement_floor);
-    const thicknessWalls = typeof thicknessWallsInput.value === 'number' && Number.isFinite(thicknessWallsInput.value)
-      ? thicknessWallsInput.value
-      : readFiniteNumber(current.thickness_walls) ?? 0;
-
-    const needsBasementDepth =
-      floorTypeForCalc === 'Heated_basement' || floorTypeForCalc === 'Unheated_basement';
-    const basementDepthOk =
-      !needsBasementDepth
-      || (depthBasementFloor != null && Number.isFinite(depthBasementFloor) && depthBasementFloor > 0);
-
-    const uComputed =
-      derivedGroundArea > 0 && derivedGroundPerimeter > 0 && thicknessWalls > 0 && basementDepthOk
-        ? computeGroundUValueFromElementModel(current, nextExtra, floorTypeForCalc, {
-            totalArea: groundTotalAreaManual
-              ? readFiniteNumber(current.total_area) ?? autoDerivedTotalArea
-              : autoDerivedTotalArea,
-            perimeter: derivedGroundPerimeter,
-            thicknessWalls,
-            ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
-          })
-        : null;
-
-    const uSync = applyComputedGroundUValueAutofill(nextExtra, uComputed, constructionBands);
-    if (uSync.changed) {
-      nextExtra = uSync.extra;
-      changed = true;
+    if (supportsShieldLocation) {
+      nextExtra.shield_fact_location = parseWindShieldLocation(nextExtra.shield_fact_location);
     }
-
-    const syncAreaForLine = selectedGroundShape === 'line' ? derivedGroundArea : null;
-    const needsTotalAreaSync =
-      !groundTotalAreaManual
-      && !numbersClose(readFiniteNumber(current.total_area), autoDerivedTotalArea);
-    const needsPerimeterSync = !numbersClose(readFiniteNumber(current.perimeter), derivedGroundPerimeter);
-    const needsLineAreaSync = syncAreaForLine != null
-      && !numbersClose(readFiniteNumber(current.area), syncAreaForLine);
-    const needsGroundSync =
-      needsTotalAreaSync || needsPerimeterSync || needsLineAreaSync;
-
-    if (!changed && !needsGroundSync) return;
-
-    ctx.updateElement(current.id, {
-      ...(needsGroundSync ? {
-        ...(needsTotalAreaSync ? { total_area: autoDerivedTotalArea } : {}),
-        ...(needsPerimeterSync ? { perimeter: derivedGroundPerimeter } : {}),
-        ...(needsLineAreaSync ? { area: syncAreaForLine! } : {}),
-      } : {}),
-      ...(changed ? { extra_json: nextExtra } : {}),
-    } as Partial<Element>);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays). numbersClose is a module-scope pure function (stable identity), listed for fidelity with the legacy ElementCreator effect this was moved from.
-  }, [
-    ctx.selection,
-    ctx.selectedElementV,
-    ctx.getElementById,
-    ctx.updateElement,
-    floorType,
-    supportsShieldLocation,
-    thicknessWallsInput.value,
-    derivedGroundArea,
-    autoDerivedTotalArea,
-    groundTotalAreaManual,
-    derivedGroundPerimeter,
-    selectedGroundShape,
-    constructionBands,
-    numbersClose,
-  ]);
+    const apv = readFiniteNumber(nextExtra.area_per_perimeter_vent);
+    if (apv == null || apv === 0) {
+      const derivedDefault = defaultSuspendedAreaPerPerimeterVent(derivedGroundArea, derivedGroundPerimeter);
+      // Not roundToTwoDecimals: 0.0015 m²/m (Part F minimum) would round to 0.
+      if (derivedDefault != null) nextExtra.area_per_perimeter_vent = roundToFourDecimals(derivedDefault);
+    }
+    return { ...patch, extra_json: nextExtra } as Partial<Element>;
+  };
 
   const resyncGroundThicknessWallsFromAssemblies = useCallback(() => {
     if (ctx.selection?.type !== 'element') return;
@@ -681,6 +589,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     liveThicknessWallsValue,
     selectedGroundShape,
     getPersistedFloorType,
+    withSuspendedFloorDefaults,
   };
 }
 
@@ -801,6 +710,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       groundWallThicknessAutofill,
       liveThicknessWallsValue,
       resyncGroundThicknessWallsFromAssemblies,
+      withSuspendedFloorDefaults,
     } = state;
     const {
       elementType,
@@ -923,7 +833,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
               if (!groundFloorTypeSupportsViewerElevation(nextValue)) {
                 elementElevationInput.setValue('');
               }
-              commitExistingElementDraft(patch);
+              commitExistingElementDraft(withSuspendedFloorDefaults(patch, nextValue));
             }}
             options={Object.entries(GROUND_FLOOR_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
             variant="ghost"

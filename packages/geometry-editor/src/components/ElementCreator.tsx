@@ -94,12 +94,7 @@ import {
 } from '../lib/transparentOpeningDerivedFields';
 import { elementBaseElevationMForTb } from '../lib/geometry3dMapper';
 import {
-  syncGroundExposedPerimetersFromWalls,
-  syncSuspendedGroundFabricFromWalls,
-  GROUND_EXPOSED_PERIMETER_MANUAL_KEY,
   GROUND_U_VALUE_MANUAL_KEY,
-  THICKNESS_WALLS_MANUAL_KEY,
-  THERMAL_TRANSM_WALLS_MANUAL_KEY,
 } from '../lib/groundSuspendedFabricSync';
 import {
   computeGroundUValueFromElementModel,
@@ -725,71 +720,6 @@ const isGlobalElementType = (type: ElementType): boolean => {
   return ['WaterPipework', 'Appliance', 'HotWaterDemand', 'ContextShading', 'Vents', 'MechanicalVentilation', 'CombustionAppliances', 'MechanicalVentilationDuctwork', 'MechanicalVentilationTerminal'].includes(type);
 };
 
-/**
- * Signature of the fields `syncSuspendedGroundFabricFromWalls` /
- * `syncGroundExposedPerimetersFromWalls` consume. Returns `''` for elements neither sync reads.
- */
-function buildSuspendedGroundFabricSignaturePart(el: Element): string {
-  if (el.type === 'BuildingElementGround') {
-    const extra = readExtraJsonRecord(el.extra_json);
-    return [
-      el.id,
-      el.type,
-      el.name ?? '',
-      el.zoneId ?? '',
-      el.floorId ?? '',
-      JSON.stringify(el.coordinates ?? []),
-      (el as { floor_type?: string }).floor_type ?? '',
-      (el as { area?: number }).area ?? '',
-      (el as { total_area?: number }).total_area ?? '',
-      (el as { perimeter?: number }).perimeter ?? '',
-      (el as { thickness_walls?: number }).thickness_walls ?? '',
-      JSON.stringify(extra),
-      extra[GROUND_EXPOSED_PERIMETER_MANUAL_KEY] === true ? 'perimeter-manual' : '',
-      extra[THICKNESS_WALLS_MANUAL_KEY] === true ? 'thick-manual' : '',
-      extra[THERMAL_TRANSM_WALLS_MANUAL_KEY] === true ? 'transm-manual' : '',
-    ].join('|');
-  }
-
-  if (el.type === 'BuildingElementOpaque') {
-    const pitch = (el as { pitch?: number }).pitch ?? 90;
-    if (Math.abs(pitch - 90) > 10) return '';
-    return [
-      el.id,
-      el.type,
-      el.name ?? '',
-      el.zoneId ?? '',
-      el.floorId ?? '',
-      (el as { parent_element?: string | null }).parent_element ?? '',
-      (el as { location?: string }).location ?? '',
-      JSON.stringify(el.coordinates ?? []),
-      pitch,
-      (el as { area?: number }).area ?? '',
-      JSON.stringify(el.extra_json ?? {}),
-    ].join('|');
-  }
-
-  if (
-    el.type === 'BuildingElementAdjacentConditionedSpace' ||
-    el.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' ||
-    el.type === 'BuildingElementPartyWall'
-  ) {
-    return [
-      el.id,
-      el.type,
-      el.name ?? '',
-      el.zoneId ?? '',
-      el.floorId ?? '',
-      (el as { parent_element?: string | null }).parent_element ?? '',
-      JSON.stringify(el.coordinates ?? []),
-      (el as { area?: number }).area ?? '',
-      JSON.stringify(el.extra_json ?? {}),
-    ].join('|');
-  }
-
-  return '';
-}
-
 const SelectedElementValidationRows = React.memo(function SelectedElementValidationRows({
   activeFilename,
   onFocusField,
@@ -1006,7 +936,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
   const validateElement = useGeometryStore((s) => s.validateElement);
   const hostValidationFindings = useGeometryStore((s) => s.hostValidationFindings);
-  const defaultsLookup = useGeometryStore((s) => s.getDefaultsLookup());
   const resolvedSelectionContext = selectionContext ?? selection;
   // Stable version counter for the currently selected element.
   // This replaces the unstable `elementsById[selection?.id || '']` dependency
@@ -1024,34 +953,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // null: the converter takes no heat capacity from this element, so the field is not offered.
     return constructionBands && element ? hemieHeatCapacityBands(hemieConstructionType(element, allElements, buildType)) ?? null : undefined;
   }, [constructionBands, selectedId, elementsById, allElements, buildType]);
-
-  const latestElementsByIdRef = useRef(elementsById);
-  useEffect(() => {
-    latestElementsByIdRef.current = elementsById;
-  }, [elementsById]);
-  const [suspendedGroundFabricSignatureCache] = useState(
-    () => new WeakMap<Element, string>(),
-  );
-  const suspendedGroundFabricSyncSignature = useMemo(() => {
-    // Elements are replaced (not mutated) on write, so a per-element cache keyed on identity
-    // re-serialises only what changed instead of the whole model on every store update.
-    const parts: string[] = [];
-    for (const el of allElements) {
-      let part = suspendedGroundFabricSignatureCache.get(el);
-      if (part === undefined) {
-        part = buildSuspendedGroundFabricSignaturePart(el);
-        suspendedGroundFabricSignatureCache.set(el, part);
-      }
-      if (part !== '') parts.push(part);
-    }
-    return parts.join('\n');
-  }, [allElements, suspendedGroundFabricSignatureCache]);
-
-  useEffect(() => {
-    const latest = latestElementsByIdRef.current;
-    syncSuspendedGroundFabricFromWalls(latest, updateElement, defaultsLookup);
-    syncGroundExposedPerimetersFromWalls(latest, updateElement, constructionBands);
-  }, [constructionBands, defaultsLookup, suspendedGroundFabricSyncSignature, updateElement]);
 
   const primaryFhsZoneId = useMemo(
     () => zones.find((zone) => !zone.isPlaceholder)?.id,
@@ -2747,7 +2648,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             const zInt = typeof z === 'number' ? Math.floor(z) : undefined;
             if (zInt !== undefined) {
               const syncedFloorId = String(zInt);
-              if (element.floorId !== syncedFloorId) {
+              const storedZ = geometryStore.getState().floors.find((floor) => floor.id === element.floorId)?.zIndex;
+              if (storedZ !== zInt && element.floorId !== syncedFloorId) {
                 updateElement(element.id, { floorId: syncedFloorId });
               }
               setElementFloorId(syncedFloorId);
@@ -3700,7 +3602,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     wallShared,
     transparentMidHeightInput: buildingElementTransparentFormState.midHeightInput,
     getElementById,
-    updateElement,
     geometryStore,
     allElements,
     floors,

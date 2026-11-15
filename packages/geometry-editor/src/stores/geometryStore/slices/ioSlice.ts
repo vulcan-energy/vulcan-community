@@ -49,6 +49,7 @@ import {
 } from '../../../lib/openingSegmentOutward';
 import { getParentOrientation360 } from '../../../lib/parentOrientation';
 import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
+import { asDocumentLoad } from '../../../lib/groundSuspendedFabricSync';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -1799,9 +1800,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     return csvContent;
   },
 
-  loadFromCSV: (csvContent, loadOptions) => applyCsvDocument(csvContent, loadOptions),
+  loadFromCSV: (csvContent, loadOptions) => asDocumentLoad(() => applyCsvDocument(csvContent, loadOptions)),
   replaceDocumentFromCsv: (csvContent, { currentFloorId, floors }) => {
-    applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId, floors });
+    asDocumentLoad(() => applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId, floors }));
   },
   };
 
