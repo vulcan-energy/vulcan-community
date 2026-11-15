@@ -104,6 +104,7 @@ import {
 import {
   buildSpaceHeatSystemSampleBaselineExtraJson,
   firstRecordEntry,
+  newBuildPickerOwnsProductId,
   resolveHeatSourceWetReferenceName,
   SYSTEM_SUBCATEGORY_TO_DIR,
   withoutPresetPrimaryPipework,
@@ -1000,6 +1001,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const coldWaterNames = useMemo(() => (hemDatabaseProducts ? Object.keys(readExtraJsonRecord(readExtraJsonRecord(defaultsJson).ColdWaterSource)) : []), [hemDatabaseProducts, defaultsJson]);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   const systemDefaults = useGeometryStore((state) => state.targetValidation?.systemDefaults);
+  const productPickerOwnsId = useGeometryStore((state) => newBuildPickerOwnsProductId(existingBuilding, state.targetValidation?.productSlots, currentData.name));
   const cooled = useGeometryStore((state) => cooledHeatSources(state.elementsById));
   // Fields Advanced does not show: those the standard form owns, and those the target hides.
   const getBaseFields = useCallback(
@@ -1549,7 +1551,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         electricSupplyNames,
         coldWaterNames,
         // A new build picks each product with its chip: the raw product id beside it is a second surface.
-        dropKeys: new Set([...unusedHeatPumpFields(advancedFieldsData, cooled), ...(existingBuilding ? [] : ['product_id'])]),
+        dropKeys: new Set([...unusedHeatPumpFields(advancedFieldsData, cooled), ...(productPickerOwnsId ? ['product_id'] : [])]),
         pvDiverter: subtype === 'HotWaterSource',
       }) as typeof result;
     }
@@ -1616,6 +1618,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     coldWaterNames,
     cooled,
     hemDatabaseProducts,
+    productPickerOwnsId,
   ]);
 
   const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {

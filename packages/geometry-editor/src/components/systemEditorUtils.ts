@@ -300,3 +300,13 @@ export function remapSpaceHeatSystemHeatSourceInExtraJson(
   }
   return changed ? { ...extra, SpaceHeatSystem: nextSystems } : null;
 }
+
+/** A new build picks each product with its chip, so the raw product id is a second surface; a slot with no candidates (no product rule) has no picker, so the id stays. */
+export function newBuildPickerOwnsProductId(
+  existing: boolean,
+  slots: readonly { row?: string; candidates?: readonly unknown[] | null }[] | undefined,
+  name: unknown,
+): boolean {
+  return !existing && !!slots?.some((slot) => slot.row === name && !!slot.candidates?.length);
+}
+

@@ -251,6 +251,7 @@ pub(super) fn distant(
 
     let mut objects = Vec::new();
     let mut unused = Vec::new();
+    let mut below = false;
     for row in rows {
         let name = text(row, &["Name"]).unwrap_or_default();
         let kind = text(row, &["shading_type", "Type"]);
@@ -283,6 +284,7 @@ pub(super) fn distant(
         // obstacle.
         let height = height - base;
         if height <= 0.0 {
+            below = true;
             continue;
         }
         objects.push(Object {
@@ -413,7 +415,12 @@ pub(super) fn distant(
     notices.push(notice(
         SHADING_POINTER,
         if nothing_anywhere {
-            "Distant shading: nothing is drawn or chosen on any side, so every side is very light and the roof is not shaded, the default. Draw what shades a side, or choose its band.".to_string()
+            let drawn = if below {
+                "everything drawn sits below the dwelling and is left out"
+            } else {
+                "nothing is drawn or chosen on any side"
+            };
+            format!("Distant shading: {drawn}, so each side takes the default, very light, and the roof is not shaded. Draw what shades a side, or choose its band.")
         } else {
             format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; "))
         },
@@ -801,11 +808,27 @@ mod tests {
     }
 
     #[test]
+    fn objects_all_below_the_dwelling_are_said_to_be_left_out() {
+        let out = derive_all(
+            &["Low,ContextShading,obstacle,135,225,10,2"],
+            180.0,
+            3.0,
+            "",
+        );
+        assert!(
+            out.notice("everything drawn sits below the dwelling and is left out, so each side takes the default"),
+            "{:?}",
+            out.notices
+        );
+        assert!(!out.notice("nothing is drawn"), "{:?}", out.notices);
+    }
+
+    #[test]
     fn nothing_drawn_and_nothing_stated_assumes_very_light() {
         let out = derive(&[], 180.0);
         // One short notice for the whole dwelling; no side repeats it.
         assert!(
-            out.notice("nothing is drawn or chosen on any side, so every side is very light"),
+            out.notice("nothing is drawn or chosen on any side, so each side takes the default, very light, and the roof is not shaded. Draw what shades a side, or choose its band."),
             "{:?}",
             out.notices
         );

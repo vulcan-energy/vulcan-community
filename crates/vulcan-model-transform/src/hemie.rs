@@ -829,6 +829,7 @@ impl Ctx<'_> {
                 stated_mass.push(format!("solar absorption {coeff}"));
             }
         }
+        let mut stated_u = false;
         let u_values: BTreeSet<String> = elements
             .iter()
             .filter_map(|e| e.num("u_value"))
@@ -839,11 +840,14 @@ impl Ctx<'_> {
         } else if u_values.len() > 1 {
             self.errors.push(error("CONSTRUCTION", first.path(), format!("The existing-building EPC gives {} one construction, but their U-values differ ({}). Give them one U-value, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
         } else if let Some(u) = first.num("u_value") {
+            stated_u = true;
             c.insert("u_value".into(), json!(u));
-            self.constructions
-                .documented
-                .insert(format!("{} (U {u})", names(elements)));
+            self.constructions.documented.insert(format!(
+                "{} (U {u})",
+                quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>())
+            ));
         } else if let Some(r) = first.num("thermal_resistance_construction") {
+            stated_u = true;
             // Derived from the model: U from the element's construction resistance and HEM's
             // surface resistances (BS EN ISO 13789 coefficients: radiative 5.13, convective 2.5
             // sideways, 5.0 upwards, 0.7 downwards; outside 20 + 4.14).
@@ -855,9 +859,10 @@ impl Ctx<'_> {
             let inside = 1.0 / (5.13 + h_ci);
             let u = 1.0 / (r + inside + 1.0 / (20.0 + 4.14));
             c.insert("u_value".into(), json!(u));
-            self.constructions
-                .documented
-                .insert(format!("{} (U {u:.3} from R {r})", names(elements)));
+            self.constructions.documented.insert(format!(
+                "{} (U {u:.3} from R {r})",
+                quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>())
+            ));
         }
         if construction_type == "window" {
             // DESNZ-defined: HEMIE takes the g-value and frame area fraction from the glazing
@@ -928,7 +933,7 @@ impl Ctx<'_> {
                 .stated_mass
                 .insert(format!("{names} ({})", stated_mass.join(", ")));
         }
-        if c.contains_key("u_value") || !stated_mass.is_empty() {
+        if stated_u || !stated_mass.is_empty() {
             self.constructions
                 .needs_evidence
                 .extend(elements.iter().map(|e| e.name.to_string()));
@@ -1421,7 +1426,7 @@ fn convert_existing_building(
         .into_iter()
         .collect();
     if !documented.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so the existing-building EPC takes it as a documented U-value from the element: {}.", documented.join(", "))));
+        notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so the existing-building EPC takes it as a documented U-value from the element: {}.", documented.join("; "))));
     }
     let stated_glazing: Vec<String> = std::mem::take(&mut ctx.constructions.stated_glazing)
         .into_iter()
@@ -4277,7 +4282,49 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             constructions["party_wall"],
             json!({"construction_type": "party_wall", "party_wall_type": "unfilled_cavity", "cavity_seal_type": "unsealed", "party_wall_lining_type": "wet_plaster", "mass_distribution_class": "D: Mass equally distributed"})
         );
-        assert!(notices.iter().any(|n| n.message.contains("W00 (U 0.45)")));
+        assert!(notices.iter().any(|n| n.message.contains("'W00' (U 0.45)")));
+    }
+
+    #[test]
+    fn the_u_value_note_quotes_each_shared_construction_and_separates_them() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        for w in exposed
+            .iter_mut()
+            .filter(|w| w.starts_with("Roof") || w.starts_with("W00,"))
+        {
+            *w = w.replace("\",", "\",\"{\"\"u_value\"\":0.3}\"");
+        }
+        let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let note = notices
+            .iter()
+            .find(|n| n.message.contains("state their own U-value"))
+            .unwrap_or_else(|| panic!("{notices:#?}"));
+        assert!(
+            note.message
+                .ends_with(": 'Roof S', 'Roof N' (U 0.3); 'W00' (U 0.3)."),
+            "{}",
+            note.message
+        );
+    }
+
+    #[test]
+    fn a_u_value_in_the_construction_setting_is_not_evidence() {
+        let settings = SETTINGS.replace(
+            r#""{""wall_construction_type"":""cavity""}""#,
+            r#""{""wall_construction_type"":""cavity"",""u_value"":0.4}""#,
+        );
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        let (_, errors, notices) = run(&csv(&settings, &exposed, &ground(&BOX)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(
+            !notices
+                .iter()
+                .any(|n| n.message.contains("Lodgement needs evidence")),
+            "{notices:#?}"
+        );
     }
 
     /// The house with window W1 in the south wall W00; `extra` is the window's extra_json.
