@@ -58,7 +58,7 @@ import { deriveForExport } from '../../../lib/deriveForExport';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
-import { targetRules, targetSchemaMode, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
+import { targetRules, targetSchemaMode, type ArealHeatCapacityInput, type GeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
 import {
   alignHostedSlopedPanelToHostOrientation,
@@ -187,7 +187,7 @@ export type GeometryStoreSlice = StateCreator<GeometryState, [], [], IoSlice>;
 export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;
   defaultsPathForTarget: ((targetBundleId: string) => string | undefined) | undefined;
-  numericArealHeatCapacityForTarget: ((targetBundleId: string | undefined) => boolean) | undefined;
+  arealHeatCapacityForTarget: ((targetBundleId: string | undefined) => ArealHeatCapacityInput | undefined) | undefined;
   hemDatabaseProductsForTarget: ((targetBundleId: string | undefined) => boolean | undefined) | undefined;
   modelSchemaProfilePort: GeometryModelSchemaProfilePort;
   schemaPort: GeometrySchemaPort;
@@ -1832,7 +1832,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
-        numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
+        arealHeatCapacityForTarget: options.arealHeatCapacityForTarget,
         assignIds: replace
           ? ({ zones, elements, spaceLabels }) => reuseKnownIds(get(), knownIds, zones, elements, spaceLabels)
           : undefined,

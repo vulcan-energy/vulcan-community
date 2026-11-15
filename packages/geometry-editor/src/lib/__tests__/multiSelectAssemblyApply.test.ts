@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
+import { A7_AREAL_HEAT_CAPACITY_INPUT, unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import type { BundledAssemblyLibrary } from '../assemblyLibrary';
 import type { AssemblyExample, MaterialRow } from '../assemblyTypes';
 import {
@@ -94,7 +94,7 @@ describe('flat roof (pitch 0) bulk assembly apply', () => {
     expect(libraryElementTypeForElement(flatRoof)).toBe('roof');
 
     const single = computePatchFromSavedAssembly(roofRow, library, 'BuildingElementOpaque', 0);
-    const bulk = applyCreationDefaultAssemblyToElement(flatRoof, { library, ids: { roof: roofRow.id } });
+    const bulk = applyCreationDefaultAssemblyToElement(flatRoof, { library, ids: { roof: roofRow.id }, arealHeatCapacity: { classes: 'surface', numberTypes: 'all' } });
     expect((bulk.extra_json as Record<string, unknown>).u_value).toBe(single!.patch.u_value);
   });
 });
@@ -114,7 +114,7 @@ describe('saved ventilated-cavity assembly', () => {
 describe('areal heat capacity without material ρ/c', () => {
   it('clears a stale areal_heat_capacity instead of keeping it', () => {
     const wall = opaque(90, wallLine, { areal_heat_capacity: 'Very heavy' });
-    const applied = applyCreationDefaultAssemblyToElement(wall, { library, ids: { wall: noMassWallRow.id } });
+    const applied = applyCreationDefaultAssemblyToElement(wall, { library, ids: { wall: noMassWallRow.id }, arealHeatCapacity: A7_AREAL_HEAT_CAPACITY_INPUT });
     const extra = applied.extra_json as Record<string, unknown>;
     expect(extra.thermal_resistance_construction).toBeDefined();
     expect(extra.areal_heat_capacity).toBeUndefined();

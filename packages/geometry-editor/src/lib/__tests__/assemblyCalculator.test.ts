@@ -19,7 +19,6 @@ import {
   resistanceFromSolidLayer,
   rSiForPitch,
   resolveFabricArealHeatCapacityForElement,
-  snapToNearestFhsArealHeatCapacity,
   sumAssemblyArealHeatCapacity,
   computeIso6946CombinedConstructionResistance,
   ISO6946_MAX_UPPER_TO_LOWER_RESISTANCE_RATIO,
@@ -143,27 +142,31 @@ describe('areal heat capacity', () => {
   });
 });
 
-describe('FHS areal heat capacity bands', () => {
-  it('snapToNearestFhsArealHeatCapacity picks nearest band (ties → smaller)', () => {
-    expect(snapToNearestFhsArealHeatCapacity(60_000)).toBe(50_000);
-    expect(snapToNearestFhsArealHeatCapacity(62_500)).toBe(50_000);
-    expect(snapToNearestFhsArealHeatCapacity(62_501)).toBe(75_000);
-    expect(snapToNearestFhsArealHeatCapacity(92_500)).toBe(75_000);
-    expect(snapToNearestFhsArealHeatCapacity(92_501)).toBe(110_000);
+describe('areal heat capacity classes', () => {
+  it('picks the nearest class on the scale (ties → lighter)', () => {
+    expect(arealHeatCapacityBandFromJPerM2K(60_000, 'surface')).toBe('Very light');
+    expect(arealHeatCapacityBandFromJPerM2K(62_500, 'surface')).toBe('Very light');
+    expect(arealHeatCapacityBandFromJPerM2K(62_501, 'surface')).toBe('Light');
+    expect(arealHeatCapacityBandFromJPerM2K(92_500, 'surface')).toBe('Light');
+    expect(arealHeatCapacityBandFromJPerM2K(92_501, 'surface')).toBe('Medium');
+    expect(arealHeatCapacityBandFromJPerM2K(345_000, 'full_depth')).toBe('Very light');
+    expect(arealHeatCapacityBandFromJPerM2K(345_001, 'full_depth')).toBe('Light');
   });
 
-  it('resolveFabricArealHeatCapacityForElement rounds when FHS snap off', () => {
-    expect(resolveFabricArealHeatCapacityForElement(114_450.2, false)).toBe(114_450);
+  it('gives a 303 kJ/(m²·K) cavity wall the class each target reads nearest to it', () => {
+    // HEM:FHS a7 reads Very heavy as 250 kJ; a9 reads it as 1350 kJ, and Very light as 240 kJ.
+    expect(resolveFabricArealHeatCapacityForElement(303_000, 'surface')).toBe('Very heavy');
+    expect(resolveFabricArealHeatCapacityForElement(303_000, 'full_depth')).toBe('Very light');
   });
 
-  it('resolveFabricArealHeatCapacityForElement snaps when FHS snap on', () => {
-    expect(resolveFabricArealHeatCapacityForElement(114_450, true)).toBe('Medium');
+  it('rounds where the target takes a number', () => {
+    expect(resolveFabricArealHeatCapacityForElement(114_450.2, 'number')).toBe(114_450);
   });
 
-  it('maps areal heat capacity bands to and from J/(m²·K)', () => {
-    expect(arealHeatCapacityBandFromJPerM2K(110_000)).toBe('Medium');
-    expect(arealHeatCapacityJPerM2KFromBand('Medium')).toBe(110_000);
-    expect(arealHeatCapacityJPerM2KFromBand(110_000)).toBe(110_000);
+  it('maps classes to and from J/(m²·K) on each scale', () => {
+    expect(arealHeatCapacityJPerM2KFromBand('Medium', 'surface')).toBe(110_000);
+    expect(arealHeatCapacityJPerM2KFromBand('Medium', 'full_depth')).toBe(650_000);
+    expect(arealHeatCapacityJPerM2KFromBand(110_000, 'full_depth')).toBe(110_000);
   });
 });
 

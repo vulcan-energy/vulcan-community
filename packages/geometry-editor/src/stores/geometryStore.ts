@@ -37,6 +37,7 @@ import {
   targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,
+  type ArealHeatCapacityInput,
   type GeometrySchemaPort,
 } from '../../../geometry-editor-host/src/schemaPort';
 import {
@@ -2901,10 +2902,11 @@ export interface CreateGeometryStoreOptions {
    */
   defaultsPathForTarget?: (targetBundleId: string) => string | undefined;
   /**
-   * True when a pinned target takes a number for areal heat capacity, so a load keeps an
-   * element's number instead of snapping it to the nearest band (which loses it).
+   * The areal heat capacity a pinned target takes (undefined for an unpinned CSV or an unknown pin:
+   * HEM:FHS 1.0.0a7's). A load keeps a number where the target takes one, snaps it to the nearest
+   * class on the target's scale elsewhere, and re-derives the class an applied assembly wrote.
    */
-  numericArealHeatCapacityForTarget?: (targetBundleId: string | undefined) => boolean;
+  arealHeatCapacityForTarget?: (targetBundleId: string | undefined) => ArealHeatCapacityInput | undefined;
   /**
    * Whether the document's own pinned target references database products (`TargetRules.
    * hemDatabaseProducts`); undefined for a pin the host does not know. Export-time values follow
@@ -3225,7 +3227,7 @@ const createGeometryState = (
   ...createIoSlice({
     defaultDefaultsPath,
     defaultsPathForTarget: options.defaultsPathForTarget,
-    numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
+    arealHeatCapacityForTarget: options.arealHeatCapacityForTarget,
     hemDatabaseProductsForTarget: options.hemDatabaseProductsForTarget,
     hostDocumentMetadataKeys,
     modelSchemaProfilePort,
@@ -3972,11 +3974,12 @@ const createGeometryState = (
     }
 
     // Under construction bands the bands give the fabric; the stored default assemblies wait unused.
-    if (!targetRules(schemaPort, get().complianceSettings).constructionBands) {
+    const creationRules = targetRules(schemaPort, get().complianceSettings);
+    if (!creationRules.constructionBands) {
       newElement = applyCreationDefaultAssemblyToElement(newElement, {
         library: get().bundledAssemblyLibrary,
         ids: get().creationDefaultAssemblyIds,
-        fhsComplianceSnapArealHeat: true,
+        arealHeatCapacity: creationRules.arealHeatCapacity,
       }) as Element;
     }
     newElement = { ...newElement, _nameAutoSync: true };

@@ -7,6 +7,7 @@
  */
 
 import type { AssemblyLayer, AssemblyLayerSolid, MaterialRow, RepeatingBridgeDefinition } from './assemblyTypes';
+import type { ArealHeatCapacityInput, ArealHeatCapacityScale } from '../../../geometry-editor-host/src/schemaPort';
 import {
   effectiveCavityResistanceM2KPerW,
   migrateLegacyCavityLayer,
@@ -142,44 +143,6 @@ export function sumAssemblyArealHeatCapacity(
   return { jPerM2K: total, errors: [] };
 }
 
-/** FHS-style discrete fabric mass: approved areal heat capacity bands (J/(m²·K)). */
-export const FHS_AREAL_HEAT_CAPACITY_BANDS_J_M2K = [
-  50_000, 75_000, 110_000, 175_000, 250_000,
-] as const;
-
-const AHC_MATCH_EPS = 1e-3;
-
-/**
- * Map a computed C'' to the nearest allowed band. When two bands are equidistant,
- * the smaller value is chosen.
- */
-export function snapToNearestFhsArealHeatCapacity(jPerM2K: number): number {
-  if (!Number.isFinite(jPerM2K)) {
-    return FHS_AREAL_HEAT_CAPACITY_BANDS_J_M2K[0];
-  }
-  let best: (typeof FHS_AREAL_HEAT_CAPACITY_BANDS_J_M2K)[number] = FHS_AREAL_HEAT_CAPACITY_BANDS_J_M2K[0];
-  let bestD = Infinity;
-  for (const b of FHS_AREAL_HEAT_CAPACITY_BANDS_J_M2K) {
-    const d = Math.abs(jPerM2K - b);
-    if (d < bestD - AHC_MATCH_EPS) {
-      bestD = d;
-      best = b;
-    } else if (Math.abs(d - bestD) <= AHC_MATCH_EPS && b < best) {
-      best = b;
-    }
-  }
-  return best;
-}
-
-/** True if `v` equals one of the discrete FHS bands (within tolerance). */
-export function matchesFhsDiscreteArealHeatCapacity(v: number): boolean {
-  if (!Number.isFinite(v)) return false;
-  for (const b of FHS_AREAL_HEAT_CAPACITY_BANDS_J_M2K) {
-    if (Math.abs(v - b) <= AHC_MATCH_EPS) return true;
-  }
-  return false;
-}
-
 export type FhsArealHeatCapacityBand =
   | 'Very light'
   | 'Light'
@@ -187,50 +150,77 @@ export type FhsArealHeatCapacityBand =
   | 'Heavy'
   | 'Very heavy';
 
-const FHS_AREAL_HEAT_CAPACITY_LABEL_BY_J_M2K: Record<number, FhsArealHeatCapacityBand> = {
-  50000: 'Very light',
-  75000: 'Light',
-  110000: 'Medium',
-  175000: 'Heavy',
-  250000: 'Very heavy',
+/**
+ * The value (J/(m²·K)) each pinned wrapper reads a class as, per scale. `surface`: HEM:FHS
+ * 1.0.0a7 (`AREAL_HEAT_MAP`, future_homes_standard.rs at c5ba2673; EN ISO 52016-1 Table B.14).
+ * `full_depth`: HEM:FHS 1.0.0a9 (`AREAL_HEAT_MAP` at f2c2425f) and HEM:EPC 0.13.2
+ * (`ArealHeatCapacity.as_core_value`, epc_wrapper enums.py at 18032feb), which count the full
+ * depth of the element. A target names its scale (`ArealHeatCapacityInput.classes`).
+ */
+export const AREAL_HEAT_CAPACITY_CLASSES: Readonly<Record<ArealHeatCapacityScale, Readonly<Record<FhsArealHeatCapacityBand, number>>>> = {
+  surface: { 'Very light': 50_000, Light: 75_000, Medium: 110_000, Heavy: 175_000, 'Very heavy': 250_000 },
+  full_depth: { 'Very light': 240_000, Light: 450_000, Medium: 650_000, Heavy: 850_000, 'Very heavy': 1_350_000 },
 };
 
-const FHS_AREAL_HEAT_CAPACITY_J_M2K_BY_LABEL: Record<FhsArealHeatCapacityBand, number> = {
-  'Very light': 50_000,
-  'Light': 75_000,
-  'Medium': 110_000,
-  'Heavy': 175_000,
-  'Very heavy': 250_000,
-};
+const AHC_MATCH_EPS = 1e-3;
 
+const classEntries = (scale: ArealHeatCapacityScale) =>
+  Object.entries(AREAL_HEAT_CAPACITY_CLASSES[scale]) as [FhsArealHeatCapacityBand, number][];
+
+/**
+ * The class whose value on `scale` is nearest a computed C''. When two classes are equidistant,
+ * the lighter one is chosen.
+ */
 export function arealHeatCapacityBandFromJPerM2K(
   jPerM2K: number | null | undefined,
+  scale: ArealHeatCapacityScale,
 ): FhsArealHeatCapacityBand | undefined {
   if (jPerM2K == null || !Number.isFinite(jPerM2K)) return undefined;
-  const snapped = snapToNearestFhsArealHeatCapacity(jPerM2K);
-  return FHS_AREAL_HEAT_CAPACITY_LABEL_BY_J_M2K[snapped];
+  let best = classEntries(scale)[0]!;
+  let bestD = Infinity;
+  for (const entry of classEntries(scale)) {
+    const d = Math.abs(jPerM2K - entry[1]);
+    if (d < bestD - AHC_MATCH_EPS) {
+      bestD = d;
+      best = entry;
+    }
+  }
+  return best[0];
 }
 
+/** True if `v` is the value of a class on `scale` (within tolerance). */
+export function matchesArealHeatCapacityClass(v: number, scale: ArealHeatCapacityScale): boolean {
+  return Number.isFinite(v) && classEntries(scale).some(([, b]) => Math.abs(v - b) <= AHC_MATCH_EPS);
+}
+
+/** J/(m²·K) of a number, or of a class read on `scale`. */
 export function arealHeatCapacityJPerM2KFromBand(
   value: unknown,
+  scale: ArealHeatCapacityScale,
 ): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim() as FhsArealHeatCapacityBand;
-  return FHS_AREAL_HEAT_CAPACITY_J_M2K_BY_LABEL[trimmed];
+  return AREAL_HEAT_CAPACITY_CLASSES[scale][value.trim() as FhsArealHeatCapacityBand];
+}
+
+/** How an element of this type states areal heat capacity on the target: a number, or a class on a scale. */
+export type ArealHeatCapacityWrite = 'number' | ArealHeatCapacityScale;
+
+export function arealHeatCapacityWrite(input: ArealHeatCapacityInput, elementType: string): ArealHeatCapacityWrite {
+  return input.numberTypes === 'all' || input.numberTypes.includes(elementType) ? 'number' : input.classes;
 }
 
 /**
- * Value for `extra_json.areal_heat_capacity`: rounded layer sum when FHS snap is off,
- * otherwise the nearest FHS enum label.
+ * Value for `extra_json.areal_heat_capacity`: the rounded layer sum where the target takes a
+ * number, otherwise the nearest class on the target's scale.
  */
 export function resolveFabricArealHeatCapacityForElement(
   rawJPerM2K: number | null | undefined,
-  fhsComplianceSnap: boolean,
+  write: ArealHeatCapacityWrite,
 ): number | FhsArealHeatCapacityBand | undefined {
   if (rawJPerM2K == null || !Number.isFinite(rawJPerM2K)) return undefined;
-  if (fhsComplianceSnap) return arealHeatCapacityBandFromJPerM2K(rawJPerM2K);
-  return Math.round(rawJPerM2K);
+  if (write === 'number') return Math.round(rawJPerM2K);
+  return arealHeatCapacityBandFromJPerM2K(rawJPerM2K, write);
 }
 
 /** Internal surface resistance R_si for element pitch (degrees from horizontal, HEM schema). */

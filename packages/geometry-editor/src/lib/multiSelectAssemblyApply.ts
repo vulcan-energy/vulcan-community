@@ -29,6 +29,7 @@ import {
 } from './annexFCavity';
 import {
   arealHeatCapacityJPerM2KFromBand,
+  arealHeatCapacityWrite,
   CALCULATION_ENGINE_VERSION,
   computeIso6946CombinedConstructionResistance,
   computeOpaqueUAndTotals,
@@ -51,6 +52,7 @@ import {
 } from './assemblyMaterialFabric';
 import { parseVulcanAssemblyV1FromExtraJson } from './assemblyAppliedUi';
 import type { Element } from '../geometry/types';
+import type { ArealHeatCapacityInput, ArealHeatCapacityScale } from '../../../geometry-editor-host/src/schemaPort';
 import { getDefaultValueForElementField, type DefaultsLookup } from './defaultsCache';
 import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
 import { getElementShape } from './shapeUtils';
@@ -127,15 +129,12 @@ function numOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
-function arealHeatCapacityJOrNull(v: unknown): number | null {
-  const numeric = numOrNull(v);
-  if (numeric != null) return numeric;
-  const fromBand = arealHeatCapacityJPerM2KFromBand(v);
-  return typeof fromBand === 'number' && Number.isFinite(fromBand) ? fromBand : null;
+function arealHeatCapacityJOrNull(v: unknown, scale: ArealHeatCapacityScale): number | null {
+  return arealHeatCapacityJPerM2KFromBand(v, scale) ?? null;
 }
 
-/** Read current fabric numbers from element extra_json / envelope (for grouping + table). */
-export function readFabricDisplayValues(el: Element): FabricDisplayValues {
+/** Read current fabric numbers from element extra_json / envelope; a class is read on `scale`. */
+function readFabricDisplayValues(el: Element, scale: ArealHeatCapacityScale): FabricDisplayValues {
   const ex = el.extra_json;
   const extra = ex && typeof ex === 'object' && !Array.isArray(ex) ? (ex as Record<string, unknown>) : {};
   const v = parseVulcanAssemblyV1FromExtraJson(ex);
@@ -153,7 +152,7 @@ export function readFabricDisplayValues(el: Element): FabricDisplayValues {
       ? toFhsMassDistributionClass(massRaw) ?? massRaw
       : '—';
   const ahcJ =
-    arealHeatCapacityJOrNull(extra.areal_heat_capacity) ??
+    arealHeatCapacityJOrNull(extra.areal_heat_capacity, scale) ??
     (v ? numOrNull(v.arealHeatCapacityWrittenToElement_J_m2K) : null) ??
     (v ? numOrNull(v.arealHeatCapacity_J_m2K) : null);
   const arealHeat_kJ_m2K = ahcJ != null ? ahcJ / 1000 : null;
@@ -181,9 +180,10 @@ function strMass(raw: unknown): string {
  */
 export function effectiveFabricDisplayValues(
   el: Element,
+  scale: ArealHeatCapacityScale,
   defaultsLookup?: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
 ): EffectiveFabricDisplay {
-  const cur = readFabricDisplayValues(el);
+  const cur = readFabricDisplayValues(el, scale);
   const t = el.type;
   const getDefault = defaultsLookup?.getDefaultValueForElementField ?? getDefaultValueForElementField;
 
@@ -228,7 +228,7 @@ export function effectiveFabricDisplayValues(
   const uMerged = cur.u ?? pickNum(defU);
   const rMerged = cur.r ?? pickNum(defR);
   const massMerged = cur.mass !== '—' ? cur.mass : strMass(defMass);
-  const defArealJ = arealHeatCapacityJOrNull(defAreal);
+  const defArealJ = arealHeatCapacityJOrNull(defAreal, scale);
   const arealMerged =
     cur.arealHeat_kJ_m2K ?? (defArealJ != null ? defArealJ / 1000 : null);
 
@@ -250,7 +250,8 @@ export const FABRIC_GROUP_KEY_DEFAULT = '—|U—|R—|—';
 
 /** Stable key for grouping selected elements by current fabric snapshot. */
 export function fabricGroupKey(el: Element): string {
-  const v = readFabricDisplayValues(el);
+  // The key leaves out areal heat capacity, so the scale does not change it.
+  const v = readFabricDisplayValues(el, 'surface');
   const u = v.u != null ? String(roundUValueToTwoSignificantFigures(v.u)) : '—';
   const r = v.r != null ? roundToTwoDecimals(v.r).toFixed(2) : '—';
   return `${v.assemblyLabel}|U${u}|R${r}|${v.mass}`;
@@ -274,8 +275,8 @@ export interface SavedAssemblyComputation {
 }
 
 export interface ComputePatchFromSavedAssemblyOptions {
-  /** When true (FHS validation mode), write `areal_heat_capacity` as the nearest FHS enum band. */
-  fhsComplianceSnapArealHeat?: boolean;
+  /** The target's areal heat capacity input; absent, the element takes the rounded number. */
+  arealHeatCapacity?: ArealHeatCapacityInput;
   groundFloorType?: string | null;
 }
 
@@ -289,7 +290,7 @@ export function computePatchFromSavedAssembly(
   pitchDeg: number,
   options?: ComputePatchFromSavedAssemblyOptions,
 ): SavedAssemblyComputation | null {
-  const fhsSnap = options?.fhsComplianceSnapArealHeat ?? false;
+  const arealWrite = options?.arealHeatCapacity ? arealHeatCapacityWrite(options.arealHeatCapacity, elementMode) : 'number';
   const groundFloorType = options?.groundFloorType ?? null;
   const halfConstruction = shouldUseHeatedAdjacentHalfConstructionFabric(elementMode);
   const suspendedGroundAssembly =
@@ -400,8 +401,8 @@ export function computePatchFromSavedAssembly(
   const arealJHalved = applyHeatedAdjacentHalfToArealJPerM2K(areal.jPerM2K, elementMode);
   const massDistributionClass = fhsMassDistributionFromSuggestion(massSuggestion);
   const arealRawJ = arealJHalved != null ? roundToTwoDecimals(arealJHalved) : undefined;
-  const arealElementValue = resolveFabricArealHeatCapacityForElement(arealJHalved, fhsSnap);
-  const arealElementJ = arealHeatCapacityJPerM2KFromBand(arealElementValue);
+  const arealElementValue = resolveFabricArealHeatCapacityForElement(arealJHalved, arealWrite);
+  const arealElementJ = arealWrite === 'number' ? arealElementValue as number | undefined : arealHeatCapacityJPerM2KFromBand(arealElementValue, arealWrite);
   const arealPreviewKj =
     arealElementJ != null ? Math.round((arealElementJ / 1000) * 100) / 100 : null;
 
@@ -538,10 +539,10 @@ export function applyCreationDefaultAssemblyToElement(
   args: {
     library: BundledAssemblyLibrary | null;
     ids: CreationDefaultAssemblyIds;
-    fhsComplianceSnapArealHeat?: boolean;
+    arealHeatCapacity: ArealHeatCapacityInput;
   },
 ): Element {
-  const { library, ids, fhsComplianceSnapArealHeat = false } = args;
+  const { library, ids, arealHeatCapacity } = args;
   if (!library || !ids || Object.keys(ids).length === 0) return element;
   const mode = assemblyElementMode(element);
   if (!mode) return element;
@@ -552,9 +553,7 @@ export function applyCreationDefaultAssemblyToElement(
   const row = library.examples.find((e) => e.id === chosenId);
   if (!row || row.elementType !== libType) return element;
   const pitch = assemblyPitchDegForElement(element);
-  const comp = computePatchFromSavedAssembly(row, library, mode, pitch, {
-    fhsComplianceSnapArealHeat,
-  });
+  const comp = computePatchFromSavedAssembly(row, library, mode, pitch, { arealHeatCapacity });
   if (!comp || comp.errors.length > 0 || Object.keys(comp.patch).length === 0) return element;
   const prev =
     element.extra_json && typeof element.extra_json === 'object' && !Array.isArray(element.extra_json)
