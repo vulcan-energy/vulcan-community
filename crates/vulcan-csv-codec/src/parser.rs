@@ -198,6 +198,12 @@ impl CSVParser {
                     self.parse_extra_json_value(value)?
                 } else if section_name == "Metadata" && header == "Value" {
                     self.parse_metadata_value(value)?
+                } else if Self::NAME_COLUMNS.contains(&header.as_str()) {
+                    // A name is text even when it reads as a number ("1", "007").
+                    match value.trim() {
+                        "" => Value::Null,
+                        name => Value::String(name.to_string()),
+                    }
                 } else {
                     self.parse_value(value)?
                 };
@@ -279,18 +285,16 @@ impl CSVParser {
         Self::SECTIONS.contains(&section_name)
     }
 
-    /// A Metadata value can be an identifier (a smart meter GUID of decimal digits): a digit
-    /// string that a number cannot hold exactly, with a leading zero or beyond 2^53, stays text.
+    /// A Metadata value can be an identifier (a smart meter GUID): a cell whose number would
+    /// not reproduce its text exactly (`0012`, `12345678901234e1`, beyond 2^53) stays text.
     fn parse_metadata_value(&self, value: &str) -> Result<Value, ParseError> {
-        let trimmed = value.trim();
-        let digits = !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit());
-        let exact = trimmed
-            .parse::<u64>()
-            .is_ok_and(|n| n <= 9_007_199_254_740_992 && n.to_string() == trimmed);
-        if digits && !exact {
-            return Ok(Value::String(trimmed.to_string()));
+        let parsed = self.parse_value(value)?;
+        match &parsed {
+            Value::Number(n) if n.to_string() != value.trim() => {
+                Ok(Value::String(value.trim().to_string()))
+            }
+            _ => Ok(parsed),
         }
-        self.parse_value(value)
     }
 
     fn parse_value(&self, value: &str) -> Result<Value, ParseError> {
@@ -458,6 +462,19 @@ impl CSVParser {
 
     /// Must equal `KNOWN_GEOMETRY_CSV_SECTIONS` in packages/geometry-document; its
     /// geometryCsvSections.test.ts compares the two.
+    /// Columns that name an element, zone or system, or refer to one by name.
+    const NAME_COLUMNS: &'static [&'static str] = &[
+        "Name",
+        "Zone",
+        "parent_element",
+        "host_element",
+        "host_element_name",
+        "linked_wall",
+        "linked_window",
+        "space_heat_system",
+        "zone_reference",
+    ];
+
     const SECTIONS: &'static [&'static str] = &[
         "Metadata",
         "Exposed Elements",
