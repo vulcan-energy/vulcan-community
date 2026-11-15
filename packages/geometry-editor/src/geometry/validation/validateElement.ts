@@ -163,6 +163,10 @@ type FloorStackInterval = {
   topM: number;
 };
 
+/** A bay, conservatory or dormer part: its heights follow its bundle, not the storey it is drawn on. */
+const isBundlePart = (element: Element): boolean =>
+  getHemieBundle(element) !== null || (element.extra_json as Record<string, unknown> | undefined)?.dormer_bundle !== undefined;
+
 export function getFloorStackWarningElementIds(elements: Element[], floors: Floor[]): Set<string> {
   if (floors.length === 0) return new Set();
 
@@ -172,7 +176,7 @@ export function getFloorStackWarningElementIds(elements: Element[], floors: Floo
   const affectedElementIds = new Set<string>();
 
   for (const element of elements) {
-    if (!isVerticalLineWall(element)) continue;
+    if (!isVerticalLineWall(element) || isBundlePart(element)) continue;
     const firstPoint = element.coordinates[0];
     const height = (element as { height?: unknown }).height;
     if (
@@ -2785,7 +2789,7 @@ export const validateElementCore = (
     // Adjacent/party types are excluded — HEM has no fabric base_height there; optional `_base_height` / base_height is for 3D plot only.
     if (floors && floors.length > 0) {
       const fabricWithBaseHeight = ['BuildingElementOpaque', 'BuildingElementTransparent'] as const;
-      if (fabricWithBaseHeight.includes(element.type as (typeof fabricWithBaseHeight)[number]) && !element.isPlaceholder) {
+      if (fabricWithBaseHeight.includes(element.type as (typeof fabricWithBaseHeight)[number]) && !element.isPlaceholder && !isBundlePart(element)) {
         const coords = element.coordinates;
         if (coords && coords.length > 0) {
           const z = coords[0].z;
@@ -2824,7 +2828,9 @@ export const validateElementCore = (
                     );
                   }
                   const elementHeight = (element as { height?: unknown }).height;
+                  // A cold loft's roof rises above the storey it is drawn on, outside the dwelling.
                   if (
+                    (element as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof !== true &&
                     typeof elementHeight === 'number' &&
                     Number.isFinite(elementHeight) &&
                     elementHeight > 0

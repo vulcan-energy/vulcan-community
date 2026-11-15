@@ -196,7 +196,7 @@ const CASES: Case[] = [
   { name: 'a second zone with no split takes its floor area',
     edit: replace('simplified thermal bridging,livingroom_area,restofdwelling_area\nZone 1,Zone,198.77,70.99,2.8,FALSE,12.78,58.21\n',
       'simplified thermal bridging\nZone 1,Zone,198.77,70.99,2.8,FALSE\nZone 2,Zone,10,4,2.5,FALSE\n'),
-    notice: 'Zone 2 restofdwelling_area blank → 4', saves: { 'Zone|Zone 2|restofdwelling_area': '4' } },
+    notice: 'Zone 2 rest of dwelling area blank → 4', saves: { 'Zone|Zone 2|restofdwelling_area': '4' } },
   { name: 'absent KitchenExtractorHoodExternal takes false', defaults: true, edit: (csv) => csv.replace(/^KitchenExtractorHoodExternal,.*\n/m, ''),
     saves: { 'Metadata|KitchenExtractorHoodExternal': 'FALSE' } },
   // A blank link in a table with the column is "linked to nothing" (E059); a table with no such
@@ -267,7 +267,7 @@ const CASES: Case[] = [
   // Files saved by older editors carry a numeric areal heat capacity, which the converter rejects:
   // the load snaps it to its band and names the change.
   { name: 'a numeric areal heat capacity', edit: replace('"{}"\nWall (N),', '"{""areal_heat_capacity"":123456}"\nWall (N),'),
-    notice: 'Wall (S) areal_heat_capacity 123456 → Medium', saves: { 'Exposed Elements|Wall (S)|extra_json': '{"areal_heat_capacity":"Medium"}' } },
+    notice: 'Wall (S) areal heat capacity 123456 → Medium', saves: { 'Exposed Elements|Wall (S)|extra_json': '{"areal_heat_capacity":"Medium"}' } },
   // The converter's older aliases and a SpaceHeatSystem row with its system in extra_json give it the
   // model their editor type gives, so they load as that type, unnamed.
   { name: 'a legacy Wall alias', edit: replace('Wall (N),Zone 1,BuildingElementOpaque,', 'Wall (N),Zone 1,Wall,'),
@@ -296,7 +296,7 @@ const CASES: Case[] = [
   // The load takes the living-room split from the labels whatever the switch says, and names the change.
   { name: 'compliance validation off still takes the split from the labels',
     edit: (csv) => replace('ComplianceValidationEnabled,TRUE,', 'ComplianceValidationEnabled,FALSE,')(replace('FALSE,12.78,58.21', 'FALSE,20,50.99')(csv)),
-    notice: 'Zone 1 livingroom_area 20 → 12.78', saves: { 'Zone|Zone 1|livingroom_area': '12.78' } },
+    notice: 'Zone 1 living room area 20 → 12.78', saves: { 'Zone|Zone 1|livingroom_area': '12.78' } },
   // A point bridge's coefficient may sit in extra_json alone: the converter reads it there.
   { name: 'point bridge coefficient in extra_json', allows: ['PB1|heat_transfer_coeff'],
     edit: replace('linear_thermal_transmittance,parent_element,coords,extra_json\n', 'linear_thermal_transmittance,parent_element,coords,extra_json\nPB1,Zone 1,ThermalBridgePoint,,,,,"0,0,0","{""heat_transfer_coeff"":0.5}"\n') },

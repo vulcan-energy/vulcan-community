@@ -2303,7 +2303,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       singlePlantRows,
     );
     const unsetClassRow = unsetClassContainer.querySelector('[data-field-key="ecodesign_control_class"]');
-    expect(unsetClassRow?.textContent).toContain('is a required property');
+    expect(unsetClassRow?.textContent).toContain('Required, no default');
     cleanup();
 
     // Two plants (second plant synthesized -- no real two-plant SpaceHeatSystem

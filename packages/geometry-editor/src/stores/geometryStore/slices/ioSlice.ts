@@ -755,6 +755,9 @@ const extraJsonField = (cell: string, field: string): string | undefined => {
   }
 };
 const LEGACY_COLUMN: Readonly<Record<string, string>> = { shading_type: 'Type', start_angle: 'start angle', end_angle: 'end angle' };
+const COLUMN_WORDS: Readonly<Record<string, string>> = { livingroom_area: 'living room area', restofdwelling_area: 'rest of dwelling area', orientation360: 'orientation' };
+/** A CSV column in the words a load notice uses. */
+const columnWords = (column: string): string => COLUMN_WORDS[column] ?? column.replace(/_/g, ' ');
 /**
  * One load notice listing every cell of a zone or element row, a column the file lacks included,
  * that the loaded document saves with a different value, such as a plan area, a labelled
@@ -793,7 +796,7 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
         for (const field of ['areal_heat_capacity', 'mass_distribution_class']) {
           const was = extraJsonField(before, field);
           const now = extraJsonField(after, field);
-          if (was !== undefined && now !== undefined && was !== now) replaced.push(`${authored.Name} ${field} ${was} → ${now}`);
+          if (was !== undefined && now !== undefined && was !== now) replaced.push(`${authored.Name} ${columnWords(field)} ${was} → ${now}`);
         }
       }
       if (after === undefined || NOT_REPLACEABLE_COLUMNS.has(column)) continue;
@@ -804,7 +807,7 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
         // A PV panel's pitch comes from its host roof, not its own coords.
         const coordsPitch = column === 'pitch' && !key.startsWith('On-Site Generation|') && authored.coords?.trim();
         if (after !== '' && !coordsPitch) {
-          replaced.push(`${authored.Name} ${column} blank → ${after}`);
+          replaced.push(`${authored.Name} ${columnWords(column)} blank → ${after}`);
         }
         continue;
       }
@@ -812,7 +815,7 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
       const same = Number.isFinite(a) && Number.isFinite(b) && after !== ''
         ? Math.abs(b - a) < 0.015 || (column === 'area' && bothFaces && Math.abs(b - 2 * a) < 0.015)
         : before.toLowerCase() === after.toLowerCase();
-      if (!same) replaced.push(`${authored.Name} ${column} ${before} → ${after || 'blank'}`);
+      if (!same) replaced.push(`${authored.Name} ${columnWords(column)} ${before} → ${after || 'blank'}`);
     }
   }
   const metadata = (csv: string) => new Map(csv.split(/\r?\n/).map(parseCsvLine)
@@ -827,7 +830,7 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
   // A row the file lacks is listed by lateLoadNotice (absentMetadataRowFill).
   const one = replaced.length === 1;
   return replaced.length
-    ? [`Loading replaced ${one ? '1 value' : `${replaced.length} values`} in the file; saving writes the new ${one ? 'value' : 'values'}: ${replaced.join('; ')}.`]
+    ? [`Opening the model updated ${one ? '1 value' : `${replaced.length} values`}. Save to keep ${one ? 'it' : 'them'}: ${replaced.join('; ')}.`]
     : [];
 };
 

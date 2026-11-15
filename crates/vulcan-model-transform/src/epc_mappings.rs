@@ -251,7 +251,7 @@ pub(crate) fn report_ventilation_defaults(
             errors.push(error(
                 "E_EPC_VENTILATION_INSTALLATION",
                 json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "installation_type"]),
-                format!("Ventilation system '{name}': state its installation_type (installation_scheme or no_installation_scheme) on its Ventilation Systems row. There is no default."),
+                format!("Ventilation system '{name}': choose its installation type (installation scheme or no installation scheme). There is no default."),
             ));
         }
         // An MVHR's location (inside or outside the envelope) is an assessor input with no
@@ -262,7 +262,7 @@ pub(crate) fn report_ventilation_defaults(
             errors.push(error(
                 "E_EPC_VENTILATION_MVHR_LOCATION",
                 json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "mvhr_location"]),
-                format!("MVHR '{name}': state its mvhr_location (inside or outside the insulated envelope) on its Ventilation Systems row. There is no default."),
+                format!("MVHR '{name}': choose its MVHR location (inside or outside the insulated envelope). There is no default."),
             ));
         }
         // A stopped intermittent extract fan leaks; its back-draught protection and diameter
@@ -277,7 +277,7 @@ pub(crate) fn report_ventilation_defaults(
             errors.push(error(
                 "E_EPC_FAN_LEAKAGE",
                 json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name, "leakage_when_stopped"]),
-                format!("Intermittent extract fan '{name}': state leakage_when_stopped with its back_draught_protection (internal damper, external terminal or none) and diameter (100 mm or 150 mm) on its Ventilation Systems row. There is no default."),
+                format!("Intermittent extract fan '{name}': choose its back-draught protection (internal damper, external terminal or none) and diameter (100 mm or 150 mm) under leakage when stopped. There is no default."),
             ));
         }
         let used: Vec<String> = VENTILATION_DEFAULT_FIELDS
@@ -287,7 +287,7 @@ pub(crate) fn report_ventilation_defaults(
             .collect();
         if !used.is_empty() {
             let path = json_pointer(&["InfiltrationVentilation", "MechanicalVentilation", name]);
-            notices.push(notice(&path, format!("The ventilation system '{name}' does not state these settings, so the model uses the target defaults: {}. Add them to its Ventilation Systems row to state them.", used.join(", "))));
+            notices.push(notice(&path, format!("The ventilation system '{name}' does not state these settings, so the model uses the defaults: {}. State them on the system to change them.", used.join(", ").replace('_', " "))));
         }
     }
 }
@@ -473,7 +473,7 @@ pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationE
                     errors.push(error(
                         "E_EPC_CYLINDER_COIL",
                         format!("{path}/{field}"),
-                        format!("Cylinder '{source_name}': state its coil's {field} (heat source '{name}') on the cylinder's Systems row. There is no default."),
+                        format!("Cylinder '{source_name}': state its coil's {} (heat source '{name}') on the cylinder. There is no default.", field.replace('_', " ")),
                     ));
                 }
             }
@@ -665,7 +665,7 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
         if !used.is_empty() {
-            notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses the defaults. State them on its row to change them.", used.join(", "))));
+            notices.push(notice(&json_pointer(&["EnergySupply", supply, "ElectricBattery"]), format!("The battery on '{supply}' does not state {}, so it uses the defaults. State them on the battery to change them.", used.join(", ").replace('_', " "))));
         }
     }
     let heat_source_types: BTreeMap<String, String> = model["HeatSourceWet"]
@@ -760,7 +760,7 @@ pub(crate) fn apply_desnz_defaults(
         // naming the system, before the run fails on it.
         let path = json_pointer(&["SpaceHeatSystem", name]);
         let mut need = |field: &str, why: String| {
-            errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("Wet distribution '{name}': state its {} on its Systems row. There is no default {why}.", field.replace('_', " "))));
+            errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("Wet distribution '{name}': state its {} on the system. There is no default {why}.", field.replace('_', " "))));
         };
         if !system.contains_key("design_flow_temp") {
             need(
@@ -789,7 +789,7 @@ pub(crate) fn apply_desnz_defaults(
             );
         }
         if !used.is_empty() {
-            notices.push(notice(&path, format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on its Systems row to change them.", used.join(", "))));
+            notices.push(notice(&path, format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on the system to change them.", used.join(", ").replace('_', " "))));
         }
     }
     // DESNZ-defined values an existing building takes when they are not stated, and a new build
@@ -819,7 +819,7 @@ pub(crate) fn apply_desnz_defaults(
             match (existing, default) {
                 (true, Some(value)) => {
                     system.insert(field.into(), json!(value));
-                    notices.push(notice(&path, format!("'{name}' does not state its {words}, so it uses the default, {value}. State it on its row to change it.")));
+                    notices.push(notice(&path, format!("'{name}' does not state its {words}, so it uses the default, {value}. State it on the system to change it.")));
                 }
                 (true, None) => {}
                 (false, _) => {
@@ -1308,7 +1308,7 @@ pub(crate) fn check_system_catalogue(
             errors.push(error(
                 "E_EPC_REQUIRED_INPUT",
                 format!("{}/EnergySupply_aux", json_pointer(&segments)),
-                format!("Room heater '{name}': its product gives auxiliary power fields, so state EnergySupply_aux on its Systems row."),
+                format!("Room heater '{name}': its product gives auxiliary power fields, so choose its auxiliary energy supply."),
             ));
         }
     }

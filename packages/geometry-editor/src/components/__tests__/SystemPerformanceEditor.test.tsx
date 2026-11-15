@@ -45,7 +45,7 @@ it.each([true, false])('edits heater performance and keeps explicit profile/imme
   const input = (key: string) => within(container.querySelector(`[data-field-key="${key}"]`) as HTMLElement).getByRole('textbox');
   expect(container.querySelector('[data-field-key="power_max"]')).toHaveTextContent('kW');
   fireEvent.change(input('power_max'), { target: { value: '' } });
-  expect(container.querySelector('[data-field-key="power_max"]')).toHaveTextContent('is a required property');
+  expect(container.querySelector('[data-field-key="power_max"]')).toHaveTextContent('Required, no default');
   fireEvent.change(input('power_max'), { target: { value: '5' } });
   fireEvent.change(input('cop_dhw'), { target: { value: '3.1' } });
   await waitFor(() => expect(onChange.mock.lastCall?.[0].extra_json.HotWaterSource['hw cylinder'].HeatSource['HP/one.~'].test_data.M.cop_dhw).toBe(3.1));

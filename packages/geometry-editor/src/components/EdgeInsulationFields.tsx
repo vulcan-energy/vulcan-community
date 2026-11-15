@@ -83,6 +83,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
             step="any"
             size="md"
             variant="ghost"
+            placeholder={existing ? 'Default: 25 mm mineral wool' : undefined}
             value={form[type].edgeThermalResistance}
             onChange={(e) => apply({ ...form, [type]: { ...form[type], edgeThermalResistance: e.target.value } })}
           />
@@ -95,6 +96,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
             step="any"
             size="md"
             variant="ghost"
+            placeholder={existing && type === 'vertical' ? 'Default: 0.26 m' : undefined}
             value={form[type].widthOrDepth}
             onChange={(e) => apply({ ...form, [type]: { ...form[type], widthOrDepth: e.target.value } })}
           />
@@ -110,7 +112,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
       </div>
       {existing && (
         <p style={{ margin: ROW_MARGIN(compact), fontSize: 12, color: 'var(--text-secondary)' }}>
-          Details not known? Leave these blank: the default edge insulation applies. A blank resistance or vertical depth takes its default; the horizontal width has none.
+          Leave blank for the default: vertical, 0.26 m deep, 25 mm mineral wool. Horizontal edge insulation has no default width.
         </p>
       )}
       {segment('horizontal')}

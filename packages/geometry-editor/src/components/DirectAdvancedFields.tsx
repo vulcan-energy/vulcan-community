@@ -693,7 +693,7 @@ function renderControlForProperty(args: {
     config: {
       ...config, systemSamplePathSegments: segments,
       ...(elementType === 'System' ? { validateValue: (next: unknown) => {
-        if (next === undefined || next === null || next === '') return required ? { valid: false, errors: ['is a required property'] } : { valid: true };
+        if (next === undefined || next === null || next === '') return required ? { valid: false, errors: ['Required, no default'] } : { valid: true };
         return validateValueAgainstPropertyNode(schema, resolved, elementType, leafKey, next);
       } } : {}),
     } as DirectControlProps['config'],
@@ -830,7 +830,7 @@ function renderControlForProperty(args: {
     // integer+oneOf ones like `ecodesign_control_class`) — a deliberate R4.3b
     // improvement, since those fields rendered via BooleanControl/TextControl on the
     // retired JsonForms path and neither ever surfaced a required error.
-    errors = 'is a required property';
+    errors = 'Required, no default';
   }
   const controlProps = { ...baseProps, errors };
 

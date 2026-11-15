@@ -1727,13 +1727,24 @@ impl JSONBuilder {
         });
     }
 
-    /// Prefix each error on a built wet emitter or PV system with the CSV row it came from.
+    /// Prefix each error on a built wet emitter or PV system with the CSV row it came from, in
+    /// place of a prefix that names the system alone.
     pub fn name_csv_rows(&self, errors: &mut [ValidationError]) {
         for error in errors {
-            if let Some((_, row)) = self.csv_rows.borrow().iter().find(|(path, _)| {
+            if let Some((path, row)) = self.csv_rows.borrow().iter().find(|(path, _)| {
                 error.path == *path || error.path.starts_with(&format!("{path}/"))
             }) {
-                error.message = format!("{row}: {}", error.message);
+                let name = path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .replace("~1", "/")
+                    .replace("~0", "~");
+                let message = error
+                    .message
+                    .strip_prefix(&format!("{name}: "))
+                    .unwrap_or(&error.message);
+                error.message = format!("{row}: {message}");
             }
         }
     }
@@ -5990,7 +6001,7 @@ impl JSONBuilder {
                 };
                 self.csv_rows.borrow_mut().push((
                     crate::json_pointer(&["OnSiteGeneration", model_name]),
-                    format!("On-Site Generation row '{element_name}'"),
+                    format!("On-Site Generation '{element_name}'"),
                 ));
                 if should_merge_into_default {
                     // The row replaces the template entry: `pv_system` was seeded from the same
