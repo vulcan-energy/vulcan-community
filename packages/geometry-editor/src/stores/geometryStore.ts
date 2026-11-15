@@ -4372,7 +4372,8 @@ const createGeometryState = (
         floorGroups.get(z)!.push(w);
       }
 
-      const updated = { ...state.elementsById };
+      // A new record per write: snapUtils indexes a record on first query, so it must not change after.
+      let updated = { ...state.elementsById };
       let changed = false;
 
       for (const [, group] of floorGroups.entries()) {
@@ -4506,11 +4507,11 @@ const createGeometryState = (
 
             // Only apply if resulting length is valid
             if (newLenA >= 0.001) {
-              updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+              updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
               changed = true;
             }
             if (newLenB >= 0.001) {
-              updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+              updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
               changed = true;
             }
           }
@@ -4600,7 +4601,7 @@ const createGeometryState = (
                 newA2 = { x: inter.x, y: inter.y, z: a2.z } as any;
                 const newLen = Math.hypot(newA2.x - newA1.x, newA2.y - newA1.y);
                 if (newLen >= 0.001) {
-                  updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               } else if (lenA2 > lenA1) {
@@ -4608,7 +4609,7 @@ const createGeometryState = (
                 newA1 = { x: inter.x, y: inter.y, z: a1.z } as any;
                 const newLen = Math.hypot(newA2.x - newA1.x, newA2.y - newA1.y);
                 if (newLen >= 0.001) {
-                  updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
@@ -4625,7 +4626,7 @@ const createGeometryState = (
                 newB2 = { x: inter.x, y: inter.y, z: b2.z } as any;
                 const newLen = Math.hypot(newB2.x - newB1.x, newB2.y - newB1.y);
                 if (newLen >= 0.001) {
-                  updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               } else if (lenB2 > lenB1) {
@@ -4633,7 +4634,7 @@ const createGeometryState = (
                 newB1 = { x: inter.x, y: inter.y, z: b1.z } as any;
                 const newLen = Math.hypot(newB2.x - newB1.x, newB2.y - newB1.y);
                 if (newLen >= 0.001) {
-                  updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
@@ -4690,7 +4691,7 @@ const createGeometryState = (
                 }
 
                 if (aChanged) {
-                  updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
@@ -4730,7 +4731,7 @@ const createGeometryState = (
                 }
 
                 if (bChanged) {
-                  updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }

@@ -1594,6 +1594,7 @@ const vertexXIndex = new WeakMap<Record<string, Element>, { ids: string[]; byBuc
  * `Object.keys(elementsById)` order. {@link pointsConnected} needs that much in x (and keeps the
  * stored x, as {@link networkPoint3} does), so a scan over these finds what a scan over every element
  * finds. The index is built once per element record: canvas indicators query every vertex.
+ * The record must not be mutated after a query; write a new record instead.
  */
 function idsWithVertexNearX(elementsById: Record<string, Element>, x: number): string[] {
   let index = vertexXIndex.get(elementsById);
