@@ -471,7 +471,7 @@ const WINDOW_PART_TABLE_COPY = {
   rowLabel: 'Part',
   removeLabel: 'window part',
   empty: 'Add the window’s openings before calculating.',
-  addLabel: 'Add opening',
+  addLabel: 'Add openable part',
 };
 
 const TANK_CONTROL_TABLE_COPY = {
@@ -578,7 +578,7 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
     : null;
   return <div style={{ fontSize: 12 }}>
     {status && <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>}
-    {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add opening</button>}
+    {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add openable part</button>}
   </div>;
 }
 
@@ -744,6 +744,29 @@ function renderControlForProperty(args: {
     }
     return (
       <WindowPartListControl key={path} {...baseProps} errors="" />
+    );
+  }
+
+  // A stopped fan's leakage is an object of two choices: one dropdown each, not a text box over JSON.
+  if (leafKey === 'leakage_when_stopped' && isRecord(resolved.properties)) {
+    const parts = readRecord(resolved.properties);
+    const stated = isRecord(value) ? value : {};
+    const requiredParts = Array.isArray(resolved.required) ? resolved.required : [];
+    return (
+      <React.Fragment key={path}>
+        {Object.keys(parts).map((part) => {
+          const partResolved = unwrapNullableSchema(readRecord(dereferenceSchemaNodeInRoot(parts[part], schema)));
+          return renderControlForProperty({
+            ...args,
+            segments: [...segments, part],
+            resolved: partResolved,
+            value: stated[part],
+            label: labelForProperty(part, partResolved, elementType),
+            scope: `${scope}/properties/${part}`,
+            required: required && requiredParts.includes(part),
+          });
+        })}
+      </React.Fragment>
     );
   }
 

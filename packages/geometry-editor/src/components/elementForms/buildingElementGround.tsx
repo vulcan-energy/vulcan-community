@@ -923,8 +923,8 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
             }}
             options={[
               { value: 'Heated_basement', label: 'Heated Basement' },
-              { value: 'Slab_no_edge_insulation', label: 'Slab No Edge Insulation' },
-              { value: 'Slab_edge_insulation', label: 'Slab Edge Insulation' },
+              { value: 'Slab_no_edge_insulation', label: 'Ground floor, no edge insulation' },
+              { value: 'Slab_edge_insulation', label: 'Ground floor, edge insulated' },
               { value: 'Suspended_floor', label: 'Suspended Floor' },
               { value: 'Unheated_basement', label: 'Unheated Basement' }
             ]}
@@ -948,7 +948,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
         </div>
           </>
         )}
-        {renderFieldLabel('Thickness Walls (m):', elementType)}
+        {renderFieldLabel('Wall thickness (m):', elementType)}
         <div
           className="element-input"
           ref={registerBaseFieldRefs(['thicknessWalls', 'thickness_walls'])}

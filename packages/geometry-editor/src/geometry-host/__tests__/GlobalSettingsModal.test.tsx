@@ -110,7 +110,7 @@ describe("GlobalSettingsModal target-required rows", () => {
     for (const label of epcOnly) expect(screen.getByLabelText(label)).toHaveValue("");
     // Required booleans with no default are choices, never an unticked box that reads as "no".
     expect(screen.getByLabelText("Noise nuisance")).toHaveValue("");
-    expect(screen.getByLabelText("Part G Compliance")).toHaveValue("TRUE");
+    expect(screen.getByLabelText("Part G compliance")).toHaveValue("TRUE");
     await user.selectOptions(screen.getByLabelText("Electricity smart meter"), "No");
     await user.selectOptions(screen.getByLabelText("Cross ventilation possible"), "Yes");
     expect(store.getState().complianceSettings).toMatchObject({ HasElectricitySmartMeter: false, Ventilation_cross_vent_possible: true });

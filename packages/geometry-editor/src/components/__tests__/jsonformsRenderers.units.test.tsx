@@ -187,7 +187,7 @@ describe('advanced numeric field presentations', () => {
       { openRuCalculator: vi.fn() },
     ],
     [
-      'Calc U',
+      'Calculate U-value',
       'u_value',
       'BuildingElementGround',
       { openGroundUCalculator: vi.fn() },

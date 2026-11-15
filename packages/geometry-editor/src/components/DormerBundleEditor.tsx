@@ -703,6 +703,7 @@ export function useDormerBundleEditor(args: {
           elementType={elementType}
           zoneId={elementZoneId}
           placeholder="Select the sloped roof hosting this dormer"
+          only={(parent) => parent.type === 'BuildingElementOpaque' && typeof parent.pitch === 'number' && parent.pitch > 0 && parent.pitch < 90}
           selfId={selection.type === 'element' ? selection.id : undefined}
         />
         <div style={INLINE_FIELD_NOTE_STYLE}>
@@ -847,22 +848,17 @@ export function useDormerBundleEditor(args: {
       </div>
       {existingBuilding && (
         <>
-          <div className="element-input">
-            <label className="checkbox-container" htmlFor="dormer-side-windows">
-              <input
-                type="checkbox"
-                className="styled-checkbox"
-                checked={dormerSideWindows}
-                onChange={(e) => {
-                  setDormerSideWindows(e.target.checked);
-                  commitDormerAnchorChanges({ parameters: { sideWindows: e.target.checked } });
-                }}
-                id="dormer-side-windows"
-              />
-              <span className="checkbox-custom"></span>
-              Same window in both side walls
-            </label>
-          </div>
+          <StandardDropdown
+            label="Side windows"
+            value={dormerSideWindows ? 'yes' : 'no'}
+            onChange={(value) => {
+              setDormerSideWindows(value === 'yes');
+              commitDormerAnchorChanges({ parameters: { sideWindows: value === 'yes' } });
+            }}
+            options={[{ value: 'yes', label: 'Yes, the same window in both side walls' }, { value: 'no', label: 'No' }]}
+            variant="ghost"
+            size="md"
+          />
           {dormerError && <p className="hem-target-help" role="alert">{dormerError}</p>}
         </>
       )}

@@ -37,7 +37,7 @@ const BAY_FIELDS: Field<BayParameters>[] = [
   { key: 'centre', label: 'Opening centre from wall start', kind: 'number', unit: 'm' },
   { key: 'openingWidth', label: 'Opening width', kind: 'number', unit: 'm' },
   { key: 'depth', label: 'Projection', kind: 'number', unit: 'm' },
-  { key: 'frontWidth', label: 'Front width (b)', kind: 'number', unit: 'm' },
+  { key: 'frontWidth', label: 'Front width', kind: 'number', unit: 'm' },
   { key: 'wallHeight', label: 'Bay wall height', kind: 'number', unit: 'm', optional: true },
   { key: 'roof', label: 'Roof', kind: 'choice', options: [{ value: 'flat', label: 'Flat' }, { value: 'pitched', label: 'Pitched' }, { value: 'none', label: 'None (a bay above)' }] },
   { key: 'sideWindows', label: 'Side windows', kind: 'choice', options: [{ value: 'true', label: 'Yes' }, { value: 'false', label: 'No' }] },

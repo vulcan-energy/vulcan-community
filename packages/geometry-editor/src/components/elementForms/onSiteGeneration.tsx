@@ -524,7 +524,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                 min="1"
                 step="1"
                 value={typeof pvExtra.panel_count === 'number' ? String(pvExtra.panel_count) : ''}
-                placeholder={`Drawn: ${onSiteWidthInput.value ?? '?'} × ${onSiteHeightInput.value ?? '?'} m`}
+                placeholder="From the drawn area"
                 onChange={(e) => {
                   const count = Number.parseInt(e.target.value, 10);
                   patchPvExtra('panel_count', Number.isFinite(count) && count > 0 ? count : undefined);

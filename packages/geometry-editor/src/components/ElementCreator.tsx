@@ -5457,7 +5457,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           systemFormState.pendingSystemAction?.kind === 'source'
             ? (systemFormState.pendingSystemAction.target === 'pcdb' ? 'Switch to PCDB?' : 'Switch to Sample?')
             : systemFormState.pendingSystemAction?.kind === 'type'
-              ? 'Change system type?'
+              ? systemFormState.pendingSystemAction.question
             : systemFormState.pendingSystemAction?.kind === 'subcategory'
               ? 'Change system category?'
               : systemFormState.pendingSystemAction?.value?.trim()
@@ -5472,7 +5472,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 : 'This removes the PCDB selection and any merged heating or cooling JSON, then loads the first preset for the selected category. Continue?'
             )
             : systemFormState.pendingSystemAction?.kind === 'type'
-              ? 'This clears the other inputs of this system. Continue?'
+              ? 'This clears its other inputs. Continue?'
             : systemFormState.pendingSystemAction?.kind === 'subcategory'
               ? 'This clears the current system preset and any merged heating or cooling JSON on this system row. Continue?'
               : systemFormState.pendingSystemAction?.value?.trim()

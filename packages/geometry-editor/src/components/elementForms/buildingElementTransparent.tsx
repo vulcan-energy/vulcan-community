@@ -846,13 +846,13 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                       )}
                       {sections.length > 1 && (
                         <button type="button" className="btn btn-small btn-secondary" onClick={() => save(sections.filter((_, i) => i !== index))}>
-                          Remove section {index + 1}
+                          Remove glazing section {index + 1}
                         </button>
                       )}
                     </div>
                   ))}
                   <button type="button" className="btn btn-small btn-secondary" onClick={() => save([...sections, { windowType: '' }])}>
-                    Add section
+                    Add glazing section
                   </button>
                 </div>
               );

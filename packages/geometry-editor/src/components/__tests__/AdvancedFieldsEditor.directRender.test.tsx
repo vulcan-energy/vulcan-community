@@ -967,10 +967,10 @@ function sweepRenderedRows(): {
 const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/BuildingElementOpaque [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
-    'solar_absorption_coeff | Solar Absorption Coeff | textbox | 0 | 1 | - | tip',
+    'thermal_resistance_construction | Construction thermal resistance | textbox | 0 | - | - | tip',
+    'solar_absorption_coeff | Solar absorption coefficient | textbox | 0 | 1 | - | tip',
   ],
   'core/BuildingElementTransparent [every subtype]': [
     'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
@@ -980,7 +980,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/BuildingElementGround [- Exposed_floor Heated_basement ceiling door fancoil floor radiator roof ufh wall]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
@@ -988,7 +988,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/BuildingElementGround [Slab_no_edge_insulation]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
@@ -996,14 +996,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/BuildingElementGround [Slab_edge_insulation]': [
     'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
   ],
   'core/BuildingElementGround [Suspended_floor]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
@@ -1015,7 +1015,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/BuildingElementGround [Unheated_basement]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
@@ -1026,20 +1026,20 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/BuildingElementAdjacentConditionedSpace [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Construction thermal resistance | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0 | - | - | tip',
+    'thermal_resistance_construction | Construction thermal resistance | textbox | 0 | - | - | tip',
     'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementPartyWall [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'core/MechanicalVentilationDuctwork [every subtype]': [
     'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
@@ -1109,7 +1109,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/OnSiteGeneration [every subtype]': [
     'EnergySupply | Energy Supply | textbox | - | - | - | tip',
-    'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
+    'inverter_is_inside | Inverter inside the thermal envelope | checkbox | - | - | - | tip',
     'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
     'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
     'inverter_type | Inverter Type | select | - | - | - | tip',
@@ -1125,10 +1125,10 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'boiler_location | boiler · Boiler Location | select | - | - | - | tip',
     'efficiency_full_load | boiler · Efficiency Full Load | textbox | 0 | 1 | - | tip',
     'efficiency_part_load | boiler · Efficiency Part Load | textbox | 0 | 1.12 | - | tip',
-    'electricity_circ_pump | boiler · Electricity Circ Pump | textbox | 0 | - | - | tip',
+    'electricity_circ_pump | boiler · Circulation pump power | textbox | 0 | - | - | tip',
     'electricity_full_load | boiler · Electricity Full Load | textbox | 0 | - | - | tip',
     'electricity_part_load | boiler · Electricity Part Load | textbox | 0 | - | - | tip',
-    'electricity_standby | boiler · Electricity Standby | textbox | 0 | - | - | tip',
+    'electricity_standby | boiler · Standby power | textbox | 0 | - | - | tip',
     'EnergySupply | boiler · Energy Supply | textbox | - | - | - | tip',
     'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | - | tip',
     'modulation_load | boiler · Modulation Load | textbox | 0 | 1 | - | tip',
@@ -1211,20 +1211,20 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | -273.15 | - | - | tip',
     'min_flow_temp | Ecodesign Controller · Min Flow Temp | textbox | 0 | - | - | tip',
     'min_outdoor_temp | Ecodesign Controller · Min Outdoor Temp | textbox | -273.15 | - | - | tip',
-    'temp_flow_limit_upper | Temp Flow Limit Upper | textbox | 0 | - | - | tip',
+    'temp_flow_limit_upper | Upper flow temperature limit | textbox | 0 | - | - | tip',
     'max_flow_rate | Max Flow Rate | textbox | 0 | - | - | tip',
     'min_flow_rate | Min Flow Rate | textbox | 0 | - | - | tip',
     'pipework | Pipework | textbox | - | - | [{"external_diameter_mm":1,"insulation_thermal_conductivity":1,"insulation_thickness_mm":0,"internal_diameter_mm":1,"length":1,"location":"internal","pipe_contents":"water","surface_reflectivity":false}] | no-tip',
-    'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | - | - | tip',
+    'temp_diff_emit_dsgn | Design temperature drop | textbox | 0 | - | - | tip',
     'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
     'variable_flow | Variable Flow | checkbox | - | - | - | tip',
   ],
   'fhs/BuildingElementOpaque [every subtype]': [
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'colour | Colour | select | - | - | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementTransparent [every subtype]': [
     'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
@@ -1238,7 +1238,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Slab_edge_insulation]': [
     'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
@@ -1246,14 +1246,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Suspended_floor]': [
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'height_upper_surface | Height Upper Surface | textbox | 0 | 100 | - | tip',
     'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | 100 | - | tip',
     'area_per_perimeter_vent | Area Per Perimeter Vent | textbox | - | - | - | tip',
@@ -1265,7 +1265,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Unheated_basement]': [
@@ -1273,28 +1273,28 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | - | - | - | tip',
     'thermal_transm_envi_base | Thermal Transm Envi Base | textbox | - | - | - | tip',
     'thermal_transm_walls | Thermal Transm Walls | textbox | - | - | - | tip',
     'height_basement_walls | Height Basement Walls | textbox | - | - | - | tip',
   ],
   'fhs/BuildingElementAdjacentConditionedSpace [every subtype]': [
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
-    'thermal_resistance_construction | Thermal Resistance Construction | textbox | 0.01 | 50 | - | tip',
+    'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | 3 | - | tip',
   ],
   'fhs/BuildingElementPartyWall [every subtype]': [
     'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
-    'mass_distribution_class | Mass Distribution Class | select | - | - | - | tip',
+    'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/MechanicalVentilationDuctwork [every subtype]': [
     'cross_section_shape | Cross Section Shape | select | - | - | - | tip',
@@ -1353,7 +1353,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'shading | Shading | textbox | - | - | [{"type":null,"distance":0}] | tip',
     'inverter_peak_power_dc | Inverter Peak Power DC | textbox | 0 | - | - | tip',
     'inverter_peak_power_ac | Inverter Peak Power AC | textbox | 0 | - | - | tip',
-    'inverter_is_inside | Inverter Is Inside | checkbox | - | - | - | tip',
+    'inverter_is_inside | Inverter inside the thermal envelope | checkbox | - | - | - | tip',
     'inverter_type | Inverter Type | select | - | - | - | tip',
   ],
   'fhs/ElectricBattery [every subtype]': [
@@ -1365,10 +1365,10 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'boiler_location | boiler · Boiler Location | select | - | - | - | tip',
     'efficiency_full_load | boiler · Efficiency Full Load | textbox | 0.1 | 1 | - | tip',
     'efficiency_part_load | boiler · Efficiency Part Load | textbox | 0.1 | 1.12 | - | tip',
-    'electricity_circ_pump | boiler · Electricity Circ Pump | textbox | 0.001 | 1 | - | tip',
+    'electricity_circ_pump | boiler · Circulation pump power | textbox | 0.001 | 1 | - | tip',
     'electricity_full_load | boiler · Electricity Full Load | textbox | 0 | 1 | - | tip',
     'electricity_part_load | boiler · Electricity Part Load | textbox | 0 | 1 | - | tip',
-    'electricity_standby | boiler · Electricity Standby | textbox | 0 | 0.1 | - | tip',
+    'electricity_standby | boiler · Standby power | textbox | 0 | 0.1 | - | tip',
     'EnergySupply | boiler · Energy Supply | textbox | - | - | - | tip',
     'EnergySupply_aux | boiler · Energy Supply Aux | textbox | - | - | - | no-tip',
     'is_heat_network | boiler · Is Heat Network | checkbox | - | - | - | tip',
@@ -1441,8 +1441,8 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | 10 | 50 | - | tip',
     'min_flow_temp | Ecodesign Controller · Min Flow Temp | textbox | 20 | 120 | - | tip',
     'min_outdoor_temp | Ecodesign Controller · Min Outdoor Temp | textbox | -60 | 30 | - | tip',
-    'temp_flow_limit_upper | Temp Flow Limit Upper | textbox | 0 | - | - | tip',
-    'temp_diff_emit_dsgn | Temp Diff Emit Dsgn | textbox | 0 | 70 | - | tip',
+    'temp_flow_limit_upper | Upper flow temperature limit | textbox | 0 | - | - | tip',
+    'temp_diff_emit_dsgn | Design temperature drop | textbox | 0 | 70 | - | tip',
     'variable_flow | Variable Flow | checkbox | - | - | - | no-tip',
   ],
 };
@@ -1524,7 +1524,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       },
       [
         row('areal_heat_capacity', 'Areal Heat Capacity', TEXT('0', '0')),
-        row('mass_distribution_class', 'Mass Distribution Class', SELECT),
+        row('mass_distribution_class', 'Mass distribution', SELECT),
         // R4.6a CHARACTERIZATION CHANGE (both rows): was TEXT(null) -- a bare
         // TextControl with no numeric attributes at all. Core declares both of these
         // as `anyOf:[{type:'number', exclusiveMinimum:0},{type:'null'}]`, a nullable
@@ -1540,8 +1540,8 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         // which declares the same fields as plain `{type:'number'}`, has always
         // rendered them (see this test's own FHS half below, TEXT('0.01')).
         row('u_value', 'U-Value', TEXT('0', '0')),
-        row('thermal_resistance_construction', 'Thermal Resistance Construction', TEXT('0', '0')),
-        row('solar_absorption_coeff', 'Solar Absorption Coeff', TEXT('0')),
+        row('thermal_resistance_construction', 'Construction thermal resistance', TEXT('0', '0')),
+        row('solar_absorption_coeff', 'Solar absorption coefficient', TEXT('0')),
       ],
     );
 
@@ -1613,11 +1613,11 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         },
       },
       [
-        row('thermal_resistance_construction', 'Thermal Resistance Construction', TEXT('0.01')),
+        row('thermal_resistance_construction', 'Construction thermal resistance', TEXT('0.01')),
         row('u_value', 'U-Value', TEXT('0.01')),
         row('colour', 'Colour', SELECT),
         row('areal_heat_capacity', 'Areal Heat Capacity', SELECT),
-        row('mass_distribution_class', 'Mass Distribution Class', SELECT),
+        row('mass_distribution_class', 'Mass distribution', SELECT),
       ],
     );
   });
@@ -2047,6 +2047,32 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(fieldLabelText(roofRow)).toBe('Is Unheated Pitched Roof');
   });
 
+  it('renders a stopped fan\'s leakage as one dropdown per part, not as JSON text', () => {
+    const leakage = {
+      type: 'object',
+      properties: {
+        back_draught_protection: { type: 'string', enum: ['internal damper', 'external terminal', 'none'] },
+        diameter: { type: 'number', enum: [100, 150] },
+      },
+    };
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const { container } = render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+        <GeometryStoreProvider store={store}>
+          <DirectAdvancedFields
+            schema={{ type: 'object', properties: { leakage_when_stopped: leakage } }}
+            data={{ leakage_when_stopped: { back_draught_protection: 'none', diameter: 100 } }}
+            config={{ advancedEditor: true, elementType: 'MechanicalVentilation' }}
+            onDataChange={vi.fn()}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    expect(container.textContent).not.toContain('{"');
+    expect(fieldLabelText(fieldRow(container, 'back_draught_protection'))).toBe('Back Draught Protection');
+    expect(fieldRow(container, 'diameter')).toBeTruthy();
+  });
+
   it('config 6 -- WetEmitter, radiator, FHS: per_metre and lumped thermal-mode pruning direct-render characterization', () => {
     assertDirectCharacterization(
       {
@@ -2114,7 +2140,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       { elementType: 'OnSiteGeneration', useFHSSchema: false, extraJson: {} },
       [
         row('EnergySupply', 'Energy Supply', TEXT(null)),
-        row('inverter_is_inside', 'Inverter Is Inside', CHECKBOX),
+        row('inverter_is_inside', 'Inverter inside the thermal envelope', CHECKBOX),
         row('inverter_peak_power_ac', 'Inverter Peak Power AC', TEXT('0', '0')),
         row('inverter_peak_power_dc', 'Inverter Peak Power DC', TEXT('0', '0')),
         row('inverter_type', 'Inverter Type', SELECT),
@@ -2144,7 +2170,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('shading', 'Shading', TEXT(null)),
         row('inverter_peak_power_dc', 'Inverter Peak Power DC', TEXT('0', '0')),
         row('inverter_peak_power_ac', 'Inverter Peak Power AC', TEXT('0', '0')),
-        row('inverter_is_inside', 'Inverter Is Inside', CHECKBOX),
+        row('inverter_is_inside', 'Inverter inside the thermal envelope', CHECKBOX),
         row('inverter_type', 'Inverter Type', SELECT),
       ],
     );
@@ -2199,10 +2225,10 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       row('max_outdoor_temp', 'Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
       row('min_flow_temp', 'Ecodesign Controller · Min Flow Temp', TEXT('20')),
       row('min_outdoor_temp', 'Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
-      row('temp_flow_limit_upper', 'Temp Flow Limit Upper', TEXT('0', '0')),
+      row('temp_flow_limit_upper', 'Upper flow temperature limit', TEXT('0', '0')),
       row('max_flow_rate', 'Max Flow Rate', TEXT('0', '0')),
       row('min_flow_rate', 'Min Flow Rate', TEXT('0', '0')),
-      row('temp_diff_emit_dsgn', 'Temp Diff Emit Dsgn', TEXT('0', '0')),
+      row('temp_diff_emit_dsgn', 'Design temperature drop', TEXT('0', '0')),
       row('variable_flow', 'Variable Flow', CHECKBOX),
     ];
 
@@ -2304,18 +2330,18 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       },
       [
         row('frac_convective', 'Living warm air · Frac Convective', TEXT('0.1')),
-        row('temp_flow_limit_upper', 'Living warm air · Temp Flow Limit Upper', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Living warm air · Temp Diff Emit Dsgn', TEXT(null)),
+        row('temp_flow_limit_upper', 'Living warm air · Upper flow temperature limit', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Living warm air · Design temperature drop', TEXT(null)),
         row('bypass_fraction_recirculated', 'Zone 1 circuit · Bypass Fraction Recirculated', TEXT('0')),
         row('design_flow_temp', 'Zone 1 circuit · Design Flow Temp', TEXT('20')),
         row('ecodesign_control_class', 'Zone 1 circuit · Ecodesign Controller · Ecodesign Control Class', SELECT),
         row('max_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
         row('min_flow_temp', 'Zone 1 circuit · Ecodesign Controller · Min Flow Temp', TEXT('20')),
         row('min_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
-        row('temp_flow_limit_upper', 'Zone 1 circuit · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('temp_flow_limit_upper', 'Zone 1 circuit · Upper flow temperature limit', TEXT('0', '0')),
         row('max_flow_rate', 'Zone 1 circuit · Max Flow Rate', TEXT('0', '0')),
         row('min_flow_rate', 'Zone 1 circuit · Min Flow Rate', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Zone 1 circuit · Temp Diff Emit Dsgn', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Zone 1 circuit · Design temperature drop', TEXT('0', '0')),
         row('variable_flow', 'Zone 1 circuit · Variable Flow', CHECKBOX),
       ],
     );
@@ -2372,14 +2398,14 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('max_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
         row('min_flow_temp', 'Kitchen/Diner rads · Ecodesign Controller · Min Flow Temp', TEXT('20')),
         row('min_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
-        row('temp_flow_limit_upper', 'Kitchen/Diner rads · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('temp_flow_limit_upper', 'Kitchen/Diner rads · Upper flow temperature limit', TEXT('0', '0')),
         row('max_flow_rate', 'Kitchen/Diner rads · Max Flow Rate', TEXT('0', '0')),
         row('min_flow_rate', 'Kitchen/Diner rads · Min Flow Rate', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Kitchen/Diner rads · Temp Diff Emit Dsgn', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Kitchen/Diner rads · Design temperature drop', TEXT('0', '0')),
         row('variable_flow', 'Kitchen/Diner rads · Variable Flow', CHECKBOX),
         row('frac_convective', 'Zone 1.5 circuit · Frac Convective', TEXT('0.1')),
-        row('temp_flow_limit_upper', 'Zone 1.5 circuit · Temp Flow Limit Upper', TEXT('0', '0')),
-        row('temp_diff_emit_dsgn', 'Zone 1.5 circuit · Temp Diff Emit Dsgn', TEXT(null)),
+        row('temp_flow_limit_upper', 'Zone 1.5 circuit · Upper flow temperature limit', TEXT('0', '0')),
+        row('temp_diff_emit_dsgn', 'Zone 1.5 circuit · Design temperature drop', TEXT(null)),
       ],
     );
 
@@ -2480,10 +2506,10 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       },
       [
         row('ColdWaterSource', 'Cold Water Source', SELECT),
-        row('daily_losses', 'Daily Losses', TEXT('0.001')),
+        row('daily_losses', 'Standing heat loss', TEXT('0.001')),
         row('heater_position', 'hp · Heater Position', TEXT('0')),
         row('name', 'hp · Name', TEXT(null)),
-        row('temp_flow_limit_upper', 'hp · Temp Flow Limit Upper', TEXT('0', '0')),
+        row('temp_flow_limit_upper', 'hp · Upper flow temperature limit', TEXT('0', '0')),
         row('thermostat_position', 'hp · Thermostat Position', TEXT('0')),
         row('init_temp', 'Init Temp', TEXT('1')),
         row('volume', 'Volume', TEXT('1')),
@@ -3367,7 +3393,7 @@ describe('EPC system pickers and defaults', () => {
     const curve = (out.properties.ecodesign_controller.properties as Record<string, Record<string, unknown>>).weather_compensation_curve_id;
     expect(curve.oneOf).toEqual([{ const: 5, title: 'Curve 5 (gradient 1.2)' }]);
     expect(curve.description).toContain('heat pump with radiators: curve 5');
-    expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'mains elec' }, { const: 'LPG bulk', title: 'LPG bulk' }]);
+    expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }, { const: 'LPG bulk', title: 'LPG, bulk' }]);
     expect(out.properties.EnergySupply_heat_network).toBeUndefined();
   });
 

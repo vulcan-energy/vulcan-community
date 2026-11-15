@@ -249,7 +249,7 @@ describe('review findings: write-path faults', () => {
 
 describe('review findings: bulk edit and copy on a8/a9', () => {
   it.each([
-    ['table after Add opening', withList([part(1), {}])],
+    ['table after Add openable part', withList([part(1), {}])],
     ['empty list with stale columns', withList([])],
     ['malformed list', withList('x')],
     ['incomplete single part', withList([{ free_area_height: 1 }])],

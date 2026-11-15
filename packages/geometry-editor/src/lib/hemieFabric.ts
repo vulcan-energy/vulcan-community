@@ -42,6 +42,12 @@ export function postcodeOutsideArea(postcode: string | undefined): string | unde
   return area && OUTSIDE_AREAS.has(area) ? area : undefined;
 }
 
+/** True for a well-formed postcode whose area is in none of the EPC schemes' nations or outside areas. */
+export function postcodeUnrecognised(postcode: string | undefined): boolean {
+  const area = postcodeArea(postcode);
+  return !!area && !OUTSIDE_AREAS.has(area) && !BORDER_AREAS.has(area) && postcodeRegion(postcode) === undefined;
+}
+
 /**
  * The region the converter takes (`region` in `hemie.rs`): derived from the postcode area, or in
  * a border area the stated nation; undefined when neither gives one.
@@ -62,13 +68,13 @@ export function postcodeRegion(postcode: string | undefined, statedNation?: stri
 export const FABRIC_PRESET_TYPES: ReadonlySet<string> = new Set(['BuildingElementOpaque', 'BuildingElementTransparent']);
 
 /**
- * Rows older files carry that the converter no longer reads (`RETIRED_SETTINGS` in `hemie.rs`):
+ * Settings older files carry that the converter no longer reads (`RETIRED_SETTINGS` in `hemie.rs`):
  * a load drops each one and says what to do instead.
  */
 export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
-  HEMIE_region: 'the region now comes from the postcode. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details.',
-  HEMIE_front_door: 'mark the front door on the door itself.',
-  HEMIE_infiltration_properties: 'an existing building needs an air test. Enter the air test result in Global Settings.',
+  HEMIE_region: 'The region setting was removed: it now comes from the postcode. For a postcode area that spans two nations, choose the Nation next to the Postcode in Global Settings.',
+  HEMIE_front_door: 'The front door setting was removed: mark the front door on the door itself.',
+  HEMIE_infiltration_properties: 'The infiltration setting was removed: an existing building needs an air test. Enter the air test result in Global Settings.',
 };
 
 const HEAT_CAPACITY_BANDS = ['Very light', 'Light', 'Medium', 'Heavy', 'Very heavy'] as const;
@@ -155,7 +161,11 @@ const FLAT_ROOF_LOCATIONS: Readonly<Record<string, string>> = { at_joists: 'At j
 const words = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, ' ');
 
 /** "External wall": a construction type as people read it. */
-export const hemieConstructionTypeLabel = words;
+const CONSTRUCTION_TYPE_LABELS: Readonly<Record<string, string>> = {
+  not_edge_insulated_ground_attached_floor: 'Ground floor, no edge insulation',
+  edge_insulated_ground_attached_floor: 'Ground floor, edge insulated',
+};
+export const hemieConstructionTypeLabel = (type: string): string => CONSTRUCTION_TYPE_LABELS[type] ?? words(type);
 
 /** "Glazing gap (mm)": a construction field with its unit. */
 export function hemieFieldLabel(field: string): string {
