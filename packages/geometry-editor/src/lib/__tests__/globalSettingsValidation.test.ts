@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element, Floor, Zone } from '../../geometry/types';
-import { collectGlobalSettingsWarnings } from '../globalSettingsValidation';
+import { collectGlobalSettingsWarnings, unsetMetadataInputIssues } from '../globalSettingsValidation';
 
 const groundFloorElement = {
   id: 'ground',
@@ -353,5 +353,21 @@ describe('collectGlobalSettingsWarnings', () => {
     expect(warnings).toContain(
       'Ventilation zone base height cannot be checked because basement ground-floor depth/height is missing.',
     );
+  });
+});
+
+describe('smart meter GUID issues', () => {
+  const state = (settings: Record<string, unknown>) => ({
+    zones: [], elementsById: {}, spaceLabelsById: {}, spaceLabelIds: [], floors: [], elements: [], complianceSettings: settings,
+  }) as unknown as Parameters<typeof unsetMetadataInputIssues>[0];
+  const guid = (settings: Record<string, unknown>, root: unknown) =>
+    unsetMetadataInputIssues(state(settings), root, {}, { requiredMetadataRows: ['HasElectricitySmartMeter'], storeyBuildTypes: [] })
+      .filter((issue) => issue.includes('Smart meter GUID'));
+
+  it('asks for the GUID only with a smart meter, whether or not the target schema has loaded', () => {
+    for (const root of [null, undefined, { properties: { ElectricitySmartMeterGUID: { type: 'string' } } }]) {
+      expect(guid({ HasElectricitySmartMeter: false }, root)).toEqual([]);
+      expect(guid({ HasElectricitySmartMeter: true }, root)).toEqual(['Global Settings: Smart meter GUID is not set. Enter it in Global Settings.']);
+    }
   });
 });

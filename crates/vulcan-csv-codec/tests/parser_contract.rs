@@ -56,3 +56,18 @@ fn non_finite_and_out_of_range_numbers_are_not_coerced() {
     assert_eq!(values[3], "Infinity");
     assert_eq!(values[4], 1e300);
 }
+
+#[test]
+fn a_metadata_digit_string_a_number_cannot_hold_exactly_stays_text() {
+    let parsed = CSVParser::new()
+        .parse_csv(
+            "Metadata,,\nA,0012345678901234\nB,1234567890123456\nC,98765432109876543\nD,0\nE,0.5\n",
+        )
+        .expect("CSV should parse");
+    let values: Vec<_> = parsed["Metadata"].iter().map(|row| &row["Value"]).collect();
+    assert_eq!(values[0], "0012345678901234");
+    assert_eq!(values[1], 1234567890123456_i64);
+    assert_eq!(values[2], "98765432109876543");
+    assert_eq!(values[3], 0);
+    assert_eq!(values[4], 0.5);
+}

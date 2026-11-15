@@ -1207,6 +1207,9 @@ pub(crate) fn derive_zone_frac_convective_cooling(
             .map(|name| systems[name]["frac_convective"].as_f64())
             .collect();
         let message = match found.iter().position(Option::is_none) {
+            // A meta system takes no convective fraction (`SpaceCoolSystemMeta`), and neither
+            // HEMIE nor the wrapper derives one from its members: the zone states its own.
+            Some(i) if systems[names[i]]["type"] == "meta" => format!("Zone '{zone}': cooling system '{}' combines other systems, so it has no convective fraction. Enter the zone's convective fraction for cooling.", names[i]),
             Some(i) => format!("Zone '{zone}': cooling system '{}' has no convective fraction, so the zone's fraction cannot be found. Enter its convective fraction.", names[i]),
             None if found.windows(2).all(|w| w[0] == w[1]) => {
                 zone_value["frac_convective_cooling"] = json!(found[0]);
@@ -1259,6 +1262,9 @@ pub(crate) mod tests {
                 "/Zone/d/frac_convective_cooling"
             ]
         );
+        assert!(errors[1]
+            .message
+            .contains("Enter the zone's convective fraction for cooling"));
 
         let mut existing = json!({"IsExistingBuilding": true, "SpaceCoolSystem": {"ac": {"frac_convective": 0.95}}, "Zone": {"a": {"SpaceCoolSystem": "ac"}}});
         derive_zone_frac_convective_cooling(&mut existing, &mut errors);

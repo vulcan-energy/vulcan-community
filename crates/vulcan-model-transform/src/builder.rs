@@ -5397,8 +5397,15 @@ impl JSONBuilder {
                     }
 
                     if let Some(val) = field_value {
+                        // A text field takes a cell the codec read as a number as its text
+                        // (a smart meter GUID of decimal digits).
+                        let text = match &val {
+                            Value::String(s) => Some(s.clone()),
+                            Value::Number(n) => Some(n.to_string()),
+                            _ => None,
+                        };
                         if name == "Postcode" {
-                            if let Some(str_val) = val.as_str() {
+                            if let Some(str_val) = text.as_deref() {
                                 let postcode = str_val.trim();
                                 if !postcode.is_empty() {
                                     let metadata = result_obj
@@ -5413,7 +5420,7 @@ impl JSONBuilder {
                                 }
                             }
                         } else if name == "General_build_type" {
-                            if let Some(str_val) = val.as_str() {
+                            if let Some(str_val) = text.as_deref() {
                                 let allowed = self.schema_build_types();
                                 // A deriving profile reads the generic `house` as "derive the
                                 // built form from the party walls" (`apply_epc_field_shapes`).
@@ -5566,7 +5573,7 @@ impl JSONBuilder {
                                     .required_metadata_rows()
                                     .contains(&"HasElectricitySmartMeter"))
                         {
-                            if let Some(str_val) = val.as_str() {
+                            if let Some(str_val) = text.as_deref() {
                                 if !str_val.is_empty() {
                                     result_obj.insert(
                                         name.clone(),

@@ -196,6 +196,8 @@ impl CSVParser {
                 let value = adjusted_columns.get(i).map(|v| v.as_str()).unwrap_or("");
                 let parsed_value = if header == "extra_json" {
                     self.parse_extra_json_value(value)?
+                } else if section_name == "Metadata" && header == "Value" {
+                    self.parse_metadata_value(value)?
                 } else {
                     self.parse_value(value)?
                 };
@@ -275,6 +277,20 @@ impl CSVParser {
 
     fn is_valid_section(&self, section_name: &str) -> bool {
         Self::SECTIONS.contains(&section_name)
+    }
+
+    /// A Metadata value can be an identifier (a smart meter GUID of decimal digits): a digit
+    /// string that a number cannot hold exactly, with a leading zero or beyond 2^53, stays text.
+    fn parse_metadata_value(&self, value: &str) -> Result<Value, ParseError> {
+        let trimmed = value.trim();
+        let digits = !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_digit());
+        let exact = trimmed
+            .parse::<u64>()
+            .is_ok_and(|n| n <= 9_007_199_254_740_992 && n.to_string() == trimmed);
+        if digits && !exact {
+            return Ok(Value::String(trimmed.to_string()));
+        }
+        self.parse_value(value)
     }
 
     fn parse_value(&self, value: &str) -> Result<Value, ParseError> {

@@ -803,7 +803,8 @@ export function unsetMetadataInputIssues(
   };
   const desnzDefault = new Set([...Object.keys(rules.desnzDefaultRows ?? {}), ...(rules.derivedMetadataRows ?? [])]);
   const guidIssue = smartMeterGuidIssue(state.complianceSettings, required);
-  return [...(guidIssue ? [guidIssue] : []), ...metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
+  // smartMeterGuidIssue alone judges the GUID: it is required only with a smart meter.
+  return [...(guidIssue ? [guidIssue] : []), ...metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && key !== 'ElectricitySmartMeterGUID' && !accepted.has(key)
       && !desnzDefault.has(key)
       && !systemsRowSetsMetadataInput(state.elements, key)
       && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
