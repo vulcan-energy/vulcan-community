@@ -20,7 +20,7 @@ import { Tooltip } from './Tooltip';
 import { loadBundledAssemblyLibrary, type BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import type { AssemblyExample, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
 import { MASS_CLASS_LABELS, parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
-import type { GroundFloorType } from '../lib/groundUValueCalculator';
+import { GROUND_FLOOR_TYPE_LABELS, type GroundFloorType } from '../lib/groundUValueCalculator';
 import { getElementTypeDisplayName } from '../lib/displayNames';
 import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS } from '../lib/assemblyMaterialFabric';
 import {
@@ -956,13 +956,8 @@ const BOOLEAN_SELECT_OPTIONS = [
 const WINDOW_SHADING_TYPE_OPTIONS = (Object.entries(WINDOW_SHADING_TYPE_LABELS) as [WindowShading['shading_type'], string][])
   .map(([value, label]) => ({ value, label }));
 const COLOUR_OPTIONS = ['Light', 'Intermediate', 'Dark'].map((value) => ({ value, label: value }));
-const FLOOR_TYPE_OPTIONS = [
-  { value: 'Heated_basement', label: 'Heated Basement' },
-  { value: 'Slab_no_edge_insulation', label: 'Ground floor, no edge insulation' },
-  { value: 'Slab_edge_insulation', label: 'Ground floor, edge insulated' },
-  { value: 'Suspended_floor', label: 'Suspended Floor' },
-  { value: 'Unheated_basement', label: 'Unheated Basement' },
-] as const;
+const FLOOR_TYPE_OPTIONS = (Object.entries(GROUND_FLOOR_TYPE_LABELS) as [GroundFloorType, string][])
+  .map(([value, label]) => ({ value, label }));
 const CROSS_SECTION_OPTIONS = [
   { value: 'circular', label: 'Circular' },
   { value: 'rectangular', label: 'Rectangular' },

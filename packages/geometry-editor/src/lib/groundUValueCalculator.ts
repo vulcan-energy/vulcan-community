@@ -8,6 +8,15 @@ export type GroundFloorType =
   | 'Suspended_floor'
   | 'Unheated_basement';
 
+/** The one wording of each ground floor type: the form, the multi-select panel and the calculator all use it. */
+export const GROUND_FLOOR_TYPE_LABELS: Readonly<Record<GroundFloorType, string>> = {
+  Heated_basement: 'Heated basement',
+  Slab_no_edge_insulation: 'Ground floor, no edge insulation',
+  Slab_edge_insulation: 'Ground floor, edge insulated',
+  Suspended_floor: 'Suspended floor',
+  Unheated_basement: 'Unheated basement',
+};
+
 export type WindShieldLocation = 'Sheltered' | 'Average' | 'Exposed';
 
 /** HEM `$defs/WindShieldLocation` in `input_core.schema.json` — ISO 13370 ventilation shielding factors. */

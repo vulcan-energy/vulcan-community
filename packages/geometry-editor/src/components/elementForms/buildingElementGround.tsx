@@ -125,6 +125,7 @@ import {
 import {
   computeGroundUValueFromElementModel,
   defaultSuspendedAreaPerPerimeterVent,
+  GROUND_FLOOR_TYPE_LABELS,
   parseWindShieldLocation,
 } from '../../lib/groundUValueCalculator';
 import {
@@ -924,13 +925,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
               }
               commitExistingElementDraft(patch);
             }}
-            options={[
-              { value: 'Heated_basement', label: 'Heated Basement' },
-              { value: 'Slab_no_edge_insulation', label: 'Ground floor, no edge insulation' },
-              { value: 'Slab_edge_insulation', label: 'Ground floor, edge insulated' },
-              { value: 'Suspended_floor', label: 'Suspended Floor' },
-              { value: 'Unheated_basement', label: 'Unheated Basement' }
-            ]}
+            options={Object.entries(GROUND_FLOOR_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
             variant="ghost"
             size="md"
           />

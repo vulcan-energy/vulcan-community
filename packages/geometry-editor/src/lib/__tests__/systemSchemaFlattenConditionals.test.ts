@@ -32,6 +32,15 @@ describe('jsonSchemaIfMatches', () => {
 });
 
 describe('flattenIfThenAllOfProperties', () => {
+  it('keeps the type of a field a branch only requires to be not null', () => {
+    const flat = flattenIfThenAllOfProperties({
+      properties: { rate: { anyOf: [{ type: 'number', exclusiveMinimum: 0 }, { type: 'null' }], title: 'Rate' } },
+      allOf: [{ if: { required: ['x'] }, then: { properties: { rate: { not: { type: 'null' } } }, required: ['rate'] } }],
+    }, { x: 1 }) as { properties: { rate: Record<string, unknown> }; required: string[] };
+    expect(flat.properties.rate).toMatchObject({ type: 'number', exclusiveMinimum: 0 });
+    expect(flat.required).toContain('rate');
+  });
+
   it('drops a forbidden property, including its required entry', () => {
     const flat = flattenIfThenAllOfProperties({
       properties: { a: { type: 'number' }, b: { type: 'number' }, c: { type: 'number' } },

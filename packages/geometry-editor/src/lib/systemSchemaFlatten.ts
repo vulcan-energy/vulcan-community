@@ -126,6 +126,12 @@ export function omitAbsentOptionalObjectPropertiesFromSchema(node: unknown, inst
   return { ...n, properties: props };
 }
 
+/** Exactly `{not: {type: 'null'}}`. */
+function isNotNullOnly(node: unknown): boolean {
+  if (!isRecord(node) || Object.keys(node).length !== 1 || !isRecord(node.not)) return false;
+  return node.not.type === 'null' && Object.keys(node.not).length === 1;
+}
+
 function mergeAllOfListIntoMerged(
   merged: Record<string, unknown>,
   allOf: unknown[],
@@ -258,7 +264,12 @@ export function flattenIfThenAllOfProperties(
   }
 
   // Conditional `allOf` / `then` keys must win over any overlapping base `properties` from expansion.
-  out.properties = { ...baseProps, ...merged };
+  out.properties = { ...baseProps };
+  for (const [key, branchSchema] of Object.entries(merged)) {
+    // A branch that only says "not null" keeps the field's own type, unit and bounds, minus the null option.
+    const base = baseProps[key];
+    (out.properties as Record<string, unknown>)[key] = isNotNullOnly(branchSchema) && isRecord(base) ? unwrapNullableSchema(base) : branchSchema;
+  }
   // A branch forbids a key with `false` or `{not: {}}`: it is absent for this instance, not a control.
   const properties = out.properties as Record<string, unknown>;
   const forbidden = Object.keys(properties).filter((key) => isForbiddenSchemaNode(properties[key]));

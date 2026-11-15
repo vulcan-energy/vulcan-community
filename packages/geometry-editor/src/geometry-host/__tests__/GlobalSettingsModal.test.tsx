@@ -189,8 +189,8 @@ describe("GlobalSettingsModal", () => {
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
     expect(screen.getByText("Dwelling details")).toBeInTheDocument();
     expect(screen.getByText("Air tightness")).toBeInTheDocument();
-    expect(screen.getByText("Ventilation Environment")).toBeInTheDocument();
-    expect(screen.getByText("Thermal Bridging")).toBeInTheDocument();
+    expect(screen.getByText("Ventilation environment")).toBeInTheDocument();
+    expect(screen.getByText("Thermal bridging")).toBeInTheDocument();
 
     const dwellingDetails = screen.getByText("Dwelling details");
     await user.click(dwellingDetails);
@@ -204,7 +204,7 @@ describe("GlobalSettingsModal", () => {
     await user.click(airTightness);
     expect(screen.queryByLabelText("Test Pressure")).not.toBeInTheDocument();
 
-    const ventilation = screen.getByText("Ventilation Environment");
+    const ventilation = screen.getByText("Ventilation environment");
     await user.click(ventilation);
     expect(screen.getByLabelText("Shield Class")).toBeInTheDocument();
     await user.click(ventilation);
@@ -225,7 +225,7 @@ describe("GlobalSettingsModal", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
-    await user.click(screen.getByText("Thermal Bridging"));
+    await user.click(screen.getByText("Thermal bridging"));
     expect(screen.queryByText(/Fallback heat loss/)).not.toBeInTheDocument();
   });
 

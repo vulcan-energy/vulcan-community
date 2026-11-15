@@ -158,6 +158,8 @@ export function hemieLeftoverKeys(element: Element): string[] {
 const UNITS: Readonly<Record<string, string>> = { glazing_gap: 'mm', insulation_thickness: 'mm', areal_heat_capacity: 'J/m²·K', basement_air_volume: 'm³' };
 /** A flat roof's insulation location, as the converter takes it: at the joists is a cold roof, above them a warm roof. */
 const FLAT_ROOF_LOCATIONS: Readonly<Record<string, string>> = { at_joists: 'At joists (cold roof)', above_joists: 'Above joists (warm roof)' };
+/** The wording of a field whose key does not read plainly. */
+const FIELD_LABELS: Readonly<Record<string, string>> = { areal_heat_capacity: 'Heat capacity per area' };
 const words = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, ' ');
 
 /** "External wall": a construction type as people read it. */
@@ -169,7 +171,8 @@ export const hemieConstructionTypeLabel = (type: string): string => CONSTRUCTION
 
 /** "Glazing gap (mm)": a construction field with its unit. */
 export function hemieFieldLabel(field: string): string {
-  return UNITS[field] ? `${words(field)} (${UNITS[field]})` : words(field);
+  const label = FIELD_LABELS[field] ?? words(field);
+  return UNITS[field] ? `${label} (${UNITS[field]})` : label;
 }
 
 /** "12 mm", "Wood or PVC", "Yes": a construction field's value with its unit, for the construction type when given. */

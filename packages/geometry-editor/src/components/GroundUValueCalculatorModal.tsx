@@ -10,6 +10,7 @@ import {
   computeGroundUValueFromElementModel,
   DEFAULT_BASEMENT_VENTILATION_RATE_ACH,
   DEFAULT_WIND_SPEED_MPS_GROUND_U,
+  GROUND_FLOOR_TYPE_LABELS,
   parseWindShieldLocation,
 } from '../lib/groundUValueCalculator';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -171,7 +172,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
     const fmt = (n: number | null | undefined, decimals: number, suffix: string): string =>
       n != null && Number.isFinite(n) ? `${n.toFixed(decimals)}${suffix}` : '—';
 
-    const floorTypeDisplay = floorType === 'Slab_edge_insulation' ? 'Ground floor, edge insulated' : String(floorType).replace(/_/g, ' ');
+    const floorTypeDisplay = GROUND_FLOOR_TYPE_LABELS[floorType];
 
     const detailRows: Array<{ key: string; label: string; ok: boolean; value: string }> = [
       { key: 'floor_type', label: 'Floor type', ok: true, value: floorTypeDisplay },

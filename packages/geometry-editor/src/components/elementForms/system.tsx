@@ -341,7 +341,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       const value = resolveHeatSourceWetReferenceName(element);
       if (!value || seen.has(value)) continue;
       seen.add(value);
-      const label = element.name && element.name !== value ? `${element.name} (${value})` : value;
+      const label = element.name || value;
       options.push({ value, label });
     }
     return options;

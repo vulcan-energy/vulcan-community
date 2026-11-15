@@ -6799,7 +6799,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         const featureA = project(item.featureSegment[0]);
         const featureB = project(item.featureSegment[1]);
         const color = item.status === 'below-guidance' ? canvasInteractionPalette.warningGuide : snapColor;
-        const labelText = `${item.label}: ${item.distanceM.toFixed(2)}m / ${item.guidanceDistanceM.toFixed(2)}m`;
+        const labelText = `${item.label}: ${item.distanceM.toFixed(2)}m (${item.guidanceDistanceM.toFixed(2)}m advised)`;
         const measureDx = featurePoint.x - panelPoint.x;
         const measureDy = featurePoint.y - panelPoint.y;
         const measureLen = Math.hypot(measureDx, measureDy);

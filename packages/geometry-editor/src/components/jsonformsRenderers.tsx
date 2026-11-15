@@ -1219,10 +1219,13 @@ function renderAdvancedFieldRow(
   fullWidthHeader?: React.ReactNode,
 ) {
   const visibleActions = actions.filter(Boolean);
+  // The control class options are long: give the select the full row and wrap the actions below it.
+  const fullRowMain = propKey === 'ecodesign_control_class';
   const inputActionsRow = (
     <div
       style={{
         display: 'flex',
+        flexWrap: fullRowMain ? 'wrap' : 'nowrap',
         alignItems,
         gap: '8px',
         width: '100%',
@@ -1230,7 +1233,7 @@ function renderAdvancedFieldRow(
         boxSizing: 'border-box',
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>{main}</div>
+      <div style={{ flex: fullRowMain ? '1 1 100%' : 1, minWidth: 0 }}>{main}</div>
       {visibleActions.length > 0 ? (
         <div
           style={{
@@ -2634,6 +2637,9 @@ export const GroupAccordion: React.FC<{
           fontWeight: 700,
         }}
       >
+        <span aria-hidden style={{ width: 14, flexShrink: 0, opacity: 0.85 }}>
+          {open ? '▼' : '▶'}
+        </span>
         <span style={{ fontWeight: 600 }}>{label}</span>
         {count !== undefined && count > 0 ? (
           <span className="badge" style={{ marginLeft: 'auto' }}>{count}</span>
