@@ -144,7 +144,7 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
   if (explicitUserMessage) {
     userMessage = explicitUserMessage;
   } else if (unstatedInput) {
-    userMessage = `Enter ${unstatedInput} in Global Settings.`;
+    userMessage = `Enter ${unstatedInput}.`;
   } else if (
     location === 'Appliances' &&
     (item.message.includes('is not allowed for {}') || item.message.includes('has less than'))
