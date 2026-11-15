@@ -161,6 +161,13 @@ function contentHashDefaultsShortHash(path: string): string | undefined {
   return CONTENT_HASH_DEFAULTS_PATH.exec(path)?.[1]?.slice(0, 8);
 }
 
+/** An EPC defaults file as words: "input/defaults/defaults_template_epc.json" -> "Defaults template EPC". */
+const EPC_FILE_PATTERN = /epc/i;
+function epcDefaultsFileLabel(path: string): string {
+  const words = (path.split('/').pop() ?? path).replace(/\.json$/, '').replace(/_/g, ' ').replace(/\bepc\b/gi, 'EPC');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function defaultsFileLabel(path: string): string {
   return contentHashDefaultsShortHash(path) ? "This model's defaults" : path;
 }
@@ -680,8 +687,6 @@ export function GlobalSettingsModal({
     []
   );
 
-  // An EPC model has no defaults to pick: it opens on Global values.
-  const shownTab = epcTarget ? "settings" : activeTab;
   const defaultsCheckReady = workspaceResourcePort.availability === "available";
   const effectiveDefaultsPath =
     (defaultsPath || "").trim() || (fallbackDefaultsPath || "").trim();
@@ -974,8 +979,10 @@ export function GlobalSettingsModal({
   const defaultsListForDisplay = useMemo(() => {
     const query = defaultsSearchQuery.toLowerCase().trim();
     const effective = (selectedDefaults || effectiveDefaultsPath).trim();
+    // An EPC model lists only EPC defaults: the file in use, shared-model copies and EPC templates.
     let filtered = availableDefaults.filter((path) =>
       `${path} ${defaultsFileLabel(path)}`.toLowerCase().includes(query)
+      && (!epcTarget || path === effective || !!contentHashDefaultsShortHash(path) || EPC_FILE_PATTERN.test(path))
     );
     if (
       effective &&
@@ -1417,7 +1424,6 @@ export function GlobalSettingsModal({
             titleId={titleId}
             onClose={() => onClose()}
           />
-          {!epcTarget && (
           <div
             role="tablist"
             style={{
@@ -1431,7 +1437,7 @@ export function GlobalSettingsModal({
             <button
               type="button"
               role="tab"
-              aria-selected={shownTab === "defaults"}
+              aria-selected={activeTab === "defaults"}
               onClick={() => setActiveTab("defaults")}
               style={{
                 flex: "1 1 0",
@@ -1444,11 +1450,11 @@ export function GlobalSettingsModal({
                 border: "none",
                 background: "transparent",
                 borderBottom:
-                  shownTab === "defaults"
+                  activeTab === "defaults"
                     ? "2px solid var(--accent-primary)"
                     : "2px solid transparent",
                 color:
-                  shownTab === "defaults"
+                  activeTab === "defaults"
                     ? "var(--text-primary)"
                     : "var(--text-secondary)",
                 fontWeight: 500,
@@ -1485,7 +1491,7 @@ export function GlobalSettingsModal({
             <button
               type="button"
               role="tab"
-              aria-selected={shownTab === "settings"}
+              aria-selected={activeTab === "settings"}
               onClick={() => setActiveTab("settings")}
               style={{
                 flex: "1 1 0",
@@ -1498,11 +1504,11 @@ export function GlobalSettingsModal({
                 border: "none",
                 background: "transparent",
                 borderBottom:
-                  shownTab === "settings"
+                  activeTab === "settings"
                     ? "2px solid var(--accent-primary)"
                     : "2px solid transparent",
                 color:
-                  shownTab === "settings"
+                  activeTab === "settings"
                     ? "var(--text-primary)"
                     : "var(--text-secondary)",
                 fontWeight: 500,
@@ -1537,7 +1543,6 @@ export function GlobalSettingsModal({
               </span>
             </button>
           </div>
-          )}
         </div>
 
         <div
@@ -1551,7 +1556,7 @@ export function GlobalSettingsModal({
           }}
         >
           {/* Defaults tab: merge targets + default assemblies */}
-          {shownTab === "defaults" && (
+          {activeTab === "defaults" && (
             <>
               <div
                 style={{
@@ -1681,7 +1686,7 @@ export function GlobalSettingsModal({
                             }}
                           />
                           <span
-                            title={shortHash ? p : undefined}
+                            title={shortHash || epcTarget ? p : undefined}
                             style={{
                               fontWeight: 600,
                               overflow: "hidden",
@@ -1691,7 +1696,13 @@ export function GlobalSettingsModal({
                               minWidth: 0,
                             }}
                           >
-                            {shortHash ? defaultsFileLabel(p) : p}
+                            {shortHash ? (
+                              defaultsFileLabel(p)
+                            ) : epcTarget ? (
+                              epcDefaultsFileLabel(p)
+                            ) : (
+                              p
+                            )}
                           </span>
                           {selected && selectedExists === false ? (
                             <span
@@ -1901,15 +1912,8 @@ export function GlobalSettingsModal({
           )}
 
           {/* Global Settings Tab */}
-          {shownTab === "settings" && (
+          {activeTab === "settings" && (
             <>
-              {epcTarget && (
-                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                  {contentHashDefaultsShortHash(effectiveDefaultsPath)
-                    ? "Starting values: this model's copy of the EPC template"
-                    : "Starting values: EPC template"}
-                </div>
-              )}
               <div
                 style={{
                   fontSize: 13,
