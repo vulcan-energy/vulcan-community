@@ -21,6 +21,18 @@ export function getSpaceLabelBaseNameForRoomType(roomType: string): string {
     .join(' ');
 }
 
+/** Words a slug's sentence case gets wrong. */
+const ROOM_TYPE_LABELS: Readonly<Record<string, string>> = {
+  wc: 'WC', communal: 'Communal area', other_habitable: 'Other habitable room',
+};
+
+/** A room type as the Space Labeller's list shows it, e.g. home_office → "Home office". */
+export function roomTypeLabel(roomType: string): string {
+  if (!roomType) return '(none)';
+  const words = roomType.split('_').join(' ');
+  return ROOM_TYPE_LABELS[roomType] ?? words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function uniqueNameInList(base: string, existing: string[]): string {
   if (!existing.includes(base)) return base;
   let n = 1;

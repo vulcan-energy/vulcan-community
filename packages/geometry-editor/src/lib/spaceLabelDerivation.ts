@@ -98,8 +98,9 @@ export const DEFAULT_SPACE_LABEL_ROOM_REGISTRY: Record<string, SpaceLabelRoomRul
     increments: { NumberOfHabitableRooms: 1 },
   },
   // TM59:2017 Table 2 and TM59:2026 §3.7.1: "two people living in one space – a combined bedroom, small kitchen
-  // and working and living area". It is the dwelling's living room and its kitchen. HEM FHS rejects zero bedrooms
-  // (calc_n_occupants), and the studio is where its occupants sleep, so it counts as one bedroom.
+  // and working and living area". It is the dwelling's living room and its kitchen. NumberOfBedrooms counts "the
+  // rooms that contain a permanent bed" (schemaDescriptionOverrides 'Global:NumberOfBedrooms'); the studio holds the
+  // bed, so it is one bedroom. HEM FHS has no zero-bedroom case: calc_n_occupants fails on 0.
   studio: {
     excludeFromFloorArea: false,
     livingBucket: 'living',
