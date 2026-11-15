@@ -38,4 +38,14 @@ describe('edgeInsulation', () => {
       formValuesToExtraJsonEdgeInsulation({ horizontal: seg('', '1'), vertical: seg() }),
     ).toEqual({ ok: false, reason: 'incomplete' });
   });
+
+  it('takes one of resistance and size on an existing building, where the other defaults', () => {
+    const partial = { horizontal: seg('', '0.5'), vertical: seg('1.5', '') };
+    expect(formValuesToExtraJsonEdgeInsulation({ horizontal: seg('1', ''), vertical: seg() }, true)).toEqual({ ok: false, reason: 'incomplete' });
+    expect(formValuesToExtraJsonEdgeInsulation(partial)).toEqual({ ok: false, reason: 'incomplete' });
+    expect(formValuesToExtraJsonEdgeInsulation(partial, true)).toEqual({
+      ok: true,
+      value: [{ type: 'horizontal', width: 0.5 }, { type: 'vertical', edge_thermal_resistance: 1.5 }],
+    });
+  });
 });

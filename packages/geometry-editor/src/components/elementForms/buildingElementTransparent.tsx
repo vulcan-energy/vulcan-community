@@ -172,7 +172,7 @@ import { ParentElementDropdown } from '../ParentElementDropdown';
 import { ResetFieldButton } from '../ResetFieldButton';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
-import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, isConservatoryGlazing, withConservatoryGlazingOpeningType } from '../../lib/hemieBundles';
+import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, isConservatoryGlazing, windowSections, withConservatoryGlazingOpeningType, withWindowSections } from '../../lib/hemieBundles';
 import { CompactSegmentedControl } from '../WindowDetailControls';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import type { Element } from '../../geometry/types';
@@ -768,27 +768,95 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
         {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
-            <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type:</div>
-            <div className="element-input" ref={registerBaseFieldRef('window_sections')}>
-              <StandardDropdown
-                value={conservatoryGlazingOpeningType(selectedElement) ?? ''}
-                onChange={(value) => commitExistingElementDraft({
-                  extra_json: withConservatoryGlazingOpeningType(selectedElement, value || null),
-                })}
-                options={isConservatoryGlazing(selectedElement, ctx.elementsById) ? [
-                  { value: '', label: 'Closed (default)' },
-                  { value: 'closed', label: 'Closed' },
-                  { value: 'half opening top', label: 'Half opening (top)' },
-                  { value: 'top third opening', label: 'Third opening (top)' },
-                ] : [
-                  { value: '', label: 'Choose...' },
-                  ...WINDOW_OPENING_TYPES.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) })),
-                ]}
-                aria-label="Opening type"
-                variant="ghost"
-                size="md"
-              />
-            </div>
+            <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type</div>
+            {isConservatoryGlazing(selectedElement, ctx.elementsById) ? (
+              <div className="element-input" ref={registerBaseFieldRef('window_sections')}>
+                <StandardDropdown
+                  value={conservatoryGlazingOpeningType(selectedElement) ?? ''}
+                  onChange={(value) => commitExistingElementDraft({
+                    extra_json: withConservatoryGlazingOpeningType(selectedElement, value || null),
+                  })}
+                  options={[
+                    { value: '', label: 'Closed (default)' },
+                    { value: 'closed', label: 'Closed' },
+                    { value: 'half opening top', label: 'Half opening (top)' },
+                    { value: 'top third opening', label: 'Third opening (top)' },
+                  ]}
+                  aria-label="Opening type"
+                  variant="ghost"
+                  size="md"
+                />
+              </div>
+            ) : (() => {
+              // One section by default; a window of several panes (a fixed pane beside a casement) states each, left to right.
+              const stated = windowSections(selectedElement);
+              const sections = stated.length ? stated : [{ windowType: '' }];
+              const save = (next: typeof sections) => commitExistingElementDraft({
+                extra_json: withWindowSections(selectedElement, next.every((section) => !section.windowType) && next.length === 1 ? [] : next),
+              });
+              const patchSection = (index: number, change: Partial<(typeof sections)[number]>) =>
+                save(sections.map((section, i) => (i === index ? { ...section, ...change } : section)));
+              return (
+                <div className="element-input" ref={registerBaseFieldRef('window_sections')} style={{ display: 'grid', gap: 6 }}>
+                  {sections.map((section, index) => (
+                    // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- sections are positional (left to right) and carry no id.
+                    <div key={index} style={{ display: 'grid', gap: 4 }}>
+                      {sections.length > 1 && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Section {index + 1}</div>}
+                      <StandardDropdown
+                        value={section.windowType}
+                        onChange={(value) => patchSection(index, { windowType: value })}
+                        options={[
+                          { value: '', label: 'Choose...' },
+                          ...WINDOW_OPENING_TYPES.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) })),
+                        ]}
+                        aria-label={sections.length > 1 ? `Section ${index + 1} opening type` : 'Opening type'}
+                        variant="ghost"
+                        size="md"
+                      />
+                      {sections.length > 1 && (
+                        <StandardInput
+                          type="number"
+                          label="Width fraction"
+                          placeholder="Equal share"
+                          min="0.01"
+                          max="1"
+                          step="0.05"
+                          value={section.widthFraction?.toString() ?? ''}
+                          onChange={(e) => {
+                            const value = e.target.value === '' ? undefined : Number(e.target.value);
+                            patchSection(index, { widthFraction: value !== undefined && Number.isFinite(value) ? value : undefined });
+                          }}
+                          variant="ghost"
+                          size="md"
+                        />
+                      )}
+                      {section.windowType && section.windowType !== 'closed' && (
+                        <StandardDropdown
+                          label="Opening angle"
+                          value={section.openingAngle ?? ''}
+                          onChange={(value) => patchSection(index, { openingAngle: value || undefined })}
+                          options={[
+                            { value: '', label: 'Standard (default)' },
+                            { value: 'full', label: 'Full' },
+                            { value: 'restricted', label: 'Restricted' },
+                          ]}
+                          variant="ghost"
+                          size="md"
+                        />
+                      )}
+                      {sections.length > 1 && (
+                        <button type="button" className="btn btn-small btn-secondary" onClick={() => save(sections.filter((_, i) => i !== index))}>
+                          Remove section {index + 1}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" className="btn btn-small btn-secondary" onClick={() => save([...sections, { windowType: '' }])}>
+                    Add section
+                  </button>
+                </div>
+              );
+            })()}
           </>
         ) : null}
         {renderFieldLabel('Frame Area Fraction:', elementType)}

@@ -546,7 +546,6 @@ describe('TextControl placeholder wiring and blank-like sentinels (ported from t
       const input = screen.getByRole('textbox') as HTMLInputElement;
       expect(input.value).toBe(displayed);
       expect(screen.queryByText('Custom')).not.toBeInTheDocument();
-      expect(screen.getByText('Schema')).toBeVisible();
       expect(screen.queryByRole('button', { name: 'Reset to default' })).not.toBeInTheDocument();
       expect(input.closest('.standard-input-container')).not.toHaveClass('custom-value');
       cleanup();

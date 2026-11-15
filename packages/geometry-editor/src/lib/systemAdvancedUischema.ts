@@ -166,6 +166,26 @@ function plantBlobControl(scopePrefix: string, ctx: PlantControlCtx): AdvancedFi
  * `Group` branch at all, which is why `AdvancedFieldsLayoutNode` above does not name
  * one either.
  */
+/** A cylinder heater's kind, as its rows are prefixed. */
+const HEATER_LABELS: Readonly<Record<string, string>> = {
+  HeatSourceWet: 'Coil', ImmersionHeater: 'Immersion heater', SolarThermalSystem: 'Solar thermal', HeatPump_HWOnly: 'Heat pump',
+};
+const heaterType = (schema: unknown) => {
+  const type = ((schema as { properties?: { type?: { const?: unknown } } } | undefined)?.properties?.type?.const);
+  return typeof type === 'string' ? type : undefined;
+};
+
+/**
+ * A cylinder heater's prefix: its kind ("Coil"), with the user's name for it only when another
+ * heater is of the same kind; the name alone when the kind is not known.
+ */
+function heaterLabel(key: string, heaters: Record<string, unknown>): string {
+  const type = heaterType(heaters[key]);
+  const label = type ? HEATER_LABELS[type] : undefined;
+  if (!label) return key;
+  return Object.values(heaters).filter((heater) => heaterType(heater) === type).length > 1 ? `${label} (${key})` : label;
+}
+
 function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: PlantControlCtx): AdvancedFieldsLayoutNode[] {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
     return [plantBlobControl(scopePrefix, ctx)];
@@ -187,7 +207,7 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
       if (shouldRecurseIntoNestedObject(childSchema)) {
         const nextPathLabels = key === 'HeatSource'
           ? ctx.pathLabels
-          : [...ctx.pathLabels, s['x-vulcan-heater-map'] ? key : startCaseKey(key)];
+          : [...ctx.pathLabels, s['x-vulcan-heater-map'] ? heaterLabel(key, props as Record<string, unknown>) : startCaseKey(key)];
         const childElements = buildControlsForSchema(childSchema, childScope, {
           ...ctx,
           pathLabels: nextPathLabels,

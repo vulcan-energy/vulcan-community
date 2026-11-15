@@ -41,6 +41,8 @@ export interface HardcodedFieldInfo {
   units?: string;
   /** Explicit meaning for numeric values whose schema has no useful physical unit. */
   unitSemantic?: FieldUnitSemantic;
+  /** The schema's own description or unit is wrong for what HEM reads; this override replaces both. */
+  correctsSchema?: boolean;
   /** UI-only numeric model field included in completeness diagnostics. */
   modelAuthoring?: boolean;
   /**
@@ -155,6 +157,41 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   'shading': {
     description: 'List of shading geometry objects (overhangs, side fins, obstacles) that model obstructions affecting the PV array. Used to calculate shading reduction factors for solar radiation, affecting electricity generation.',
     type: 'array',
+  },
+  'heat_transfer_rate_W_per_K': {
+    label: 'Heat Transfer Rate',
+    description: 'Heat transfer rate of the cylinder coil (unit: W/K).',
+    type: 'number',
+    units: 'W/K',
+  },
+  'nominal_eer': {
+    label: 'Nominal EER',
+    description: 'Nominal energy efficiency ratio of the heat pump in cooling mode.',
+    type: 'number',
+  },
+  'temp_distribution_heat_network': {
+    label: 'Heat Network Distribution Temperature',
+    description: 'Distribution temperature of the heat network the heat pump draws heat from (unit: °C). Only for a heat pump on a heat network.',
+    type: 'number',
+    units: '°C',
+  },
+  // Wet distribution flow rates are litres per minute: HEM divides design, minimum and maximum flow by 60 (emitters).
+  'design_flow_rate': {
+    description: 'Design flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60: 0.06 L/s is 3.6 L/min.',
+    type: 'number',
+    units: 'L/min',
+    // The schema text says l/s, but HEM divides this value by 60 (heating_systems/emitters.py).
+    correctsSchema: true,
+  },
+  'min_flow_rate': {
+    description: 'Minimum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',
+    type: 'number',
+    units: 'L/min',
+  },
+  'max_flow_rate': {
+    description: 'Maximum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',
+    type: 'number',
+    units: 'L/min',
   },
   'inverter_peak_power_dc': {
     description: 'Peak electrical DC power input to the inverter, in kilowatts (kW). This represents the maximum DC power the PV array can deliver into the inverter under standard test conditions.',
@@ -1006,6 +1043,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'W/l/s',
   },
   'SFP_in_use_factor': {
+    label: 'SFP In-Use Factor',
     description: 'Adjustment applied to the entered SFP to account for in-use effects such as ducting. Typical values are 1–2.5. Leave at 1 when the SFP value already includes the in-use factor.',
     type: 'number',
     unitSemantic: 'unitless',
@@ -1035,6 +1073,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     unitSemantic: 'fraction',
   },
   'mvhr_location': {
+    label: 'MVHR Location',
     description: 'Location of the MVHR unit: "inside" (within the thermal envelope) or "outside" (outside the thermal envelope). Affects heat losses and energy consumption calculations. Only applicable for MVHR systems.',
     type: 'string',
   },

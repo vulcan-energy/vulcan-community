@@ -93,7 +93,7 @@ it('collapses large test tables and edits, removes and resets only test data', (
   const details = container.querySelector('details')!;
   expect(details.open).toBe(false);
   details.open = true; fireEvent(details, new Event('toggle'));
-  expect(details).toHaveTextContent('Preset');
+  expect(details).not.toHaveTextContent('Custom');
   const inputs = container.querySelectorAll('[data-field-key="temp_test"] input');
   fireEvent.change(inputs[0], { target: { value: '-12.5' } });
   expect(details).toHaveTextContent('Custom');
@@ -109,7 +109,7 @@ it('collapses large test tables and edits, removes and resets only test data', (
   expect(onChange.mock.lastCall![0].HeatSourceWet['HP.with/dots'].test_data_EN14825).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: 'Reset to default' }));
   expect(onChange.mock.lastCall![0]).toEqual(original);
-  expect(details).toHaveTextContent('Preset');
+  expect(details).not.toHaveTextContent('Custom');
   expect(readRecord(onChange.mock.lastCall![0]).HeatSourceWet).toBeTruthy();
 });
 
@@ -137,19 +137,20 @@ it('uses heat-pump capacity units rather than unrelated battery capacity metadat
 });
 
 
-it('uses shared preset/custom badges for edited fields, reset and added immersion', async () => {
+it('badges only edited fields Custom, through reset and an added immersion', async () => {
   const { container } = mount(true, true);
   const field = (key: string) => container.querySelector(`[data-field-key="${key}"]`) as HTMLElement;
-  await waitFor(() => expect(field('cop_dhw')).toHaveTextContent('Preset'));
+  await waitFor(() => expect(field('cop_dhw')).toBeTruthy());
+  expect(field('cop_dhw')).not.toHaveTextContent('Custom');
   fireEvent.change(within(field('cop_dhw')).getByRole('textbox'), { target: { value: '3.1' } });
   await waitFor(() => expect(field('cop_dhw')).toHaveTextContent('Custom'));
-  expect(field('volume')).toHaveTextContent('Preset');
+  expect(field('volume')).not.toHaveTextContent('Custom');
   fireEvent.blur(within(field('cop_dhw')).getByRole('textbox'));
   fireEvent.click(within(field('cop_dhw')).getByRole('button', { name: 'Reset field to sample preset value' }));
-  await waitFor(() => expect(field('cop_dhw')).toHaveTextContent('Preset'));
+  await waitFor(() => expect(field('cop_dhw')).not.toHaveTextContent('Custom'));
   expect(within(field('cop_dhw')).getByRole('textbox')).toHaveValue('2.5');
   fireEvent.change(screen.getByRole('combobox', { name: 'Heater to add to hw cylinder' }), { target: { value: '__dhw_immersion__' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add heater' }));
   await waitFor(() => expect(field('power')).toHaveTextContent('Custom'));
-  expect(field('cop_dhw')).toHaveTextContent('Preset');
+  expect(field('cop_dhw')).not.toHaveTextContent('Custom');
 });

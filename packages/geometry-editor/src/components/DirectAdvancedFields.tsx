@@ -474,6 +474,17 @@ const WINDOW_PART_TABLE_COPY = {
   addLabel: 'Add opening',
 };
 
+const TANK_CONTROL_TABLE_COPY = {
+  hint: 'Each row is the thermostat of one heat source in the tank.',
+  invalid: 'Tank controls must be a list of controls. Correct the saved data before editing them.',
+  caption: 'tank controls',
+  rowHeader: 'Control',
+  rowLabel: 'Control',
+  removeLabel: 'tank control',
+  empty: '',
+  addLabel: 'Add tank control',
+};
+
 function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: {
   args: Parameters<typeof renderControlForProperty>[0];
   copy?: typeof TEST_POINT_TABLE_COPY;
@@ -490,9 +501,9 @@ function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: 
   const changed = JSON.stringify(value) !== JSON.stringify(baseline);
   return <GroupAccordion label={label} count={rows.length} openInitially={rows.length <= 3}>
     <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>{copy.hint}</p>
-    {config.systemSampleMode === true && <div style={{ marginBottom: 8 }}>
-      <StatusPill type={changed ? 'custom' : 'default-used'} labelOverride={changed ? 'Custom' : 'Preset'} />
-      {changed && Array.isArray(baseline) && <ResetFieldButton align="inline" label="Reset test data" onClick={() => applyChange(segments, structuredClone(baseline))} />}
+    {config.systemSampleMode === true && changed && <div style={{ marginBottom: 8 }}>
+      <StatusPill type="custom" />
+      {Array.isArray(baseline) && <ResetFieldButton align="inline" label="Reset test data" onClick={() => applyChange(segments, structuredClone(baseline))} />}
     </div>}
     {((!Array.isArray(value) && value != null) || rows.some((row) => !isRecord(row))) ? <p role="alert">{copy.invalid}</p> : <>
       <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
@@ -511,7 +522,7 @@ function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: 
         </table>
       </div>
       {issues?.map((issue) => <p key={issue} role="alert">{issue}</p>)}
-      {!rows.length && <p role="alert">{copy.empty}</p>}
+      {!rows.length && copy.empty && <p role="alert">{copy.empty}</p>}
       <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [...rows, {}])}>{copy.addLabel}</button>
     </>}
   </GroupAccordion>;
@@ -560,12 +571,11 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
     </div>;
   }
 
-  // A closed window's message is the validation issue, which links to the field.
-  const status = openings.kind === 'closed'
-    ? null
-    : openings.kind === 'needs_input'
-      ? 'One opening. Complete the free area height, mid height and max open area in the main form.'
-      : 'One opening. Edit it in the main form.';
+  // A closed window's message is the validation issue, which links to the field; a complete
+  // single opening has nothing to say beyond the main form.
+  const status = openings.kind === 'needs_input'
+    ? 'One opening. Complete the free area height, mid height and max open area in the main form.'
+    : null;
   return <div style={{ fontSize: 12 }}>
     {status && <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>}
     {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add opening</button>}
@@ -739,6 +749,9 @@ function renderControlForProperty(args: {
 
   if (elementType === 'System' && leafKey === 'test_data_EN14825' && isRecord(resolved.items)) {
     return <SystemPerformanceTable key={path} args={args} />;
+  }
+  if (elementType === 'System' && leafKey === 'tank_controls' && isRecord(resolved.items)) {
+    return <SystemPerformanceTable key={path} args={args} copy={TANK_CONTROL_TABLE_COPY} />;
   }
 
   // A plant whose schema is a union the editor has no form for (HEM:EPC's product-shaped plants):

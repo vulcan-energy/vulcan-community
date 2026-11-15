@@ -952,7 +952,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
           <>
             {showType ? (
           <>
-            <div className="element-label">Type:</div>
+            <div className="element-label">Type</div>
             <div className="element-input">
               <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
             </div>
@@ -979,7 +979,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
             </div>
             {showType ? (
           <>
-            <div className="element-label">Type:</div>
+            <div className="element-label">Type</div>
             <div className="element-input">
               <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
             </div>

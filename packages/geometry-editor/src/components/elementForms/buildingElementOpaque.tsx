@@ -312,7 +312,9 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       && selectedShape === 'line'
       && typeof state.pitch === 'number'
       && Number.isFinite(state.pitch)
-      && Math.round(state.pitch) === 90;
+      && Math.round(state.pitch) === 90
+      // A door sits in a wall; a wall with no host is not offered as a door.
+      && (!!state.isExternalDoor || !!state.parentElement);
 
     // baseHeightResetTarget needs the full element array (for the suspended-
     // floor / basement lookahead helpers). Object.values(elementsById), NOT

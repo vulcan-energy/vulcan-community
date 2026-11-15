@@ -1062,6 +1062,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
+    // The air test report's envelope area, only when stated: the converter otherwise sums the drawing.
+    if (compliance.AirPermeability_env_area !== undefined) lines.push(`AirPermeability_env_area,${compliance.AirPermeability_env_area},,,,,,,,,,,,,`);
     for (const [key, cell] of [...Object.entries(compliance.productSettings ?? {}), ...Object.entries(compliance.hemieSettings ?? {})]) {
       lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
@@ -2330,7 +2332,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       elementIds,
       spaceLabelsById,
       spaceLabelIds,
-      ...(replace ? {} : { canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1 }),
+      // A newly opened model starts with nothing selected: the inspector must not show the last model's element.
+      ...(replace ? {} : { canvasViewResetKey: (get().canvasViewResetKey ?? 0) + 1, selection: null, selectedElementIds: [] }),
     });
 
     // Missing name markers deliberately degrade to the existing naming heuristic in every

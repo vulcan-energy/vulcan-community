@@ -130,6 +130,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
+import { isExistingBuilding } from '../lib/windowOpenings';
 import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
@@ -957,6 +958,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
   const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = useTargetRules();
+  const existingBuilding = useGeometryStore(isExistingBuilding);
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
   const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
@@ -1950,7 +1952,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
     const labelContent = (
       <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-        <span>{presentation?.label ?? fieldLabel}</span>
+        {/* Labels read without a trailing colon, as the schema-driven rows do. */}
+        <span>{(presentation?.label ?? fieldLabel).replace(/:\s*$/, '')}</span>
         {evPill}
       </div>
     );
@@ -4160,6 +4163,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         />
       ) : null,
       hemDatabaseProducts,
+      existingBuilding,
       systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
       renderSpaceHeatSystemPicker,
       renderSpaceHeatSystemEmitterManager,
@@ -4508,7 +4512,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             {/* Element preset selector – Opaque/Transparent/PV types; banded fabric takes no fabric preset */}
             {PRESET_ELEMENT_TYPES.includes(elementType) && !(constructionBands && FABRIC_PRESET_TYPES.has(elementType)) && elementPresetOptions.length > 0 && (
               <div className="element-editor-row">
-                <div className="element-label">Preset:</div>
+                <div className="element-label">Preset</div>
                 <div className="element-editor-control">
                   <PresetDropdown
                     value={elementPreset}
@@ -5111,7 +5115,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {/* Only a space heat system picks its zone. */}
                   {elementType === 'System' && systemFormState.systemSubcategory === 'SpaceHeatSystem' && (
                     <>
-                      <div className="element-label">Zone:</div>
+                      <div className="element-label">Zone</div>
                       <div className="element-input" ref={registerBaseFieldRefs(['zoneId', 'zone_id'])}>
                         <StandardDropdown
                           value={elementZoneId}

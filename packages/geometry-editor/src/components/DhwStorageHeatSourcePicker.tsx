@@ -112,7 +112,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
           const heater = readRecord(value);
           return <div key={name} style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{name} · {({ ImmersionHeater: 'Immersion heater', HeatPump_HWOnly: 'Hot-water-only heat pump', HeatSourceWet: 'Linked heat source' }[String(heater.type)] ?? String(heater.type ?? 'Unknown heater'))}</span>
+              <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{({ ImmersionHeater: 'Immersion heater', HeatPump_HWOnly: 'Hot-water-only heat pump', HeatSourceWet: 'Coil' }[String(heater.type)] ?? String(heater.type ?? 'Unknown heater'))} ({name})</span>
               <button type="button" className="btn btn-nav btn-small" aria-label={`Remove heater ${name}`} onClick={() => patchHeaters(tankName, (current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== name)))}>Remove</button>
             </div>
             {heater.type === 'HeatSourceWet' && (() => {
