@@ -183,3 +183,21 @@ describe('elementTypeAvailability', () => {
     expect(elementTypeAvailability(excluding, 'System', {})).toEqual({ available: true });
   });
 });
+
+describe('FHS building element U-value or resistance', () => {
+  // The a9 shape: the element takes the resistance or the U-value (`oneOf`), and a party wall forbids the U-value.
+  const root = (partyWall: Record<string, unknown>) => ({ properties: { Zone: { additionalProperties: { properties: { BuildingElement: { additionalProperties: {
+    properties: { type: {}, u_value: {}, thermal_resistance_construction: {} },
+    required: ['type'],
+    oneOf: [{ required: ['thermal_resistance_construction'] }, { required: ['u_value'] }],
+    allOf: [{ if: { properties: { type: { const: 'BuildingElementPartyWall' } } }, then: { required: ['u_value_whole_wall'], properties: partyWall } }],
+  } } } } } } });
+  const required = (partyWall: Record<string, unknown>) => resolveElementSubschemaForProfile(root(partyWall) as never, 'fhs', 'BuildingElementPartyWall')?.required;
+
+  it('requires the resistance when the U-value is forbidden', () => {
+    expect(required({ u_value_whole_wall: {}, u_value: false })).toEqual(['type', 'u_value_whole_wall', 'thermal_resistance_construction']);
+  });
+  it('requires neither when both are allowed', () => {
+    expect(required({ u_value_whole_wall: {} })).toEqual(['type', 'u_value_whole_wall']);
+  });
+});
