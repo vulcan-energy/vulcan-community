@@ -1253,7 +1253,8 @@
 }
 
 .space-labeller-panel__row-host {
-  flex: 1 0 100%;
+  /* The full row less the indent, so the fields wrap inside the row instead of running past it. */
+  flex: 1 0 calc(100% - 38px);
   min-width: 0;
   margin-left: 38px;
   display: flex;
