@@ -510,11 +510,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   // Display labels and units for the product-less system forms (the schema's own titles are engine words).
   'System:HotWaterSource:volume': { description: 'Volume of the tank (unit: litres)', type: 'number', units: 'litres' },
-  'System:HotWaterSource:daily_losses': { description: 'Heat the full tank loses in 24 hours (unit: kWh/day)', type: 'number', units: 'kWh/day' },
+  'System:HotWaterSource:daily_losses': { description: 'Heat the full tank loses in 24 hours (unit: kWh/24h)', type: 'number' },
   'System:HotWaterSource:primary_flow_rate': { description: 'Flow rate through the coil (unit: L/min)', type: 'number', units: 'L/min' },
   'System:HotWaterSource:temp_flow_limit_upper': { description: 'Highest flow temperature the heat source supplies (unit: deg C)', type: 'number', units: 'deg C' },
   'System:SpaceHeatSystem:temp_flow_limit_upper': { description: 'Highest flow temperature the heat source supplies (unit: deg C)', type: 'number', units: 'deg C' },
-  'System:SpaceHeatSystem:temp_diff_emit_dsgn': { description: 'Design temperature difference between emitter flow and return (unit: K)', type: 'number', units: 'K' },
+  'System:SpaceHeatSystem:temp_diff_emit_dsgn': { description: 'Design temperature difference between emitter flow and return (unit: K)', type: 'number' },
   'System:HeatSourceWet:electricity_circ_pump': { description: 'Electrical power of the circulation pump (unit: kW)', type: 'number', units: 'kW' },
   'System:HeatSourceWet:electricity_standby': { description: 'Electrical power in standby mode (unit: kW)', type: 'number', units: 'kW' },
   'solar_absorption_coeff': { label: 'Solar absorption coefficient' },

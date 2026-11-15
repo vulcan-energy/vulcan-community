@@ -427,6 +427,15 @@ function unusedHeatPumpFields(extraJson: unknown): ReadonlySet<string> {
   return drop;
 }
 
+/** True when a system states its own weather compensation coefficients, or has no curve chosen: the fields stay shown until a curve covers them. */
+function statesWeatherCoefficients(extraJson: unknown): boolean {
+  return Object.values(readExtraJsonRecord(readExtraJsonRecord(extraJson).SpaceHeatSystem)).some((system) => {
+    const controller = readExtraJsonRecord(readExtraJsonRecord(system).ecodesign_controller);
+    const noCurve = controller.weather_compensation_curve_id === undefined || controller.weather_compensation_curve_id === null || controller.weather_compensation_curve_id === '';
+    return noCurve || ['weather_comp_a', 'weather_comp_b', 'weather_comp_c', 'min_flow_temp'].some((key) => controller[key] !== undefined && controller[key] !== null && controller[key] !== '');
+  });
+}
+
 /** A plant part's schema title as words: "Buffertank" -> "buffer tank", "dhw" -> "hot water". */
 const plantPartWords = (title: string): string => title.toLowerCase().replace('buffertank', 'buffer tank').replace(/\bdhw\b/g, 'hot water');
 
@@ -1494,7 +1503,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         existing: existingBuilding,
         supplyNames: energySupplyNames,
         // The curve picker sets the curve coefficients, so their own fields stay hidden.
-        dropKeys: new Set([...(loadCompensationUnread(advancedFieldsData) ? LOAD_COMPENSATION_FIELDS : []), ...(systemDefaults?.weatherCurves?.length ? ['weather_comp_a', 'weather_comp_b', 'weather_comp_c'] : [])]),
+        dropKeys: new Set([...(loadCompensationUnread(advancedFieldsData) ? LOAD_COMPENSATION_FIELDS : []), ...(systemDefaults?.weatherCurves?.length && !statesWeatherCoefficients(advancedFieldsData) ? ['weather_comp_a', 'weather_comp_b', 'weather_comp_c'] : [])]),
       }) as typeof result;
       result = pruneSpaceHeatSystemWeatherCompensationSchema(
         result as Record<string, unknown>,
