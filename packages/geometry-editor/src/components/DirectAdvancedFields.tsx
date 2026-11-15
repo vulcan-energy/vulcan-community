@@ -864,23 +864,10 @@ const NO_ENGINE_FIELDS: ReadonlySet<string> = new Set();
 export function DirectAdvancedFields({
   schema,
   data,
-  config: hostConfig,
+  config,
   layout,
   onDataChange,
 }: DirectAdvancedFieldsProps): React.ReactElement {
-  // A plant's default products, by its fields' pointers, from the slots of the element this form
-  // edits (by its name). The store's selection is not used: the panel can edit an element while the
-  // selection is of another kind, which left the product field "Required" under its default chip.
-  const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
-  const elementName = (hostConfig.currentElementData as { name?: unknown } | undefined)?.name;
-  const config = React.useMemo(() => hostConfig.elementType !== 'System' ? hostConfig : {
-    ...hostConfig,
-    defaultProducts: Object.fromEntries((productSlots ?? []).flatMap((slot) => (
-      slot.row === elementName && slot.source === 'default' && slot.product_id != null
-        ? [[`${slot.path}/product_id`, slot.label ?? slot.product_id]]
-        : []
-    ))),
-  }, [hostConfig, productSlots, elementName]);
   const properties = readRecord(schema.properties);
   const requiredList = Array.isArray(schema.required)
     ? (schema.required as unknown[]).filter((v): v is string => typeof v === 'string')

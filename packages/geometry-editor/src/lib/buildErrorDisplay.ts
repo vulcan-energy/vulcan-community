@@ -10,7 +10,7 @@ import { globalSettingsFieldSection, METADATA_INPUT_LABELS, type GlobalSettingsF
 const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = {
   defaults: 'Global Settings > Defaults',
   target: 'Global Settings',
-  dwelling: 'Global Settings > Dwelling Details',
+  dwelling: 'Global Settings > Dwelling details',
   airTightness: 'Global Settings > Air Tightness',
   ventilation: 'Global Settings > Ventilation environment',
   thermalBridging: 'Global Settings > Thermal bridging',
@@ -69,7 +69,7 @@ const buildErrorLocation = (path?: string) => {
     const constructionType = segments[1].match(/^HEMIE_construction_(.+)$/)?.[1];
     return {
       location: segments[1] === HEMIE_NATION
-        ? 'Global Settings > Dwelling Details'
+        ? 'Global Settings > Dwelling details'
         : `Global Settings > Defaults > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
     };
   }

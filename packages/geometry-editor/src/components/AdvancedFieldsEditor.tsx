@@ -1862,8 +1862,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   }, [elementType, currentData]);
 
   // A plant whose product the target chooses by default shows that product as its Product Id placeholder, by the field's own path.
+  // Keyed on the element this form edits: the store's selection can be of another kind.
   const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
-  const selectedName = useGeometryStore((state) => (state.selection?.type === 'element' ? state.elementsById[state.selection.id]?.name : undefined));
+  const selectedName = currentData.name;
   const defaultProducts = useMemo(() => Object.fromEntries(
     (productSlots ?? []).flatMap((slot) => (
       slot.row === selectedName && slot.source === 'default' && slot.product_id != null

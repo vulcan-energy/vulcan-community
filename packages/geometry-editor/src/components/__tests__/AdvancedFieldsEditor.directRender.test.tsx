@@ -2101,11 +2101,8 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(fieldRow(container, 'diameter')).toBeTruthy();
   });
 
-  it("takes a plant's default product from the slots of the element it edits, whatever the selection", () => {
+  it("shows the default product the editor passes as the plant's Product Id placeholder", () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
-    store.getState().setTargetValidation({ hemVersion: '0.13.2', items: [], productSlots: [
-      { path: '/SpaceHeatSystem/heater', system_type: 'InstantElecHeater', product_id: 90000, source: 'default', label: 'Default heater', rule: 'the only product', technology_types: [], row: 'Heater' },
-    ] } as never);
     const plant = { type: 'object', required: ['product_id'], properties: { product_id: { type: 'integer' } } };
     const { container } = render(
       <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
@@ -2114,7 +2111,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
             schema={{ type: 'object', properties: { SpaceHeatSystem: { type: 'object', properties: { heater: plant } } } }}
             data={{ SpaceHeatSystem: { heater: {} } }}
             layout={{ type: 'VerticalLayout', elements: [{ type: 'Control', scope: '#/properties/SpaceHeatSystem/properties/heater/properties/product_id' }] }}
-            config={{ advancedEditor: true, elementType: 'System', currentElementData: { name: 'Heater' } }}
+            config={{ advancedEditor: true, elementType: 'System', defaultProducts: { '/SpaceHeatSystem/heater/product_id': 'Default heater' } }}
             onDataChange={vi.fn()}
           />
         </GeometryStoreProvider>
