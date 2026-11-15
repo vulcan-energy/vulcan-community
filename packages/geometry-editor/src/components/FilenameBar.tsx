@@ -242,7 +242,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     const live = (targetValidationItems ?? []).filter((item) => item.severity !== 'warning');
     return live.length ? [...live, ...reportedBuildErrorItems] : reportedBuildErrorItems;
   }, [reportedBuildErrorItems, targetValidationItems]);
-  const hasBuildIssues = !!buildError || buildErrorItems.length > 0;
+  // Notices (severity 'warning') never raise the chip: the Save button's unsaved state already asks for a Save.
+  // They are listed under the errors when that list is open.
+  const hasBuildIssues = buildErrorItems.length > 0 ? buildErrorItems.some((item) => item.severity !== 'warning') : !!buildError;
   const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
   const migrationIssues = useMemo(() => csvMigrationIssues(Object.values(elementsById), sourceCsvVersion), [elementsById, sourceCsvVersion]);
   const reviewDocumentKey = documentSnapshot.activeDocument?.id ?? filename;
@@ -251,7 +253,6 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const showLastSaveValidationFailure =
     migrationIssues.length === 0 &&
     lastSaveValidationFailed
-    && buildErrorItems.length === 0
     && !hasBuildIssues
     && !showSaveErrorIndicator
     && currentSaveStatus !== 'saving';
@@ -424,11 +425,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     for (const row of rows) if (!locationOrder.has(row.location)) locationOrder.set(row.location, locationOrder.size);
     return rows.sort((a, b) => locationOrder.get(a.location)! - locationOrder.get(b.location)!);
   }, [buildErrorItems, resolveTarget]);
-  const displayedBuildErrorCount = displayBuildErrorRows.length;
-  // Non-blocking items (severity 'warning'), such as a load notice, are counted apart from errors.
-  const displayedNoticeCount = displayBuildErrorRows.filter((row) => row.item.severity === 'warning').length;
-  const displayedErrorCount = displayedBuildErrorCount - displayedNoticeCount;
-  const onlyNotices = buildErrorItems.length > 0 && buildErrorItems.every((item) => item.severity === 'warning');
+  const errorRows = displayBuildErrorRows.filter((row) => row.item.severity !== 'warning');
+  const noticeRows = displayBuildErrorRows.filter((row) => row.item.severity === 'warning');
+  const displayedErrorCount = errorRows.length;
   const openSettingsField = useCallback((field: string) => {
     window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
     closeSaveErrorDropdown();
@@ -554,6 +553,46 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     }
   };
 
+  const renderBuildErrorRow = (error: (typeof displayBuildErrorRows)[number]) => {
+    const settingsField = metadataRowOf(error.item.path);
+    const canNavigate = !!(error.target.elementId || error.target.zoneId || settingsField);
+    return (
+    <div
+      className="save-error-row"
+      key={buildErrorRowKey(error)}
+    >
+      <div className="save-error-location">{error.location}</div>
+      <div className="save-error-row-content">
+        {canNavigate ? (
+          <button
+            type="button"
+            className="save-error-details save-error-details-button"
+            onClick={() => (settingsField ? openSettingsField(settingsField) : goToIssueTarget(error.target))}
+            title="Go to this input"
+          >
+            {error.userMessage}
+          </button>
+        ) : (
+          <div className="save-error-user-message">{error.userMessage}</div>
+        )}
+        <details className="save-error-technical">
+          <summary>Details{error.derived.length > 0 ? ` (+${error.derived.length} related)` : ''}</summary>
+          {[error, ...error.derived].map((detail) => (
+            <React.Fragment key={buildErrorRowKey(detail)}>
+              <div className="save-error-technical-body">{detail.item.technicalMessage || detail.item.message}</div>
+              {(detail.item.path || detail.item.code || detail.item.keyword) && (
+                <div className="save-error-technical-meta">
+                  {[detail.item.path, detail.item.keyword, detail.item.code].filter(Boolean).join(' • ')}
+                </div>
+              )}
+            </React.Fragment>
+          ))}
+        </details>
+      </div>
+    </div>
+    );
+  };
+
   const saveErrorDropdownElement = isSaveErrorDropdownOpen ? (
     <div
       ref={saveErrorDropdownRef}
@@ -570,12 +609,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     >
       <div className="files-dropdown-header">
         <div className="files-dropdown-title">
-          {showLastSaveValidationFailure ? 'Validation' : onlyNotices ? 'Notice' : saveErrorTitle}
-          {displayedBuildErrorCount > 0 && (
-            <span className="save-error-header-count">
-              {[displayedErrorCount > 0 && countText(displayedErrorCount, 'error'), displayedNoticeCount > 0 && countText(displayedNoticeCount, 'notice')]
-                .filter(Boolean).join(' · ')}
-            </span>
+          {showLastSaveValidationFailure ? 'Validation' : saveErrorTitle}
+          {displayedErrorCount > 0 && (
+            <span className="save-error-header-count">{countText(displayedErrorCount, 'error')}</span>
           )}
         </div>
         <div className="files-dropdown-header-actions">
@@ -628,45 +664,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           ) : buildErrorItems.length > 0 ? (
             <div className="save-error-details">
               <div className="save-error-rows">
-                {displayBuildErrorRows.map((error) => {
-                  const settingsField = metadataRowOf(error.item.path);
-                  const canNavigate = !!(error.target.elementId || error.target.zoneId || settingsField);
-                  return (
-                  <div
-                    className="save-error-row"
-                    key={buildErrorRowKey(error)}
-                  >
-                    <div className="save-error-location">{error.location}</div>
-                    <div className="save-error-row-content">
-                      {canNavigate ? (
-                        <button
-                          type="button"
-                          className="save-error-details save-error-details-button"
-                          onClick={() => (settingsField ? openSettingsField(settingsField) : goToIssueTarget(error.target))}
-                          title="Go to this input"
-                        >
-                          {error.userMessage}
-                        </button>
-                      ) : (
-                        <div className="save-error-user-message">{error.userMessage}</div>
-                      )}
-                      <details className="save-error-technical">
-                        <summary>Details{error.derived.length > 0 ? ` (+${error.derived.length} related)` : ''}</summary>
-                        {[error, ...error.derived].map((detail) => (
-                          <React.Fragment key={buildErrorRowKey(detail)}>
-                            <div className="save-error-technical-body">{detail.item.technicalMessage || detail.item.message}</div>
-                            {(detail.item.path || detail.item.code || detail.item.keyword) && (
-                              <div className="save-error-technical-meta">
-                                {[detail.item.path, detail.item.keyword, detail.item.code].filter(Boolean).join(' • ')}
-                              </div>
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </details>
-                    </div>
-                  </div>
-                  );
-                })}
+                {errorRows.map(renderBuildErrorRow)}
+                {noticeRows.length > 0 && <div className="save-error-notices-heading">Notices</div>}
+                {noticeRows.map(renderBuildErrorRow)}
               </div>
             </div>
           ) : saveErrorFocusTarget ? (
@@ -807,7 +807,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           <button
             ref={buildErrorChipRef}
             type="button"
-            className={`status-chip ${showLastSaveValidationFailure || onlyNotices ? 'status-chip--warning' : 'status-chip--error'}`}
+            className={`status-chip ${showLastSaveValidationFailure ? 'status-chip--warning' : 'status-chip--error'}`}
             onClick={() => {
               openSaveErrorDropdown(buildErrorChipRef.current);
             }}
@@ -817,8 +817,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           >
             {showLastSaveValidationFailure
               ? 'Not validated'
-              : onlyNotices ? `Notice (${displayedNoticeCount})`
-                : `Build Error${displayedErrorCount > 0 ? ` (${displayedErrorCount})` : ''}`}
+              : `Build Error${displayedErrorCount > 0 ? ` (${displayedErrorCount})` : ''}`}
           </button>
         ) : null}
       </div>
