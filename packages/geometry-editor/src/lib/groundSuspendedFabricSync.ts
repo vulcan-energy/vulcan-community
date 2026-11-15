@@ -4,7 +4,7 @@
 import type { AssemblyLayer } from './assemblyTypes';
 import type { Element } from '../geometry/types';
 import { parseVulcanAssemblyV1FromExtraJson } from './assemblyAppliedUi';
-import { roundToTwoDecimals } from '../geometry/constants';
+import { roundToFourDecimals, roundToTwoDecimals, SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
 import { computeWeightedThermalTransmWallsFromGroundAdjacentWalls } from './suspendedFloorThermalTransmWallsAutofill';
 import { cavityPhysicalThicknessM } from './assemblyCavityModel';
 import {
@@ -15,7 +15,11 @@ import { usesGroundThermalTransmWallsAutofill } from './groundFloorSubtype';
 import type { DefaultsLookup } from './defaultsCache';
 import { deriveAutomaticGroundTotalAreas } from './groundFloorArea';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
-import { computeGroundUValueFromElementModel } from './groundUValueCalculator';
+import {
+  computeGroundUValueFromElementModel,
+  defaultSuspendedAreaPerPerimeterVent,
+  parseWindShieldLocation,
+} from './groundUValueCalculator';
 
 /** When true, auto-sync must not overwrite `extra_json.thermal_transm_walls` (user owns the value). */
 export const THERMAL_TRANSM_WALLS_MANUAL_KEY = '_thermal_transm_walls_manual';
@@ -313,14 +317,25 @@ export function groundDrawingPerimeter(
   return details.shapePerimeterM > 0 ? details.shapePerimeterM : null;
 }
 
+/** The element before the edit: itself, or for a copy the element it was copied from. */
+function elementBefore(
+  previous: Record<string, Element> | undefined,
+  copySources: ReadonlyMap<string, string> | undefined,
+  id: string,
+): Element | undefined {
+  if (!previous) return undefined;
+  return previous[id] ?? previous[copySources?.get(id) ?? ''];
+}
+
 type DerivedBefore = { stored: number | null; derived: number | null } | null;
 
 /**
  * Whether a value the drawing derives takes the new derived value after an edit. Files carry no
  * marker for a value the assessor entered, so a stored value that differed from the drawing before
- * the edit reads as entered and stays. Blank counts as following the drawing. A value the user
+ * the edit reads as entered and stays. A blank value takes the drawing's value. A value the user
  * set in this edit stays, and a value whose inputs did not change is not touched. `before` is
- * null for an element the edit created: it takes the drawing's value.
+ * null for an element the edit created: it takes the drawing's value. A copy's `before` is its
+ * source, so a stated value stays stated.
  */
 function takesDerivedValue(
   before: DerivedBefore,
@@ -329,7 +344,7 @@ function takesDerivedValue(
   eps: number,
 ): boolean {
   if (derived == null || numbersClose(stored, derived, eps)) return false;
-  if (!before) return true;
+  if (stored == null || !before) return true;
   if (!numbersClose(before.stored, stored, eps)) return false;
   if (numbersClose(before.derived, derived, eps)) return false;
   return before.stored == null || numbersClose(before.stored, before.derived, eps);
@@ -358,17 +373,19 @@ function groundThicknessWallsFromWalls(elementsById: Record<string, Element>, gr
  * - `thermal_transm_walls` for `Suspended_floor` and `Unheated_basement` (wall U-value weighting),
  * unless the corresponding manual lock is set on `extra_json`.
  *
- * `previous` is the model before the edit. Without it every ground counts as new.
+ * `previous` is the model before the edit. Without it every ground counts as new. `copySources`
+ * maps a copy made in this edit to its source.
  */
 export function syncSuspendedGroundFabricFromWalls(
   elementsById: Record<string, Element>,
   updateElement: (id: string, patch: Partial<Element>) => void,
   defaultsLookup?: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
   previous?: Record<string, Element>,
+  copySources?: ReadonlyMap<string, string>,
 ): void {
   for (const el of Object.values(elementsById)) {
     if (el.type !== 'BuildingElementGround') continue;
-    const before = previous?.[el.id];
+    const before = elementBefore(previous, copySources, el.id);
     const prevGround = before?.type === 'BuildingElementGround' ? before : null;
     const extra = readExtraJsonRecord(el.extra_json);
     const prevExtra = prevGround ? readExtraJsonRecord(prevGround.extra_json) : {};
@@ -440,13 +457,15 @@ function groundUValueFromDrawing(
  * area override flag and `_ground_u_value_manual` keep the stored value. Automatic ground U-values
  * use the shared total area with each element's own perimeter, as in the HEM split-zone examples.
  *
- * `previous` is the model before the edit. Without it every ground counts as new.
+ * `previous` is the model before the edit. Without it every ground counts as new. `copySources`
+ * maps a copy made in this edit to its source.
  */
 export function syncGroundExposedPerimetersFromWalls(
   elementsById: Record<string, Element>,
   updateElement: (id: string, patch: Partial<Element>) => void,
   constructionBands: boolean,
   previous?: Record<string, Element>,
+  copySources?: ReadonlyMap<string, string>,
 ): void {
   const groundsOf = (byId: Record<string, Element>) => Object.values(byId).filter(
     (element): element is GroundElement => element.type === 'BuildingElementGround' && !element.isPlaceholder,
@@ -467,7 +486,7 @@ export function syncGroundExposedPerimetersFromWalls(
   };
 
   for (const ground of grounds) {
-    const before = previous?.[ground.id];
+    const before = elementBefore(previous, copySources, ground.id);
     const prevGround = before?.type === 'BuildingElementGround' && !before.isPlaceholder ? before : null;
     const extra = readExtraJsonRecord(ground.extra_json);
     const next = effectiveInputs(elementsById, ground, automaticTotalAreas.get(ground.id) ?? ground.area);
@@ -529,21 +548,6 @@ export function syncGroundExposedPerimetersFromWalls(
   }
 }
 
-let documentLoadDepth = 0;
-
-/**
- * Runs a document load or replace (open, undo, redo, a shared-model update). Ground fabric does
- * not follow the walls during it: opening a model never writes to it.
- */
-export function asDocumentLoad<T>(load: () => T): T {
-  documentLoadDepth += 1;
-  try {
-    return load();
-  } finally {
-    documentLoadDepth -= 1;
-  }
-}
-
 /** Element types the ground sync reads: grounds and the line elements on their outline. */
 const GROUND_SYNC_INPUT_TYPES = new Set<Element['type']>([
   'BuildingElementGround',
@@ -565,9 +569,55 @@ function groundSyncInputsChanged(next: Record<string, Element>, previous: Record
 }
 
 /**
+ * Fills the suspended-floor defaults that are blank when a ground becomes a suspended floor in an
+ * edit (a floor type change, alone or across a selection, or a new suspended floor). Selection and
+ * loading never fill them.
+ */
+export function fillSuspendedFloorDefaults(
+  elementsById: Record<string, Element>,
+  updateElement: (id: string, patch: Partial<Element>) => void,
+  acceptsShieldLocation: boolean,
+  previous?: Record<string, Element>,
+  copySources?: ReadonlyMap<string, string>,
+): void {
+  for (const ground of Object.values(elementsById)) {
+    if (ground.type !== 'BuildingElementGround' || ground.floor_type !== 'Suspended_floor') continue;
+    const before = elementBefore(previous, copySources, ground.id);
+    if (before?.type === 'BuildingElementGround' && before.floor_type === 'Suspended_floor') continue;
+    const extra = readExtraJsonRecord(ground.extra_json);
+    const next: Record<string, unknown> = { ...extra };
+    if (readFinite(next.height_upper_surface) == null) {
+      next.height_upper_surface = SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M;
+    }
+    if (acceptsShieldLocation) {
+      next.shield_fact_location = parseWindShieldLocation(next.shield_fact_location);
+    }
+    const vent = readFinite(next.area_per_perimeter_vent);
+    const area = readFinite(ground.area);
+    const perimeter = readFinite(ground.perimeter);
+    if ((vent == null || vent === 0) && area != null && perimeter != null) {
+      const ventDefault = defaultSuspendedAreaPerPerimeterVent(area, perimeter);
+      // Not roundToTwoDecimals: 0.0015 m²/m (Part F minimum) would round to 0.
+      if (ventDefault != null) next.area_per_perimeter_vent = roundToFourDecimals(ventDefault);
+    }
+    if (JSON.stringify(next) !== JSON.stringify(extra)) updateElement(ground.id, { extra_json: next });
+  }
+}
+
+export interface GroundFabricFollower {
+  /**
+   * Runs a document load or replace (open, undo, redo, a shared-model update). Ground fabric does
+   * not follow the walls during it: opening a model never writes to it.
+   */
+  asDocumentLoad: <T>(load: () => T) => T;
+  /** Runs an edit that copies elements; `sources` maps each copy's id to its source's. */
+  withCopySources: <T>(sources: ReadonlyMap<string, string>, edit: () => T) => T;
+}
+
+/**
  * Keeps ground fabric that follows the drawing in step with the user's edits. It runs on element
  * edits only: selection, opening and loading never write (see `takesDerivedValue` for which
- * stored values follow).
+ * stored values follow). The load and copy state belongs to this store alone.
  */
 export function followGroundFabricOnEdit<
   S extends {
@@ -577,24 +627,42 @@ export function followGroundFabricOnEdit<
   },
 >(
   store: { subscribe: (listener: (state: S, previous: S) => void) => () => void; getState: () => S },
-  constructionBands: (state: S) => boolean,
-): () => void {
+  rules: { constructionBands: (state: S) => boolean; acceptsShieldLocation: () => boolean },
+): GroundFabricFollower {
+  let loadDepth = 0;
+  let copySources: ReadonlyMap<string, string> | undefined;
   let syncing = false;
-  return store.subscribe((state, previous) => {
-    if (syncing || documentLoadDepth > 0 || state.elementsById === previous.elementsById) return;
+  store.subscribe((state, previous) => {
+    if (syncing || loadDepth > 0 || state.elementsById === previous.elementsById) return;
     if (!groundSyncInputsChanged(state.elementsById, previous.elementsById)) return;
     syncing = true;
     try {
       const { updateElement } = state;
-      syncSuspendedGroundFabricFromWalls(state.elementsById, updateElement, state.getDefaultsLookup(), previous.elementsById);
-      syncGroundExposedPerimetersFromWalls(
-        store.getState().elementsById,
-        updateElement,
-        constructionBands(state),
-        previous.elementsById,
-      );
+      const before = previous.elementsById;
+      syncSuspendedGroundFabricFromWalls(state.elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
+      syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources);
+      fillSuspendedFloorDefaults(store.getState().elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
     } finally {
       syncing = false;
     }
   });
+  return {
+    asDocumentLoad: (load) => {
+      loadDepth += 1;
+      try {
+        return load();
+      } finally {
+        loadDepth -= 1;
+      }
+    },
+    withCopySources: (sources, edit) => {
+      const outer = copySources;
+      copySources = sources;
+      try {
+        return edit();
+      } finally {
+        copySources = outer;
+      }
+    },
+  };
 }

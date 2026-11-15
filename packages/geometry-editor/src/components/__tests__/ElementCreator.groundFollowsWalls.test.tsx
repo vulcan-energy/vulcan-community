@@ -96,3 +96,69 @@ describe('ground perimeter follows the walls only on edits', () => {
     expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
   });
 });
+
+describe('ground fabric edits in the store', () => {
+  /** Two 4 m × 5 m floors in two zones on one storey: each shares the 40 m² storey total. */
+  function twoZoneModel(): Store {
+    const builder = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+    builder.getState().addZone({ name: 'Front', floorArea: 20, height: 2.8, volume: 56 });
+    builder.getState().addZone({ name: 'Back', floorArea: 20, height: 2.8, volume: 56 });
+    const [front, back] = builder.getState().zones;
+    const floor = (name: string, zoneId: string, y: number) => ({
+      type: 'BuildingElementGround', name, zoneId, floor_type: 'Slab_no_edge_insulation',
+      coordinates: [{ x: 0, y, z: 0 }, { x: 4, y, z: 0 }, { x: 4, y: y + 5, z: 0 }, { x: 0, y: y + 5, z: 0 }],
+    });
+    builder.getState().addElements([
+      { type: 'BuildingElementOpaque', name: 'Front wall', zoneId: front!.id, height: 2.8, pitch: 90, base_height: 0,
+        parent_element: null, coordinates: line(0, 0, 4, 0) },
+      floor('Front floor', front!.id, 0),
+      floor('Back floor', back!.id, 5),
+    ] as never);
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+    store.getState().loadFromCSV(builder.getState().generateCSV({ allowUnresolvedMigration: true }));
+    return store;
+  }
+  const totalOf = (store: Store, name: string) =>
+    (store.getState().elementsById[idOf(store, name)] as { total_area?: number }).total_area;
+
+  it('a wall edit and a floor type edit keep the shared multi-zone total area', () => {
+    const store = twoZoneModel();
+    expect(totalOf(store, 'Front floor')).toBe(40);
+    store.getState().updateElement(idOf(store, 'Front wall'), { coordinates: line(1, 0, 4, 0) });
+    expect(totalOf(store, 'Front floor')).toBe(40);
+    store.getState().updateElement(idOf(store, 'Front floor'), { floor_type: 'Slab_edge_insulation' } as never);
+    expect(totalOf(store, 'Front floor')).toBe(40);
+  });
+
+  it('suspended-floor defaults fill when floor types change across a selection', () => {
+    const store = twoZoneModel();
+    for (const name of ['Front floor', 'Back floor']) {
+      store.getState().updateElement(idOf(store, name), { floor_type: 'Suspended_floor' } as never);
+    }
+    for (const name of ['Front floor', 'Back floor']) {
+      const extra = store.getState().elementsById[idOf(store, name)]!.extra_json as Record<string, unknown>;
+      expect(extra.height_upper_surface).toBe(0.15);
+      expect(extra.area_per_perimeter_vent).toBeGreaterThan(0);
+    }
+  });
+
+  it('clearing a derived value takes the drawing value back in the same edit', () => {
+    const store = openedModel();
+    const id = idOf(store, 'Floor');
+    store.getState().updateElement(id, { thickness_walls: 0.3, extra_json: { thermal_resistance_floor_construction: 0.2 } } as never);
+    const u = (store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value;
+    expect(u).toBeGreaterThan(0);
+    const { u_value: _cleared, ...rest } = store.getState().elementsById[id]!.extra_json as Record<string, unknown>;
+    store.getState().updateElement(id, { extra_json: rest });
+    expect((store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value).toBe(u);
+  });
+
+  it('a copy of a floor keeps a stated perimeter', () => {
+    const store = openedModel(30);
+    store.getState().duplicateElement(idOf(store, 'Floor'));
+    const copy = Object.values(store.getState().elementsById)
+      .find((element) => element.type === 'BuildingElementGround' && element.name !== 'Floor') as { perimeter?: number };
+    // Unlinked, the copy's drawing gives its 25.8 m outline: the stated 30 m stays.
+    expect(copy.perimeter).toBe(30);
+  });
+});

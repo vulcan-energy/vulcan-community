@@ -101,7 +101,7 @@
 // with a fresh ctx every render, so ctx.elementsById is exactly as current.
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M, roundToFourDecimals, roundToTwoDecimals } from '../../geometry/constants';
+import { roundToTwoDecimals } from '../../geometry/constants';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { getElementShape } from '../../lib/shapeUtils';
 import {
@@ -119,9 +119,7 @@ import {
   type SuspendedWallThicknessAutofillResult,
 } from '../../lib/groundSuspendedFabricSync';
 import {
-  defaultSuspendedAreaPerPerimeterVent,
   GROUND_FLOOR_TYPE_LABELS,
-  parseWindShieldLocation,
 } from '../../lib/groundUValueCalculator';
 import {
   computeGroundExposedPerimeterDetails,
@@ -210,15 +208,9 @@ export interface BuildingElementGroundFormState {
    * floor_type — same precedent as MechanicalVentilationTerminal's
    * getCurrentTerminal. */
   getPersistedFloorType: () => string | undefined;
-  withSuspendedFloorDefaults: (patch: Partial<Element>, nextFloorType: GroundFloorType) => Partial<Element>;
 }
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState {
-  const { schemaPort } = ctx;
-  const schemaMode = ctx.schemaMode;
-  const suspendedProperties = schemaPort.availability === 'available'
-    ? schemaPort.getElementSubschema(schemaMode, 'BuildingElementGround', 'Suspended_floor')?.properties as Record<string, unknown> | undefined : undefined;
-  const supportsShieldLocation = suspendedProperties?.shield_fact_location != null && suspendedProperties.shield_fact_location !== false;
   const [floorType, setFloorType] = useState<GroundFloorType>('');
 
   const isExistingElementSelection = (): boolean =>
@@ -498,27 +490,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a fresh object literal every render (see ElementCreator.tsx's elementFormStateCtx); depending on the whole object would defeat memoization for no benefit (same idiom as system.tsx/thermalBridgeLinear.tsx's ctx.* dep arrays).
   }, [selectedGroundElement, groundPerimeterDetails, ctx.updateElement]);
 
-  // Suspended-floor defaults fill blanks when the user picks the floor type, never on selection.
-  // The wall-driven fields (perimeter, total area, U-value) follow edits in the store
-  // (`followGroundFabricOnEdit`).
-  const withSuspendedFloorDefaults = (patch: Partial<Element>, nextFloorType: GroundFloorType): Partial<Element> => {
-    if (nextFloorType !== 'Suspended_floor' || !selectedGroundElement) return patch;
-    const extra = readExtraJsonRecord(selectedGroundElement.extra_json);
-    const nextExtra: Record<string, unknown> = { ...extra };
-    if (readFiniteNumber(nextExtra.height_upper_surface) == null) {
-      nextExtra.height_upper_surface = SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M;
-    }
-    if (supportsShieldLocation) {
-      nextExtra.shield_fact_location = parseWindShieldLocation(nextExtra.shield_fact_location);
-    }
-    const apv = readFiniteNumber(nextExtra.area_per_perimeter_vent);
-    if (apv == null || apv === 0) {
-      const derivedDefault = defaultSuspendedAreaPerPerimeterVent(derivedGroundArea, derivedGroundPerimeter);
-      // Not roundToTwoDecimals: 0.0015 m²/m (Part F minimum) would round to 0.
-      if (derivedDefault != null) nextExtra.area_per_perimeter_vent = roundToFourDecimals(derivedDefault);
-    }
-    return { ...patch, extra_json: nextExtra } as Partial<Element>;
-  };
+  // The wall-driven fields (perimeter, total area, U-value) and the suspended-floor defaults
+  // follow edits in the store (`followGroundFabricOnEdit`), never selection.
 
   const resyncGroundThicknessWallsFromAssemblies = useCallback(() => {
     if (ctx.selection?.type !== 'element') return;
@@ -589,7 +562,6 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     liveThicknessWallsValue,
     selectedGroundShape,
     getPersistedFloorType,
-    withSuspendedFloorDefaults,
   };
 }
 
@@ -710,7 +682,6 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       groundWallThicknessAutofill,
       liveThicknessWallsValue,
       resyncGroundThicknessWallsFromAssemblies,
-      withSuspendedFloorDefaults,
     } = state;
     const {
       elementType,
@@ -833,7 +804,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
               if (!groundFloorTypeSupportsViewerElevation(nextValue)) {
                 elementElevationInput.setValue('');
               }
-              commitExistingElementDraft(withSuspendedFloorDefaults(patch, nextValue));
+              commitExistingElementDraft(patch);
             }}
             options={Object.entries(GROUND_FLOOR_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
             variant="ghost"
