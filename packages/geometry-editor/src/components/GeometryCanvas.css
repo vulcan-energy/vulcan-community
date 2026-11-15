@@ -690,6 +690,21 @@
   transform: none !important;
 }
 
+/* Save outcome: the canvas primary-button rules above would otherwise win over GlobalButtonSystem's. */
+.geometry-canvas .save-button.success,
+.geometry-canvas .save-button.success:hover:not(:disabled) {
+  background: var(--success-text) !important;
+  border-color: var(--success-text) !important;
+  color: var(--bg-primary) !important;
+}
+
+.geometry-canvas .save-button.error,
+.geometry-canvas .save-button.error:hover:not(:disabled) {
+  background: var(--error-text) !important;
+  border-color: var(--error-text) !important;
+  color: var(--bg-primary) !important;
+}
+
 /* Enforce exact height/padding for selects for perfect centering */
 .geometry-canvas .filename-bar .standard-dropdown,
 .geometry-canvas .overlay-drawtoolbar .standard-dropdown,

@@ -371,6 +371,13 @@
   white-space: nowrap;
 }
 
+.save-error-notices-heading {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
 .save-error-rows {
   display: flex;
   flex-direction: column;

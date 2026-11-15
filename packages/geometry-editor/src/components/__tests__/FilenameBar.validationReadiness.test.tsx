@@ -13,7 +13,7 @@ import {
   GeometryStoreProvider,
 } from '../../stores/geometryStore';
 
-function documentHostHarness(): GeometryDocumentHostPort {
+function documentHostHarness(persistedRevision: number | null = 0): GeometryDocumentHostPort {
   const completed = async () => Object.freeze({ status: 'completed' as const });
   const document = Object.freeze({
     fileName: 'Model.csv',
@@ -21,7 +21,7 @@ function documentHostHarness(): GeometryDocumentHostPort {
     derivedResources: Object.freeze([]),
     sourceFiles: Object.freeze([]),
     revision: 0,
-    persistedRevision: 0,
+    persistedRevision,
     isDirty: false,
   });
   const snapshot = Object.freeze({
@@ -87,7 +87,35 @@ describe('FilenameBar validation readiness', () => {
     expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
   });
 
-  it('calls a chip that holds only notices a Notice, not a build error', () => {
+  it('does not show Not validated for a draft that was never saved', () => {
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ scenariosBaseModelEnabled: false });
+    render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness(null)} saveStatus="idle" saveError={null} />
+      </GeometryStoreProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a data-loss load warning on the red chip without blocking Save', () => {
+    render(
+      <GeometryStoreProvider store={createGeometryStore()}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null}
+          buildError="Loaded with 1 data warning(s)"
+          buildErrorItems={[
+            { source: 'build', severity: 'warning', message: 'Opening the model updated 1 value.' },
+            { source: 'build', message: 'Wall 1: extra_json was malformed and its overrides were dropped.' },
+          ]} />
+      </GeometryStoreProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Build Error (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('shows no chip beside Save when there are only notices', () => {
     render(
       <GeometryStoreProvider store={createGeometryStore()}>
         <FilenameBar
@@ -100,8 +128,7 @@ describe('FilenameBar validation readiness', () => {
       </GeometryStoreProvider>,
     );
 
-    expect(screen.getByRole('button', { name: 'Notice (1)' })).toHaveClass('status-chip--warning');
-    expect(screen.queryByRole('button', { name: /Build Error/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Notice|Build Error/ })).not.toBeInTheDocument();
   });
 
   it('shows the live check\'s errors on open, before any save, beside a load notice', () => {
@@ -113,19 +140,24 @@ describe('FilenameBar validation readiness', () => {
           buildErrorItems={[{ source: 'build', severity: 'warning', message: 'Opening the model updated 1 value.' }]} />
       </GeometryStoreProvider>,
     );
-    // The notice is not an error: it is counted apart.
+    // The notice is not an error: it is listed under a Notices heading, after the errors.
     fireEvent.click(screen.getByRole('button', { name: 'Build Error (1)' }));
-    expect(screen.getByText('1 error · 1 notice')).toBeInTheDocument();
+    expect(screen.getByText('1 error')).toBeInTheDocument();
+    const heading = screen.getByText('Notices');
+    expect(screen.getAllByText('PV: mounting type is required.')[0].compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(heading.compareDocumentPosition(screen.getAllByText('Opening the model updated 1 value.')[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows a long notice\'s first line, with the rest under Details', () => {
+    const store = createGeometryStore();
+    store.getState().setTargetValidation({ hemVersion: '0.13.2', items: [{ source: 'schema', path: '/OnSiteGeneration/PV/mounting_type', message: 'PV: mounting type is required.' }] });
     render(
-      <GeometryStoreProvider store={createGeometryStore()}>
+      <GeometryStoreProvider store={store}>
         <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null}
           buildErrorItems={[{ source: 'build', severity: 'warning', message: 'Opening the model updated 2 values. Save to keep them.\nWall 1 area 1 → 2; Wall 2 area 3 → 4.' }]} />
       </GeometryStoreProvider>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Notice (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Build Error (1)' }));
     expect(screen.getByText('Opening the model updated 2 values. Save to keep them.')).toBeInTheDocument();
     expect(screen.getByText(/Wall 1 area 1 → 2/).closest('details')).not.toBeNull();
   });
