@@ -366,8 +366,30 @@ function renderFieldLabelWithIndicator(
   );
 }
 
+// Every control looks its default up on every render, and a miss walks the whole tree:
+// one answer per defaults document, lookup and query.
+const defaultValueCache = new WeakMap<object, WeakMap<object, Map<string, unknown>>>();
+
 // Helper to get default value for a specific path, preferring the current elementType subtree
 function getDefaultValue(
+  defaults: unknown,
+  defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
+  propertyName: string,
+  elementType?: string,
+  subtype?: string,
+  opaqueFabricVariant?: OpaqueFabricVariant,
+): unknown {
+  if (!defaults || typeof defaults !== 'object') return undefined;
+  let byLookup = defaultValueCache.get(defaults);
+  if (!byLookup) defaultValueCache.set(defaults, (byLookup = new WeakMap()));
+  let cache = byLookup.get(defaultsLookup);
+  if (!cache) byLookup.set(defaultsLookup, (cache = new Map()));
+  const key = JSON.stringify([propertyName, elementType ?? null, subtype ?? null, opaqueFabricVariant ?? null]);
+  if (!cache.has(key)) cache.set(key, findDefaultValue(defaults, defaultsLookup, propertyName, elementType, subtype, opaqueFabricVariant));
+  return cache.get(key);
+}
+
+function findDefaultValue(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
   propertyName: string,

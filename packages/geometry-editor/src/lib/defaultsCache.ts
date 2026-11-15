@@ -200,6 +200,12 @@ function getDefaultValueFromDefaults(
   if (indexedValue !== undefined) {
     return indexedValue;
   }
+  // A built index holds every field of every node (`${field}:*`), so a miss there means
+  // no node has the field: the walk below would find nothing. `type` is the one field
+  // the index skips.
+  if (index.size > 0 && fieldName !== 'type') {
+    return undefined;
+  }
 
   // Fallback to DFS if index is empty (shouldn't happen after preload, but safe fallback)
   const propertyNameKey = fieldName;
