@@ -1246,10 +1246,12 @@ export function GlobalSettingsModal({
     target?.scrollIntoView?.({ block: "center" });
     target?.closest("label")?.control?.focus({ preventScroll: true });
   }, [focusRequest]);
-  // Postcode, nation and build type: where a survey starts, so shown ahead of the fabric on a construction-band target.
+  // Postcode, nation and build type: where a survey starts, so shown first on HEM:EPC and ahead of the
+  // fabric on a construction-band target. A new-build EPC input has no postcode, so it is not shown there.
+  const surveyFirst = epcTarget || constructionBands;
   const surveyFields = (
     <>
-      <StandardInput
+      {epcTarget && !constructionBands ? null : <StandardInput
         type="text"
         label={<span data-field-key="Postcode">Property postcode</span>}
         value={propertyPostcode ?? ""}
@@ -1265,7 +1267,7 @@ export function GlobalSettingsModal({
         error={constructionBands && postcodeUnrecognised(propertyPostcode) ? "Postcode not recognised" : undefined}
         variant="ghost"
         size="md"
-      />
+      />}
       {constructionBands && borderArea ? (
         <StandardDropdown
           label={<span data-field-key={HEMIE_NATION}>Nation</span>}
@@ -1929,7 +1931,7 @@ export function GlobalSettingsModal({
               {calculationTargetSection}
 
               {/* With the target: it decides which inputs and defaults the model takes. */}
-              {constructionBands ? <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", marginBottom: "var(--spacing-md)" }}>{surveyFields}</div> : null}
+              {surveyFirst ? <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", marginBottom: "var(--spacing-md)" }}>{surveyFields}</div> : null}
               {requiredRows.has("IsExistingBuilding") && (
                 <div data-field-section="target" style={{ marginBottom: "var(--spacing-md)" }}>
                   <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
@@ -1994,7 +1996,7 @@ export function GlobalSettingsModal({
                           gap: "var(--spacing-md)",
                         }}
                       >
-                        {constructionBands ? null : surveyFields}
+                        {surveyFirst ? null : surveyFields}
 
                         {!epcTarget && (
                         <StandardDropdown

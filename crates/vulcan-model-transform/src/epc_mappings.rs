@@ -864,7 +864,7 @@ pub(crate) fn apply_desnz_defaults(
         }
     }
     let mut unshaded = Vec::new();
-    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
+    for zone_value in model["Zone"].as_object_mut().into_iter().flatten().map(|(_, v)| v) {
         for (name, element) in zone_value["BuildingElement"]
             .as_object_mut()
             .into_iter()
@@ -875,7 +875,7 @@ pub(crate) fn apply_desnz_defaults(
                     && !e.contains_key("shading")
             }) {
                 element.insert("shading".into(), json!([]));
-                unshaded.push(format!("{zone}/{name}"));
+                unshaded.push(name.clone());
             }
         }
     }
@@ -938,9 +938,10 @@ pub(crate) fn apply_desnz_defaults(
         if let Some(area) = ventilation
             .get("Leaks")
             .and_then(|l| l.get("env_area"))
+            .and_then(Value::as_f64)
             .filter(|_| !env_area_stated)
         {
-            notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("The envelope area {area} m² is derived from the drawn elements that separate the dwelling from outside, other dwellings and unheated spaces.")));
+            notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("Envelope area is {area:.1} m², from the drawn walls, floors and roofs. To use the air test value, enter Envelope area in Global Settings > Air tightness.")));
         }
     }
 }

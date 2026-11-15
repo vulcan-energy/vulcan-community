@@ -778,7 +778,7 @@ impl Ctx<'_> {
             {
                 Some(full) => {
                     c.insert("mass_distribution_class".into(), json!(full));
-                    stated_mass.push(format!("mass distribution class {full}"));
+                    stated_mass.push(format!("mass distribution class {}", full.split(':').next().unwrap_or(&full)));
                 }
                 None => self.errors.push(error(
                     "CONSTRUCTION",
@@ -903,7 +903,7 @@ impl Ctx<'_> {
                 construction_type,
                 "window" | "external_door" | "party_or_sheltered_door"
             ) {
-                stated_mass.push(format!("areal heat capacity {capacity}"));
+                stated_mass.push(format!("areal heat capacity {} kJ/m²K", capacity / 1000.0));
             }
         }
         if !stated_mass.is_empty() {
