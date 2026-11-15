@@ -22,7 +22,7 @@ describe('targetValidationIssues', () => {
         { source: 'schema', code: 'E026', path: '/HotWaterSource/hw cylinder', message: 'not an element' },
       ],
     }, model);
-    expect(elements.get('pw')).toEqual([{ message: 'HEM 1.0.0a8: Supply the party-wall resistance.', fieldKey: 'thermal_resistance_construction', source: 'schema' }]);
+    expect(elements.get('pw')).toEqual([{ message: 'Supply the party-wall resistance.', fieldKey: 'thermal_resistance_construction', source: 'schema' }]);
     expect(zones.get('z1')?.map((issue) => issue.message)).toEqual(['HEM 1.0.0a8 requires detailed thermal-bridge records.']);
     expect(elements.size + zones.size).toBe(2);
   });
@@ -42,7 +42,7 @@ describe('targetValidationIssues', () => {
         { source: 'schema', code: 'E_TARGET_INPUT', path: '/Zone/Zone 1/BuildingElement/Party Wall', message: 'HEM 2.0.0a4: Check the wall.' },
       ],
     }, model);
-    expect(withTargetIssues(local, elements.get('pw')).issues.map((issue) => issue.message)).toEqual(['U-value required', 'HEM 0.13.2: Check the wall.']);
+    expect(withTargetIssues(local, elements.get('pw')).issues.map((issue) => issue.message)).toEqual(['U-value required', 'Check the wall.']);
   });
 
   it('gives a missing required field to that field, so a field the editor flags shows once', () => {
@@ -66,7 +66,7 @@ describe('targetValidationIssues', () => {
     }, model);
     const clean = { hasIssues: false, issues: [], hasWarnings: false, warnings: [] };
     const result = withTargetIssues(clean, elements.get('pw'));
-    expect(result.warnings).toMatchObject([{ message: 'HEM 1.0.0a8: Check the opening height.', fieldKey: 'window_part_list' }]);
+    expect(result.warnings).toMatchObject([{ message: 'Check the opening height.', fieldKey: 'window_part_list' }]);
     expect(result.issues).toHaveLength(1);
     expect(withTargetIssues(clean, elements.get('pw')?.filter((issue) => issue.warning))).toMatchObject({ hasIssues: false, hasWarnings: true });
   });

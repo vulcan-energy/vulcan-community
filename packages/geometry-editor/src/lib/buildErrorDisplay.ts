@@ -265,7 +265,6 @@ export const targetValidationIssues = (
   const elements = new Map<string, TargetIssue[]>();
   const zones = new Map<string, TargetIssue[]>();
   if (!validation?.items) return { elements, zones };
-  const hem = `HEM ${validation.hemVersion}`;
   for (const row of displayBuildErrorRows(validation.items, (path) => resolveIssueTarget(path, model))) {
     const { elementId, zoneId } = row.target;
     // A missing required field is that field's issue, though the path names its row.
@@ -274,9 +273,8 @@ export const targetValidationIssues = (
       ? { map: elements, id: elementId }
       : zoneId && row.pathSegments[2] !== 'BuildingElement' ? { map: zones, id: zoneId } : undefined;
     if (!owner) continue;
-    // One version prefix: the target's, over any inner engine-version prefix.
-    const text = row.userMessage.replace(/^HEM [^\s:]+: /, '');
-    const message = text.startsWith(hem) ? text : `${hem}: ${text}`;
+    // The message says what to fix; no engine-version prefix.
+    const message = row.userMessage.replace(/^HEM [^\s:]+: /, '');
     owner.map.set(owner.id, [...(owner.map.get(owner.id) ?? []), { message, fieldKey, source: 'schema', ...(row.item.severity === 'warning' && { warning: true }) }]);
   }
   return { elements, zones };

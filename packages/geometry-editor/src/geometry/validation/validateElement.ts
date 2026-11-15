@@ -145,9 +145,17 @@ import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 // per-type validators that move into separate files in subsequent refactors.
 
 
-/** "Leakage When Stopped" -> "Enter the leakage when stopped". Capitalised words go lower case; acronyms (PV, FHS) stay. */
-const enterFieldMessage = (label: string): string =>
-  `Enter the ${label.replace(/\b([A-Z])([a-z]+)/g, (_, first: string, rest: string) => first.toLowerCase() + rest)}`;
+const plainLabel = (label: string) => label.replace(/\b([A-Z])([a-z]+)/g, (_, first: string, rest: string) => first.toLowerCase() + rest);
+/**
+ * "Leakage When Stopped" -> "Enter the leakage when stopped"; a yes/no field ("Is Unheated Pitched Roof")
+ * -> "Choose yes or no for unheated pitched roof". Capitalised words go lower case; acronyms (PV, FHS) stay.
+ */
+const enterFieldMessage = (label: string, yesNo = false): string =>
+  yesNo ? `Choose yes or no for ${plainLabel(label.replace(/^Is /, ''))}` : `Enter the ${plainLabel(label)}`;
+const isYesNoField = (fieldSchema: unknown): boolean => {
+  const property = fieldSchema as { type?: unknown; anyOf?: Array<{ type?: unknown }> } | undefined;
+  return property?.type === 'boolean' || !!property?.anyOf?.some((branch) => branch.type === 'boolean');
+};
 
 export const geoIssue = (message: string, fieldKey?: string): ValidationIssue =>
   ({ message, source: 'geometry', fieldKey });
@@ -2501,7 +2509,7 @@ export const validateElementCore = (
             }, schemaPort);
             const unit = fieldUnitForAdornment(presentation);
             const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
-            const message = `${complianceValidationEnabled ? 'FHS: ' : ''}${enterFieldMessage(displayName)}`;
+            const message = `${complianceValidationEnabled ? 'FHS: ' : ''}${enterFieldMessage(displayName, isYesNoField(schemaProperties[field]))}`;
             issues.push(issueFactory(message, field));
           }
         }

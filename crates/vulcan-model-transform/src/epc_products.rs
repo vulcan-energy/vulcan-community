@@ -737,7 +737,10 @@ pub(crate) fn resolve_products(
                             .filter(|_| *table == "ElectricBattery")
                             .map(|c| format!(" It replaces the authored capacity {c} kWh with the product's {} kWh.", product.fields.get("capacity").map_or("", String::as_str)))
                             .unwrap_or_default();
-                        notices.push(notice(&path, format!("{who} uses HEM Database product {} ({}) by default: it is the only one of its type.{replaced} Pick another product on the system to change it.", product.id, product.label)));
+                        // The system shows its default product; a notice says only what the default changes.
+                        if !replaced.is_empty() {
+                            notices.push(notice(&path, format!("Battery '{name}' uses HEM Database product {} ({}) by default: it is the only one of its type.{replaced}", product.id, product.label)));
+                        }
                         (
                             Some(product.id),
                             ProductSource::Default,
@@ -1476,12 +1479,12 @@ pub(crate) mod tests {
             "model setting Product_radiator"
         );
         let said = |text: &str| notices.iter().any(|n| n.message.contains(text));
-        assert!(said("'a2a' (HeatPump) uses HEM Database product 693000"));
+        // A default product shows on its system; only a default that changes an input says so.
+        assert!(!said("'a2a' (HeatPump) uses HEM Database product 693000"));
         assert!(said(
             "replaces the authored capacity 5 kWh with the product's 3.84 kWh"
         ));
-        assert!(said("uses HEM Database product 83001"));
-        assert!(said("by default: it is the only one of its type."));
+        assert!(!said("uses HEM Database product 83001"));
         // Defaults are written to the converted model only.
         assert_eq!(model["HeatSourceWet"]["hiu"]["product_id"], 410000);
     }
