@@ -634,11 +634,6 @@ export function missingSuspendedShieldLocations(
 }
 
 export interface GroundFabricFollower {
-  /**
-   * Runs a document load or replace (open, undo, redo, a shared-model update). Ground fabric does
-   * not follow the walls during it: opening a model never writes to it.
-   */
-  asDocumentLoad: <T>(load: () => T) => T;
   /** Runs an edit that copies elements; `sources` maps each copy's id to its source's. */
   withCopySources: <T>(sources: ReadonlyMap<string, string>, edit: () => T) => T;
 }
@@ -653,16 +648,17 @@ export function followGroundFabricOnEdit<
     elementsById: Record<string, Element>;
     updateElement: (id: string, patch: Partial<Element>) => void;
     getDefaultsLookup: () => Pick<DefaultsLookup, 'getDefaultValueForElementField'>;
+    writeIntent: () => string;
   },
 >(
   store: { subscribe: (listener: (state: S, previous: S) => void) => () => void; getState: () => S },
   rules: { constructionBands: (state: S) => boolean; acceptsShieldLocation: () => boolean },
 ): GroundFabricFollower {
-  let loadDepth = 0;
   let copySources: ReadonlyMap<string, string> | undefined;
   let syncing = false;
   store.subscribe((state, previous) => {
-    if (syncing || loadDepth > 0 || state.elementsById === previous.elementsById) return;
+    // Only the user's edits move ground fabric: not a load, an undo, a default fill or a derived write.
+    if (syncing || state.writeIntent() !== 'user' || state.elementsById === previous.elementsById) return;
     if (!groundSyncInputsChanged(state.elementsById, previous.elementsById)) return;
     syncing = true;
     try {
@@ -677,14 +673,6 @@ export function followGroundFabricOnEdit<
     }
   });
   return {
-    asDocumentLoad: (load) => {
-      loadDepth += 1;
-      try {
-        return load();
-      } finally {
-        loadDepth -= 1;
-      }
-    },
     withCopySources: (sources, edit) => {
       const outer = copySources;
       copySources = sources;

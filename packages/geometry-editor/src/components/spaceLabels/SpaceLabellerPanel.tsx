@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SpaceLabel } from '../../geometry/types';
 import { getOpenToLivingRoomAdjacencyWarning } from '../../geometry/validation/validateSpaceLabels';
 import { fingerprintInferenceWallSet } from '../../lib/spaceInference/inferSpacesFromWalls';
@@ -65,6 +65,7 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
   const elementsById = useGeometryStore((s) => s.elementsById);
   const floors = useGeometryStore((s) => s.floors);
   const syncInferredSpaceLabelsForZone = useGeometryStore((s) => s.syncInferredSpaceLabelsForZone);
+  const writeAs = useGeometryStore((s) => s.writeAs);
 
   const wallFingerprint = useMemo(() => {
     const els = elementIds.map((id) => elementsById[id]).filter(Boolean);
@@ -73,19 +74,30 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
 
   const [footprintNotice, setFootprintNotice] = useState<string | null>(null);
 
+  // Spaces inferred from the walls are the editor's write: opening the labeller or moving a wall
+  // neither dirties the model nor adds an undo step of its own. A sync that clears a room type or
+  // drops a space changes what the user entered: that is the user's write (dirty, undoable).
+  const syncInferredSpaces = useCallback((): ReturnType<typeof syncInferredSpaceLabelsForZone> => {
+    const plan = syncInferredSpaceLabelsForZone(zoneId, { dryRun: true });
+    const discards = plan.changed && (plan.roomTypesCleared > 0 || plan.footprintCount < plan.previousCount);
+    return writeAs(discards ? 'user' : 'derived', () => syncInferredSpaceLabelsForZone(zoneId));
+  }, [zoneId, syncInferredSpaceLabelsForZone, writeAs]);
+
   useLayoutEffect(() => {
-    const r = syncInferredSpaceLabelsForZone(zoneId);
+    const r = syncInferredSpaces();
     if (r.changed && r.previousCount === 0 && r.footprintCount > 0) {
       // The layout effect synchronizes the external geometry store before paint; this notice
       // records the result of that one-time zone transition for the user.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFootprintNotice('Spaces inferred from walls — assign room types where needed.');
+    } else if (r.changed && r.roomTypesCleared > 0) {
+      setFootprintNotice(`Wall layout changed — re-check room types (${r.roomTypesCleared} unassigned).`);
     }
-  }, [zoneId, syncInferredSpaceLabelsForZone]);
+  }, [syncInferredSpaces]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      const r = syncInferredSpaceLabelsForZone(zoneId);
+      const r = syncInferredSpaces();
       if (r.changed) {
         setFootprintNotice(
           r.roomTypesCleared > 0
@@ -95,7 +107,7 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
       }
     }, 420);
     return () => clearTimeout(t);
-  }, [wallFingerprint, zoneId, syncInferredSpaceLabelsForZone]);
+  }, [wallFingerprint, syncInferredSpaces]);
 
   useEffect(() => {
     if (!footprintNotice) return undefined;

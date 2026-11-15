@@ -2323,6 +2323,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const setSpaceLabellerSelectedLabelId = useGeometryStore((s) => s.setSpaceLabellerSelectedLabelId);
   const updateSpaceLabel = useGeometryStore((s) => s.updateSpaceLabel);
   const syncDevelopmentContextShading = useGeometryStore((s) => s.syncDevelopmentContextShading);
+  const writeAs = useGeometryStore((s) => s.writeAs);
   const selectAllElementsOnCurrentFloor = useGeometryStore((s) => s.selectAllElementsOnCurrentFloor);
   const setGuideOverlay = useGeometryStore((s) => s.setGuideOverlay);
   const setGuideOverlaySource = useGeometryStore((s: any) => s.setGuideOverlaySource);
@@ -2500,11 +2501,12 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     ) {
       return;
     }
-    syncDevelopmentContextShading({
+    // Shading drawn from the project's other models follows them: the editor's write, not the user's.
+    writeAs('derived', () => syncDevelopmentContextShading({
       projectId: activeDevelopmentProject.id,
       activeStem: currentBaseModelStem,
       contextModels: developmentContextModels,
-    });
+    }));
   }, [
     activeDevelopmentProject,
     currentBaseModelStem,
@@ -2517,6 +2519,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     zones,
     complianceSettings,
     syncDevelopmentContextShading,
+    writeAs,
   ]);
 
   useEffect(() => {

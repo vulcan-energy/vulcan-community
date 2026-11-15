@@ -136,7 +136,8 @@ export const createMetadataSlice = (
   guideOverlayByFloor: {} as GuideOverlayByFloor,
   guideOverlaySourceByFloor: {} as GuideOverlaySourceByFloor,
   setDefaultsPath: (path) => set({ defaultsPath: path }),
-  setDefaultsJson: (json) => set({ defaultsJson: json }),
+  // Defaults arrive after the user's action; the Metadata rows they fill are the editor's write.
+  setDefaultsJson: (json) => get().writeAs('default', () => set({ defaultsJson: json })),
   setHostDocumentMetadataValue: (key, value) => set((state) => {
     const next = { ...state.hostDocumentMetadata };
     const normalized = value?.trim();

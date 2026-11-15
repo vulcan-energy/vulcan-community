@@ -109,6 +109,7 @@ import {
   withoutPresetPrimaryPipework,
 } from './systemEditorUtils';
 import type { SchemaNode } from '../lib/schemaTypes';
+import { MVHR_FIXED_ENERGY_SUPPLY } from '../lib/deriveForExport';
 import { WINDOW_SHADING_TYPE_LABELS } from '../lib/windowOpenings';
 import {
   emptyGeometryInspectorContributions,
@@ -120,7 +121,6 @@ import {
 const EXTRA_JSON_UI_KEY_SET = new Set<string>(EXTRA_JSON_UI_KEYS);
 
 const EMPTY_ADVANCED_FIELDS: Record<string, unknown> = Object.freeze({});
-const MVHR_FIXED_ENERGY_SUPPLY = 'mains elec' as const;
 const COLLAPSED_ENGINE_FIELDS: ReadonlySet<string> = new Set(['areal_heat_capacity', 'mass_distribution_class', 'solar_absorption_coeff']);
 const PARTY_WALL_HALF_CONSTRUCTION_NOTE =
   'Enter dwelling-side half-construction values: U from the half build-up, half areal heat capacity, and the matching mass class. If using construction R, enter half R. Set cavity treatment separately.';
@@ -1143,23 +1143,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   );
   const selectedExternalDetailKey =
     constructionDetails?.selectedCandidateKey(advancedFieldsData) ?? '';
-
-  useEffect(() => {
-    if (!shouldRenderMechanicalVentilationFixedEnergySupply) return;
-    if ((advancedFieldsRecord as Record<string, unknown>).EnergySupply === MVHR_FIXED_ENERGY_SUPPLY) return;
-    onChange({
-      ...currentData,
-      extra_json: {
-        ...(advancedFieldsRecord as Record<string, unknown>),
-        EnergySupply: MVHR_FIXED_ENERGY_SUPPLY,
-      },
-    });
-  }, [
-    advancedFieldsRecord,
-    currentData,
-    onChange,
-    shouldRenderMechanicalVentilationFixedEnergySupply,
-  ]);
 
   const projectHeatSourceWetNames = useMemo(
     () => collectHeatSourceWetNamesFromProject(elementsById),

@@ -156,6 +156,11 @@ export function remapZoneSpaceLabelsFromInference(
     });
   }
 
+  // A labelled space that matched no footprint is dropped: its room type is cleared too.
+  for (const label of prevInZone) {
+    if (label.zoneId === zoneId && label.room_type && !usedLabel.has(label.id)) roomTypesCleared++;
+  }
+
   for (let fi = 0; fi < footprints.length; fi++) {
     if (usedFace.has(fi)) continue;
     const fp = footprints[fi];

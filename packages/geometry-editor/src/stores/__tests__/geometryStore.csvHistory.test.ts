@@ -314,4 +314,85 @@ describe('CSV document history', () => {
     expect(hostOf()).toBe(wallId);
     expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
   });
+
+  describe('writeAs', () => {
+    const coldWater = (store: Store, value: string) => store.getState().setComplianceSettings({ ColdWaterSource: value });
+
+    it('a default or derived write on a clean model keeps it clean and adds no step', () => {
+      for (const intent of ['default', 'derived'] as const) {
+        const store = loadedStore();
+        store.getState().writeAs(intent, () => coldWater(store, 'header tank'));
+        settle();
+        const state = store.getState();
+        expect(state.getDocumentCsv(), intent).toBe(state.lastSavedCsv);
+        expect(state.history, intent).toHaveLength(1);
+        expect(state.history[0]!.csv, intent).toContain('header tank');
+      }
+    });
+
+    it('a user or preset write marks the model dirty and is an undo step', () => {
+      for (const intent of ['user', 'preset'] as const) {
+        const store = loadedStore();
+        store.getState().writeAs(intent, () => coldWater(store, 'header tank'));
+        settle();
+        expect(store.getState().getDocumentCsv(), intent).not.toBe(store.getState().lastSavedCsv);
+        expect(store.getState().history, intent).toHaveLength(2);
+      }
+    });
+
+    it('folds into the step of a pending edit, which stays its own step and keeps the model dirty', () => {
+      const store = loadedStore();
+      const saved = store.getState().lastSavedCsv;
+      store.getState().updateElement(idOf(store, 'Living wall'), { name: 'Front wall' });
+      store.getState().writeAs('derived', () => coldWater(store, 'header tank'));
+      settle();
+      expect(store.getState().lastSavedCsv).toBe(saved);
+      expect(store.getState().history).toHaveLength(2);
+      expect(store.getState().history[1]!.csv).toContain('header tank');
+      store.getState().undo();
+      expect(store.getState().getDocumentCsv()).toBe(saved);
+    });
+
+    it('a write that changes nothing leaves typed edits in one step', () => {
+      const store = loadedStore();
+      const wallId = idOf(store, 'Living wall');
+      for (const name of ['F', 'Fr', 'Fro', 'Fron', 'Front']) {
+        store.getState().updateElement(wallId, { name });
+        store.getState().writeAs('derived', () => undefined);
+        vi.advanceTimersByTime(50);
+      }
+      settle();
+      expect(store.getState().history).toHaveLength(2);
+    });
+
+    it('redo returns to the step without a system write made after the undo (accepted, plan §7)', () => {
+      const store = loadedStore();
+      store.getState().updateElement(idOf(store, 'Living wall'), { name: 'Front wall' });
+      settle();
+      store.getState().undo();
+      store.getState().writeAs('default', () => coldWater(store, 'header tank'));
+      store.getState().redo();
+      expect(store.getState().getDocumentCsv()).toContain('Front wall');
+      expect(store.getState().getDocumentCsv()).not.toContain('header tank');
+    });
+
+    it('a write nested in a system write is part of it', () => {
+      const store = loadedStore();
+      store.getState().writeAs('derived', () => store.getState().writeAs('user', () => coldWater(store, 'header tank')));
+      settle();
+      expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
+      expect(store.getState().history).toHaveLength(1);
+    });
+  });
+
+  it('a space-label dry run writes nothing and plans what the sync does', () => {
+    const store = loadedStore();
+    const zoneId = store.getState().zones[0]!.id;
+    const before = store.getState();
+    const plan = store.getState().syncInferredSpaceLabelsForZone(zoneId, { dryRun: true });
+    expect(store.getState()).toBe(before);
+    expect(store.getState().syncInferredSpaceLabelsForZone(zoneId)).toMatchObject({
+      changed: plan.changed, previousCount: plan.previousCount, footprintCount: plan.footprintCount, roomTypesCleared: plan.roomTypesCleared,
+    });
+  });
 });

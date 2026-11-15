@@ -54,6 +54,7 @@ import {
   fillSuspendedFloorDefaults,
   missingSuspendedShieldLocations,
 } from '../../../lib/groundSuspendedFabricSync';
+import { deriveForExport } from '../../../lib/deriveForExport';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -158,7 +159,9 @@ export interface IoSlice {
   /**
    * Internal (Undo/Redo): make `csvContent` the document without resetting history,
    * the saved baseline or the viewport; surviving element and zone ids, the selection and the
-   * shared-model identity (`modelId`, `modelVersion`) stay.
+   * shared-model identity (`modelId`, `modelVersion`) stay. It runs as a document load and adds no
+   * undo step: a caller outside undo/redo seeds history or follows with a user write, or a later
+   * system write folds into the step before the replace.
    */
   replaceDocumentFromCsv: (
     csvContent: string,
@@ -185,6 +188,7 @@ export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;
   defaultsPathForTarget: ((targetBundleId: string) => string | undefined) | undefined;
   numericArealHeatCapacityForTarget: ((targetBundleId: string | undefined) => boolean) | undefined;
+  hemDatabaseProductsForTarget: ((targetBundleId: string | undefined) => boolean | undefined) | undefined;
   modelSchemaProfilePort: GeometryModelSchemaProfilePort;
   schemaPort: GeometrySchemaPort;
   workspaceResourcePort: GeometryWorkspaceResourcePort;
@@ -917,7 +921,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const state: GeometryState = {
       ...rawState,
       elementsById: projectOverrideMarkersForExport(
-        rawState.elementsById,
+        deriveForExport(
+          rawState.elementsById,
+          options.hemDatabaseProductsForTarget
+            ? options.hemDatabaseProductsForTarget(rawState.targetBundleId)
+            : targetRules(options.schemaPort, rawState.complianceSettings).hemDatabaseProducts,
+        ),
         OVERRIDE_PROVENANCE_REGISTRY.element,
       ),
       spaceLabelsById: projectOverrideMarkersForExport(
@@ -1898,7 +1907,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
                 if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
                 try {
                   const parsed = JSON.parse(content);
-                  set({ defaultsJson: parsed, defaultsLoading: false });
+                  // The Metadata rows these defaults fill are the editor's write: the load stays clean.
+                  get().writeAs('default', () => set({ defaultsJson: parsed, defaultsLoading: false }));
                 } catch (error) {
                   console.warn('[DefaultsCache] Failed to parse CSV defaults JSON:', error);
                   set({ defaultsLoading: false });
@@ -2457,6 +2467,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         withEffectiveStoreyHeights(get().floors, loadedElements),
       ),
       get().globalOrientationOffset,
+      options.schemaPort.availability === 'available'
+        ? (element) => coerceElementToStrictestNumericTyping(element, options.schemaPort)
+        : undefined,
     );
     const upgraded = upgradedElements !== loadedElements;
     if (upgraded) {
@@ -2489,11 +2502,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const shieldLocations = missingSuspendedShieldLocations(state.elementsById, acceptsSuspendedShieldLocation(options.schemaPort));
     const hasShieldLocations = Object.keys(shieldLocations).length > 0;
     if (!fill && settings === state.complianceSettings && !hasShieldLocations) return;
-    set({
+    get().writeAs('default', () => set({
       ...(hasShieldLocations ? { elementsById: { ...state.elementsById, ...shieldLocations } } : {}),
       complianceSettings: fill ? { ...settings, ...fill.patch } : settings,
       ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
-    });
+    }));
   }
   const unsubscribeSchema = options.schemaPort.subscribe?.(followTarget);
 
