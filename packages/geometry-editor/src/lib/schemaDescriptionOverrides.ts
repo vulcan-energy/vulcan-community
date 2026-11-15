@@ -173,11 +173,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: '°C',
   },
-  // Wet distribution flow rates are in litres per minute; a value in L/s is 60 times too small.
+  // Minimum and maximum flow rates are litres per minute; the constant design flow rate is litres per second.
   'design_flow_rate': {
-    description: 'Design flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60: 0.06 L/s is 3.6 L/min.',
+    description: 'Constant flow rate of the heating circuit when the heat source cannot change its flow rate, in litres per second (L/s). A value in L/min is 60 times too large: 3.6 L/min is 0.06 L/s.',
     type: 'number',
-    units: 'L/min',
+    units: 'L/s',
   },
   'min_flow_rate': {
     description: 'Minimum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',

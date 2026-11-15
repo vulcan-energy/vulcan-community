@@ -98,6 +98,7 @@ const UNIT_ALIASES = new Map<string, string>([
   ['litre', 'L'],
   ['litres', 'L'],
   ['litre/minute', 'L/min'],
+  ['litres/min', 'L/min'],
   ['litres/minute', 'L/min'],
   ['litre per minute', 'L/min'],
   ['litres per minute', 'L/min'],
