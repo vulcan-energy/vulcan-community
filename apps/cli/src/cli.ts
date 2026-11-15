@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { checkExitCode, checkGeometryCsv, printCheckSummary, type FailOn } from './check';
 import { convertCsv, printValidationErrors } from './convert';
 import { preflightModel, preflightPassed } from './preflight';
+import { sizeModel, sizingExitCode, sizingText } from './sizing';
 import {
   autoThermalBridges,
   printAutoCsvSection,
@@ -34,6 +35,17 @@ Commands:
       Run FHS preflight (no simulation) on a HEM JSON, or on a CSV after convert.
       With --profile epc, convert the CSV and check it against the HEM:EPC schema.
       Exits 1 on any issue.
+  sizing <model.json> --design-heat-loss <file> [--json]
+      Size the heat sources and space heating systems of a preprocessed HEM core model
+      against its static design heat loss ({ coldestHourC, setpointC, weatherName, zones }). The Vulcan
+      repository's scripts/hem-targets/design-heat-loss.mjs writes both files from a Rust
+      HEM:FHS target. A "Too small" verdict is a result: exit 0. Exits 3 when
+      --design-heat-loss is not given, or its file is missing, cannot be read as JSON, or
+      lacks coldestHourC, setpointC, weatherName or a zones object. Exits 1 when a zone is
+      not an object or has a missing or non-finite number, and on any other failure.
+      --json fields: status ("sized"|"unavailable"), reason (unavailable only),
+      coldestHourC, setpointC, weatherName, zoneCount, systems[], heatSources[], notes[]
+      (sized only).
 
   --profile core|fhs|epc selects the input: by default FHS, or core when the CSV has
   ComplianceValidationEnabled,FALSE. epc is HEM:EPC input: new build, or an existing
@@ -155,6 +167,18 @@ async function runPreflight(args: string[]): Promise<number> {
   return passed ? 0 : 1;
 }
 
+async function runSizing(args: string[]): Promise<number> {
+  const usage = 'vulcan-community sizing <model.json> --design-heat-loss <file> [--json]';
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { json: { type: 'boolean' }, 'design-heat-loss': { type: 'string' } },
+  });
+  const result = sizeModel(singleCsv(positionals, usage), { designHeatLoss: values['design-heat-loss'] });
+  console.log(values.json ? JSON.stringify(result, null, 2) : sizingText(result).join('\n'));
+  return sizingExitCode(result);
+}
+
 async function runVersion(args: string[]): Promise<number> {
   const { values } = parseArgs({ args, options: { json: { type: 'boolean' } } });
   const wasm = modelWasmAvailable() ? await loadModelWasm() : null;
@@ -175,6 +199,7 @@ export async function main(argv: string[]): Promise<number> {
     if (command === 'thermal-bridges') return runThermalBridges(rest);
     if (command === 'convert') return await runConvert(rest);
     if (command === 'preflight') return await runPreflight(rest);
+    if (command === 'sizing') return await runSizing(rest);
     if (command === 'version' || command === '--version' || command === '-v') return await runVersion(rest);
     if (command === undefined || command === '--help' || command === '-h' || command === 'help') {
       console.log(HELP);

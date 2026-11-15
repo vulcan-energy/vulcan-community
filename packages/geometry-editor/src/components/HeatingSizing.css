@@ -1,0 +1,125 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* Heating sizing block (System and WetEmitter panels). Colours come from the shared tokens. */
+
+.heating-sizing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.heating-sizing__sentence {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  color: var(--text-primary);
+}
+
+.heating-sizing__dim {
+  margin: 0;
+  font-size: var(--font-size-xxs);
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+.heating-sizing__plant {
+  margin: 4px 0 0;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ---- Heat source working-range bar ---- */
+
+.heating-sizing-bar {
+  /* Not --success-text: the accessible-colours override turns it pale for text, too pale for a fill. */
+  --bar-fill: var(--status-ok-fill);
+  position: relative;
+  width: 100%;
+  height: 56px;
+  font-size: var(--font-size-xs);
+  line-height: 16px;
+  color: var(--text-primary);
+}
+
+.heating-sizing-bar--error { --bar-fill: var(--validation-error); }
+.heating-sizing-bar--warning { --bar-fill: var(--validation-warning); }
+
+.heating-sizing-bar__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 21px;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.heating-sizing-bar__segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 6px;
+  background: var(--bar-fill);
+}
+
+.heating-sizing-bar__marker {
+  position: absolute;
+  top: 18px;
+  width: 4px;
+  height: 18px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--text-primary);
+  /* A ring in the panel colour keeps the tick visible on the pale green, amber and red segments. */
+  box-shadow: 0 0 0 2px var(--bg-primary);
+}
+
+.heating-sizing-bar__label {
+  position: absolute;
+  white-space: nowrap;
+}
+
+.heating-sizing-bar__label--marker { top: 0; }
+.heating-sizing-bar__label--segment { top: 38px; }
+
+/* ---- Emitter chart ---- */
+
+.heating-sizing-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.heating-sizing-chart text {
+  font-family: var(--font-family);
+  paint-order: stroke;
+  stroke: var(--bg-primary);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.heating-sizing-chart__tick { font-size: 12px; fill: var(--text-muted); }
+.heating-sizing-chart__title { font-size: 12px; fill: var(--text-secondary); }
+.heating-sizing-chart__label { font-size: 12px; fill: var(--text-primary); }
+.heating-sizing-chart__label--red { fill: var(--validation-error-text); }
+.heating-sizing-chart__label--green { fill: var(--success-text); }
+.heating-sizing-chart__grid { stroke: var(--border-subtle); stroke-width: 1; stroke-opacity: 0.5; }
+.heating-sizing-chart__zone--red { fill: var(--validation-error); fill-opacity: 0.2; }
+.heating-sizing-chart__zone--green { fill: var(--status-ok-fill); fill-opacity: 0.2; }
+.heating-sizing-chart__need { stroke: var(--text-secondary); stroke-width: 1.5; stroke-dasharray: 2 6; stroke-linecap: round; }
+.heating-sizing-chart__curve { stroke: var(--accent-primary); stroke-width: 2.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.heating-sizing-chart__leader { stroke: var(--text-muted); stroke-width: 1; stroke-linecap: round; }
+.heating-sizing-chart__dot--success { fill: var(--status-ok-fill); }
+.heating-sizing-chart__dot--error { fill: var(--validation-error); }
+.heating-sizing-chart__dot { stroke: var(--bg-primary); stroke-width: 2; }
+.heating-sizing-chart__cross { fill: var(--bg-primary); stroke: var(--text-primary); stroke-width: 2; }

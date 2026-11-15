@@ -806,7 +806,7 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     sourceComparisonPort.getSnapshot,
     sourceComparisonPort.getSnapshot,
   );
-  const { selectedElement, elementsById, zones, activeCsvValidationInfo, targetValidation, hostValidationFindings, validateElement } = useGeometryStore(
+  const { selectedElement, elementsById, zones, activeCsvValidationInfo, targetValidation, hostValidationFindings, heatingSizing, validateElement } = useGeometryStore(
     useShallow((s) => ({
       selectedElement: s.elementsById[selectionId] ?? null,
       elementsById: s.elementsById,
@@ -814,13 +814,15 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
       activeCsvValidationInfo: activeFilename ? s.csvValidationCache[activeFilename] : undefined,
       targetValidation: s.targetValidation,
       hostValidationFindings: s.hostValidationFindings,
+      heatingSizing: s.heatingSizing,
       validateElement: s.validateElement,
     })),
   );
 
   const validationRows = useMemo(() => {
     void sourceComparisonSnapshot.revision;
-    void hostValidationFindings; // validateElement reads it from the store
+    void hostValidationFindings; // validateElement reads it and heatingSizing from the store
+    void heatingSizing;
     if (!selectedElement) return null;
 
     const validation = withTargetIssues(
@@ -845,7 +847,7 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
     const comparisonInfoPillItems = sourceComparisonPort.elementInfo(selectedElement.id)?.items ?? [];
 
     return { validation, schemaIssues, comparisonInfoPillItems };
-  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, targetValidation, hostValidationFindings, validateElement, zones]);
+  }, [activeCsvValidationInfo, activeFilename, elementsById, selectedElement, sourceComparisonPort, sourceComparisonSnapshot.revision, targetValidation, hostValidationFindings, heatingSizing, validateElement, zones]);
 
   if (!selectedElement || !validationRows) return null;
   const { validation, schemaIssues, comparisonInfoPillItems } = validationRows;

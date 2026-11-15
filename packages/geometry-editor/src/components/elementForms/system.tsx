@@ -121,6 +121,7 @@ import { useKeyedState } from '../../hooks/useKeyedState';
 import { systemPlantTypes, withSystemPlantType } from '../../lib/systemSchemaFlatten';
 import { readRecord } from '../../lib/jsonTypes';
 import { StandardDropdown } from '../StandardDropdown';
+import { HeatingSizingBlock } from '../HeatingSizingBlock';
 import {
   buildSpaceHeatSystemSampleBaselineExtraJson,
   getSystemElementSourceFromState,
@@ -917,7 +918,8 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
       handleSystemTypeChange,
       systemPlantCount,
     } = state;
-    const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager } = ctx;
+    const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager, selectedElement } = ctx;
+    const sizing = <HeatingSizingBlock element={selectedElement} elements={Object.values(elementsById)} />;
 
     // Products take no sample preset, so the type is chosen here.
     const showType = !!(hemDatabaseProducts && systemPlantCount <= 1 && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
@@ -958,6 +960,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
             </div>
           </>
         ) : null}
+            {sizing}
             {systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null}
           </>
         ) : !productCatalogue || systemUiMode === 'presets' ? (
@@ -1009,6 +1012,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
                   : 'Custom system. Edits are saved in this model.'}
               </div>
             ) : null}
+            {sizing}
           </>
         ) : productCatalogue.renderSystemSource({
           active: true,
