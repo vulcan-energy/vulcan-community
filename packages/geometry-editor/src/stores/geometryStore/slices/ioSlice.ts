@@ -186,6 +186,7 @@ export type IoSliceOptions = Readonly<{
   defaultDefaultsPath: string | undefined;
   defaultsPathForTarget: ((targetBundleId: string) => string | undefined) | undefined;
   numericArealHeatCapacityForTarget: ((targetBundleId: string | undefined) => boolean) | undefined;
+  hemDatabaseProductsForTarget: ((targetBundleId: string | undefined) => boolean | undefined) | undefined;
   modelSchemaProfilePort: GeometryModelSchemaProfilePort;
   schemaPort: GeometrySchemaPort;
   workspaceResourcePort: GeometryWorkspaceResourcePort;
@@ -918,7 +919,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const state: GeometryState = {
       ...rawState,
       elementsById: projectOverrideMarkersForExport(
-        deriveForExport(rawState.elementsById, targetRules(options.schemaPort, rawState.complianceSettings)),
+        deriveForExport(
+          rawState.elementsById,
+          options.hemDatabaseProductsForTarget
+            ? options.hemDatabaseProductsForTarget(rawState.targetBundleId)
+            : targetRules(options.schemaPort, rawState.complianceSettings).hemDatabaseProducts,
+        ),
         OVERRIDE_PROVENANCE_REGISTRY.element,
       ),
       spaceLabelsById: projectOverrideMarkersForExport(
@@ -2459,6 +2465,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         withEffectiveStoreyHeights(get().floors, loadedElements),
       ),
       get().globalOrientationOffset,
+      options.schemaPort.availability === 'available'
+        ? (element) => coerceElementToStrictestNumericTyping(element, options.schemaPort)
+        : undefined,
     );
     const upgraded = upgradedElements !== loadedElements;
     if (upgraded) {

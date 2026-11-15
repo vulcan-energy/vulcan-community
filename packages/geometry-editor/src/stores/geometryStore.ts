@@ -1540,9 +1540,10 @@ export interface GeometryState extends
   closeSpaceLabeller: () => void;
   /** Quantized wall-segment fingerprint per zone — avoids re-infer when fabric unchanged. */
   spaceInferenceWallPrintByZone: Record<string, string>;
+  /** `dryRun` returns what the sync would do and writes nothing. */
   syncInferredSpaceLabelsForZone: (
     zoneId: string,
-    opts?: { force?: boolean },
+    opts?: { force?: boolean; dryRun?: boolean },
   ) => {
     changed: boolean;
     previousCount: number;
@@ -2905,6 +2906,13 @@ export interface CreateGeometryStoreOptions {
    * element's number instead of snapping it to the nearest band (which loses it).
    */
   numericArealHeatCapacityForTarget?: (targetBundleId: string | undefined) => boolean;
+  /**
+   * Whether the document's own pinned target references database products (`TargetRules.
+   * hemDatabaseProducts`); undefined for a pin the host does not know. Export-time values follow
+   * the document's pin, not the target the open editor shows (another store can export a model
+   * pinned elsewhere). Absent, the schema port's rule applies: a host with one document.
+   */
+  hemDatabaseProductsForTarget?: (targetBundleId: string | undefined) => boolean | undefined;
   initialNamingPreferences?: NamingPreferences;
   modelSchemaProfilePort?: GeometryModelSchemaProfilePort;
   schemaPort?: GeometrySchemaPort;
@@ -3219,6 +3227,7 @@ const createGeometryState = (
     defaultDefaultsPath,
     defaultsPathForTarget: options.defaultsPathForTarget,
     numericArealHeatCapacityForTarget: options.numericArealHeatCapacityForTarget,
+    hemDatabaseProductsForTarget: options.hemDatabaseProductsForTarget,
     hostDocumentMetadataKeys,
     modelSchemaProfilePort,
     schemaPort,
@@ -5040,6 +5049,7 @@ const createGeometryState = (
 
   syncInferredSpaceLabelsForZone: (zoneId, opts) => {
     const state = get();
+    const write: typeof set = opts?.dryRun ? () => {} : set;
     if (!state.zones.some((z) => z.id === zoneId)) {
       return {
         changed: false,
@@ -5072,7 +5082,7 @@ const createGeometryState = (
     });
 
     if (footprints.length === 0 && prevInZone.length > 0) {
-      set({
+      write({
         spaceInferenceWallPrintByZone: {
           ...state.spaceInferenceWallPrintByZone,
           [zoneId]: print,
@@ -5114,7 +5124,7 @@ const createGeometryState = (
     const nextLabels = [...protectedPrev, ...nextInferredLabels];
 
     if (!opts?.force && labelsListContentEqual(prevInZone, nextLabels)) {
-      set({
+      write({
         spaceInferenceWallPrintByZone: {
           ...state.spaceInferenceWallPrintByZone,
           [zoneId]: print,
@@ -5144,7 +5154,7 @@ const createGeometryState = (
       ...nextLabels.map((sl) => sl.id),
     ];
 
-    set({
+    write({
       spaceLabelsById: nextById,
       spaceLabelIds,
       spaceInferenceWallPrintByZone: {
@@ -5152,7 +5162,7 @@ const createGeometryState = (
         [zoneId]: print,
       },
     });
-    get().syncDerivedValuesFromSpaceLabels();
+    if (!opts?.dryRun) get().syncDerivedValuesFromSpaceLabels();
     return {
       changed: true,
       previousCount: prevInZone.length,

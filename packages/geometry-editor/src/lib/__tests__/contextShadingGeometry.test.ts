@@ -107,4 +107,22 @@ describe('context shading distance', () => {
     const next = rederiveContextShadingFromDrawing(elements, 0);
     expect((next[1] as unknown as { distance: number }).distance).toBe(4);
   });
+
+  it('reads angles a target stores as integers as unchanged on load', () => {
+    const shading = { id: 's', name: 'Block', type: 'ContextShading', parent_element: 'Floor', ...block };
+    const derived = rederiveContextShadingFromDrawing(
+      [{ id: 'f', name: 'Floor', type: 'BuildingElementGround', ...floor }, { ...shading, start_angle: 0, end_angle: 0, distance: 0 }] as unknown as Element[], 0,
+    )[1] as unknown as { start_angle: number; end_angle: number; distance: number };
+    const integerAngles = (element: Element) => {
+      const record = element as unknown as Record<string, number>;
+      return { ...element, start_angle: Math.round(record.start_angle!), end_angle: Math.round(record.end_angle!) } as Element;
+    };
+    const stored = [
+      { id: 'f', name: 'Floor', type: 'BuildingElementGround', ...floor },
+      { ...shading, start_angle: Math.round(derived.start_angle), end_angle: Math.round(derived.end_angle), distance: derived.distance },
+    ] as unknown as Element[];
+    expect(derived.start_angle).not.toBe(Math.round(derived.start_angle));
+    expect(rederiveContextShadingFromDrawing(stored, 0, integerAngles)).toBe(stored);
+    expect(rederiveContextShadingFromDrawing(stored, 0)).not.toBe(stored);
+  });
 });

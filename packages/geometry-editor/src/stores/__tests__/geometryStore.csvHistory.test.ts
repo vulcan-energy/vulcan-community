@@ -353,12 +353,46 @@ describe('CSV document history', () => {
       expect(store.getState().getDocumentCsv()).toBe(saved);
     });
 
+    it('a write that changes nothing leaves typed edits in one step', () => {
+      const store = loadedStore();
+      const wallId = idOf(store, 'Living wall');
+      for (const name of ['F', 'Fr', 'Fro', 'Fron', 'Front']) {
+        store.getState().updateElement(wallId, { name });
+        store.getState().writeAs('derived', () => undefined);
+        vi.advanceTimersByTime(50);
+      }
+      settle();
+      expect(store.getState().history).toHaveLength(2);
+    });
+
+    it('redo returns to the step without a system write made after the undo (accepted, plan §7)', () => {
+      const store = loadedStore();
+      store.getState().updateElement(idOf(store, 'Living wall'), { name: 'Front wall' });
+      settle();
+      store.getState().undo();
+      store.getState().writeAs('default', () => coldWater(store, 'header tank'));
+      store.getState().redo();
+      expect(store.getState().getDocumentCsv()).toContain('Front wall');
+      expect(store.getState().getDocumentCsv()).not.toContain('header tank');
+    });
+
     it('a write nested in a system write is part of it', () => {
       const store = loadedStore();
       store.getState().writeAs('derived', () => store.getState().writeAs('user', () => coldWater(store, 'header tank')));
       settle();
       expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
       expect(store.getState().history).toHaveLength(1);
+    });
+  });
+
+  it('a space-label dry run writes nothing and plans what the sync does', () => {
+    const store = loadedStore();
+    const zoneId = store.getState().zones[0]!.id;
+    const before = store.getState();
+    const plan = store.getState().syncInferredSpaceLabelsForZone(zoneId, { dryRun: true });
+    expect(store.getState()).toBe(before);
+    expect(store.getState().syncInferredSpaceLabelsForZone(zoneId)).toMatchObject({
+      changed: plan.changed, previousCount: plan.previousCount, footprintCount: plan.footprintCount, roomTypesCleared: plan.roomTypesCleared,
     });
   });
 });

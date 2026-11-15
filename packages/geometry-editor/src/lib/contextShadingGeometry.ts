@@ -283,7 +283,15 @@ export function calculateContextShadingDistanceFromCoordinates(
  * footprint and parent, so stored values always match the drawing (the form shows the
  * derived values). Returns the input array unchanged when nothing differs.
  */
-export function rederiveContextShadingFromDrawing<T extends Element>(elements: readonly T[], globalOffsetDeg: number): T[] {
+/**
+ * `typed` applies the target's numeric typing (integer angles on some targets), as the load does
+ * to the stored values: a value the target stores rounded is not a change.
+ */
+export function rederiveContextShadingFromDrawing<T extends Element>(
+  elements: readonly T[],
+  globalOffsetDeg: number,
+  typed: (element: T) => T = (element) => element,
+): T[] {
   const byName = new Map<string, T>();
   for (const element of elements) {
     if (element.name && !byName.has(element.name)) byName.set(element.name, element);
@@ -300,11 +308,12 @@ export function rederiveContextShadingFromDrawing<T extends Element>(elements: r
       end_angle: roundToTwoDecimals(angles.end_angle),
       distance: calculateContextShadingDistanceFromCoordinates(shading, parent, elements),
     };
-    if (derived.start_angle === shading.start_angle && derived.end_angle === shading.end_angle && derived.distance === shading.distance) {
+    const candidate = typed({ ...element, ...derived }) as unknown as ContextShading;
+    if (candidate.start_angle === shading.start_angle && candidate.end_angle === shading.end_angle && candidate.distance === shading.distance) {
       return element;
     }
     changed = true;
-    return { ...element, ...derived };
+    return candidate as unknown as T;
   });
   return changed ? next : (elements as T[]);
 }
