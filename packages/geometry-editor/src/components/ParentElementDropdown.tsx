@@ -5,7 +5,7 @@
 // extracted elementForms modules can use it without importing the orchestrator.
 
 import React from 'react';
-import type { ElementType } from '../geometry/types';
+import type { Element, ElementType } from '../geometry/types';
 import { useGeometryStore } from '../stores/geometryStore';
 import { StandardDropdown } from './StandardDropdown';
 import { ELEMENT_TYPE_COMPACT_LABELS } from '../lib/elementTypeMetadata';
@@ -17,6 +17,8 @@ interface ParentElementDropdownProps {
   zoneId: string;
   placeholder: string;
   selfId?: string;
+  /** Offer only the parents this accepts; their names then stand alone, as the type is known. */
+  only?: (parent: Element) => boolean;
 }
 
 export const ParentElementDropdown: React.FC<ParentElementDropdownProps> = ({
@@ -25,10 +27,11 @@ export const ParentElementDropdown: React.FC<ParentElementDropdownProps> = ({
   elementType,
   zoneId,
   placeholder,
-  selfId
+  selfId,
+  only,
 }) => {
   const getAvailableParentElements = useGeometryStore((s) => s.getAvailableParentElements);
-  const availableParents = getAvailableParentElements(elementType, zoneId, selfId);
+  const availableParents = getAvailableParentElements(elementType, zoneId, selfId).filter((parent) => !only || only(parent));
 
   return (
     <div className="element-input" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -40,7 +43,7 @@ export const ParentElementDropdown: React.FC<ParentElementDropdownProps> = ({
             { value: '', label: placeholder },
             ...availableParents.map((parent) => ({
               value: parent.name,
-              label: `${parent.name || '(Unnamed)'} (${ELEMENT_TYPE_COMPACT_LABELS[parent.type as ElementType] ?? parent.type})`
+              label: only ? parent.name || '(Unnamed)' : `${parent.name || '(Unnamed)'} (${ELEMENT_TYPE_COMPACT_LABELS[parent.type as ElementType] ?? parent.type})`
             }))
           ]}
           variant="ghost"

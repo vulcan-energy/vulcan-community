@@ -1832,7 +1832,7 @@ function GroundUCalculatorButton({
       className="btn btn-ghost btn-sm element-editor-input-action"
       title={hasValue ? 'Edit calculator inputs for ground U-value' : 'Open ground U-value calculator'}
     >
-      {hasValue ? 'Calc Inputs' : 'Calc U'}
+      {hasValue ? 'Edit calculation' : 'Calculate U-value'}
     </button>
   );
 }
@@ -2341,6 +2341,25 @@ const examplePlaceholderText = (example: string | undefined): string | undefined
   return text === 'example' ? undefined : text;
 };
 
+/** Schema enum values that are engine codes, as an assessor reads them. */
+const ENUM_VALUE_LABELS: Readonly<Record<string, string>> = {
+  OutsideAir: 'Outside air',
+  ExhaustAirMEV: 'Exhaust air (extract ventilation)',
+  ExhaustAirMVHR: 'Exhaust air (MVHR)',
+  ExhaustAirMixed: 'Exhaust air (mixed)',
+  WaterGround: 'Ground water',
+  WaterSurface: 'Surface water',
+  HeatNetwork: 'Heat network',
+  glycol25: 'Glycol, 25%',
+  unknown: 'Not known',
+};
+/** MVHR and similar units are inside or outside the thermal envelope: say so. */
+const ENVELOPE_LOCATION_KEYS: ReadonlySet<string> = new Set(['mvhr_location', 'location_mvhr']);
+const enumOptionLabel = (propKey: string, value: string, fallback: string): string =>
+  ENVELOPE_LOCATION_KEYS.has(propKey) && (value === 'inside' || value === 'outside')
+    ? `${value === 'inside' ? 'Inside' : 'Outside'} the thermal envelope`
+    : ENUM_VALUE_LABELS[value] ?? fallback;
+
 /** A snake_case enum value as words; any other value as written. */
 const enumValueWords = (value: string): string =>
   /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(value) ? `${value[0].toUpperCase()}${value.slice(1).replace(/_/g, ' ')}` : value;
@@ -2392,7 +2411,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     options = fromEnum.map((v) => {
       const value = String(v);
       // Use description for junction types, otherwise the value in words (`optimised_inverter`: "Optimised inverter")
-      let label = enumValueWords(value);
+      let label = enumOptionLabel(propKey, value, enumValueWords(value));
       if (isJunctionType) {
         const description = JUNCTION_TYPE_DESCRIPTIONS[value];
         if (description) {
@@ -2414,7 +2433,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
         // Use description for junction types, otherwise use title or const
         const label = isJunctionType && JUNCTION_TYPE_DESCRIPTIONS[value]
           ? `${value}: ${JUNCTION_TYPE_DESCRIPTIONS[value]}`
-          : String(a.title ?? a.const);
+          : enumOptionLabel(propKey, value, String(a.title ?? a.const));
         return { value, label };
       });
       const first = alts[0]?.const;
@@ -2452,7 +2471,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       : defaultValue;
   const sourceHelperText =
     effectiveDefaultForDisplay !== undefined
-      ? `${cfg.systemSampleMode ? 'Preset' : 'Default'}: ${String(effectiveDefaultForDisplay)}`
+      ? `${cfg.systemSampleMode ? 'Preset' : 'Default'}: ${options.find((o) => o.value === String(effectiveDefaultForDisplay))?.label ?? String(effectiveDefaultForDisplay)}`
       : undefined;
   // R4.3b (Baz-requested presentation amendment, post-screenshot-review): an unset
   // enum field with a resolvable default shows that default INLINE in the closed

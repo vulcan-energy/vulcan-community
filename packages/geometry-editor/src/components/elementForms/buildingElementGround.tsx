@@ -948,7 +948,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
         </div>
           </>
         )}
-        {renderFieldLabel('Thickness Walls (m):', elementType)}
+        {renderFieldLabel('Wall thickness (m):', elementType)}
         <div
           className="element-input"
           ref={registerBaseFieldRefs(['thicknessWalls', 'thickness_walls'])}

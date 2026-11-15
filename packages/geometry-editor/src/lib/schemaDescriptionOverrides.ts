@@ -204,6 +204,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'kW',
   },
   'inverter_is_inside': {
+    label: 'Inverter inside the thermal envelope',
     description: 'Whether the inverter is considered to be located inside the thermal envelope of the dwelling. This affects where inverter losses are counted (internal gains vs external losses).',
     type: 'boolean',
   },
@@ -403,6 +404,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'deg C',
   },
   'temp_flow_limit_upper': {
+    label: 'Upper flow temperature limit',
     description:
       'Heat source upper flow-temperature operating limit (deg C). This is a plant limit, separate from the wet distribution design_flow_temp / min_flow_temp weather-compensation curve.',
     type: 'number',
@@ -506,6 +508,22 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: 'kW',
   },
+  // Display labels and units for the product-less system forms (the schema's own titles are engine words).
+  'System:HotWaterSource:volume': { description: 'Volume of the tank (unit: litres)', type: 'number', units: 'litres' },
+  'System:HotWaterSource:daily_losses': { description: 'Heat the full tank loses in 24 hours (unit: kWh/day)', type: 'number', units: 'kWh/day' },
+  'System:HotWaterSource:primary_flow_rate': { description: 'Flow rate through the coil (unit: L/min)', type: 'number', units: 'L/min' },
+  'System:HotWaterSource:temp_flow_limit_upper': { description: 'Highest flow temperature the heat source supplies (unit: deg C)', type: 'number', units: 'deg C' },
+  'System:SpaceHeatSystem:temp_flow_limit_upper': { description: 'Highest flow temperature the heat source supplies (unit: deg C)', type: 'number', units: 'deg C' },
+  'System:SpaceHeatSystem:temp_diff_emit_dsgn': { description: 'Design temperature difference between emitter flow and return (unit: K)', type: 'number', units: 'K' },
+  'System:HeatSourceWet:electricity_circ_pump': { description: 'Electrical power of the circulation pump (unit: kW)', type: 'number', units: 'kW' },
+  'System:HeatSourceWet:electricity_standby': { description: 'Electrical power in standby mode (unit: kW)', type: 'number', units: 'kW' },
+  'solar_absorption_coeff': { label: 'Solar absorption coefficient' },
+  'mass_distribution_class': { label: 'Mass distribution' },
+  'temp_diff_emit_dsgn': { label: 'Design temperature drop' },
+  'electricity_circ_pump': { label: 'Circulation pump power' },
+  'electricity_standby': { label: 'Standby power' },
+  'primary_flow_rate': { label: 'Primary flow rate' },
+  'daily_losses': { label: 'Standing heat loss' },
   'System:HotWaterSource:tank_volume_declared': {
     description: "Tank volume stored in the database (unit: litres)",
     type: 'number',
@@ -1430,6 +1448,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'm²·K/W',
   },
   'thermal_resistance_construction': {
+    label: 'Construction thermal resistance',
     description: 'Thermal resistance of the construction (unit: m²·K/W). This is the inverse of U-value and represents the resistance to heat flow through the building element construction.',
     type: 'number',
     units: 'm²·K/W',

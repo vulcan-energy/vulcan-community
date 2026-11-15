@@ -145,7 +145,7 @@ import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } fro
 export type PendingSystemAction =
   | { kind: 'source'; target: 'presets' | 'pcdb' }
   | { kind: 'subcategory'; value: string }
-  | { kind: 'type'; value: string }
+  | { kind: 'type'; value: string; question: string }
   | { kind: 'preset'; value: string };
 
 /** Readable names for the schema's plant types; a type not listed shows its exact value. */
@@ -746,7 +746,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     const [, existing] = Object.entries(readRecord(readRecord(selectedSystemElementFull.extra_json)[systemSubcategory]))[0] ?? [];
     // Another type's inputs do not carry over: ask before clearing a plant that has any.
     if (existing && Object.keys(readRecord(existing)).some((key) => key !== 'type')) {
-      setPendingSystemAction({ kind: 'type', value: type });
+      setPendingSystemAction({ kind: 'type', value: type, question: `Change ${SYSTEM_TYPE_LABELS[systemPlantType] ?? systemPlantType} to ${SYSTEM_TYPE_LABELS[type] ?? type}?` });
       return;
     }
     applySystemTypeChange(type);

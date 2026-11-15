@@ -427,6 +427,24 @@ function unusedHeatPumpFields(extraJson: unknown): ReadonlySet<string> {
   return drop;
 }
 
+/** A plant part's schema title as words: "Buffertank" -> "buffer tank", "dhw" -> "hot water". */
+const plantPartWords = (title: string): string => title.toLowerCase().replace('buffertank', 'buffer tank').replace(/\bdhw\b/g, 'hot water');
+
+/** The default supplies' names as an assessor reads them; a supply the user named stays as named. */
+const SUPPLY_LABELS: Readonly<Record<string, string>> = {
+  'mains elec': 'Mains electricity',
+  'mains gas': 'Mains gas',
+  'LPG bulk': 'LPG, bulk',
+  'LPG bottled': 'LPG, bottled',
+  'LPG condition 11F': 'LPG, special condition 11F',
+  'wood logs': 'Wood logs',
+  'wood pellets': 'Wood pellets',
+  'wood chips': 'Wood chips',
+  'house coal': 'House coal',
+  anthracite: 'Anthracite',
+  'smokeless fuel': 'Smokeless fuel',
+};
+
 // eslint-disable-next-line react-refresh/only-export-components -- schema helper shared with tests.
 export function applyEcodesignControlClassEnum(
   schema: Record<string, unknown>,
@@ -475,7 +493,7 @@ export function applyEcodesignControlClassEnum(
         const hasObjectBranch = Array.isArray(readExtraJsonRecord(child).anyOf)
           && (readExtraJsonRecord(child).anyOf as unknown[]).some((branch) => readExtraJsonRecord(branch).type === 'object');
         if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
-          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: supplyNames.map((name) => ({ const: name, title: name })) };
+          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: supplyNames.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
           delete picker.anyOf;
           nextProperties[key] = picker;
           changed = true;
@@ -1441,6 +1459,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       result.required = mechanicalVentilationRequiredFields;
     }
 
+    if (elementType === 'MechanicalVentilation' && result && hemDatabaseProducts) {
+      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { supplyNames: energySupplyNames }) as typeof result;
+    }
+
     if (elementType === 'System' && subtype) {
       const rootFull = getActiveRootSchema();
       if (rootFull && result) {
@@ -1471,7 +1493,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         weatherCurves: systemDefaults?.weatherCurves,
         existing: existingBuilding,
         supplyNames: energySupplyNames,
-        dropKeys: new Set(loadCompensationUnread(advancedFieldsData) ? LOAD_COMPENSATION_FIELDS : []),
+        // The curve picker sets the curve coefficients, so their own fields stay hidden.
+        dropKeys: new Set([...(loadCompensationUnread(advancedFieldsData) ? LOAD_COMPENSATION_FIELDS : []), ...(systemDefaults?.weatherCurves?.length ? ['weather_comp_a', 'weather_comp_b', 'weather_comp_c'] : [])]),
       }) as typeof result;
       result = pruneSpaceHeatSystemWeatherCompensationSchema(
         result as Record<string, unknown>,
@@ -2423,7 +2446,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         />
       )}
 
-      {elementType === 'BuildingElementTransparent' &&
+      {/* An existing building states its close shading with the window's own selects. */}
+      {elementType === 'BuildingElementTransparent' && !existingBuilding &&
         currentElementData?.type === 'BuildingElementTransparent' && (
           <AttachedWindowShadingStrip
             windowElement={currentElementData as BuildingElementTransparent}
@@ -2619,7 +2643,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
                 onChange({ ...currentData, extra_json: { ...base, [subtype!]: { ...plants, [plant]: { ...readRecord(plants[plant]), [part]: {} } } } });
               }}
             >
-              {`Add ${title.toLowerCase()}${Object.keys(readRecord(readRecord(advancedFieldsData)[subtype!])).length > 1 ? ` to ${plant}` : ''}`}
+              {`Add ${plantPartWords(title)}${Object.keys(readRecord(readRecord(advancedFieldsData)[subtype!])).length > 1 ? ` to ${plant}` : ''}`}
             </button>
           ))}
         </div>

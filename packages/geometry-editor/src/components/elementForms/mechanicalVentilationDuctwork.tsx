@@ -133,7 +133,7 @@ export const mechanicalVentilationDuctworkFormModule: ElementFormModule<Mechanic
           />
         </div>
         {renderServiceLineCoreFields(serviceLine, ctx, {
-          lengthLabel: (mode) => (mode === 'vertical' ? 'Vertical Length (m):' : 'Plan Length (m):'),
+          lengthLabel: (mode) => (mode === 'vertical' ? 'Vertical length:' : 'Plan length:'),
           lengthReadOnlyWhenVertical: true,
           zRefKeys: ['service_line_z0', 'service_line_z1'],
           showActualLengthWhenSlope: true,

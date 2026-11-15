@@ -366,7 +366,7 @@ export const parseCsvToGeometry = (
       continue;
     }
     if (hostMetadataKey && hostMetadataKey in HEMIE_RETIRED_ROWS) {
-      retiredRows.push(`${hostMetadataKey} removed: ${HEMIE_RETIRED_ROWS[hostMetadataKey]}`);
+      retiredRows.push(HEMIE_RETIRED_ROWS[hostMetadataKey]);
       continue;
     }
     if (hostMetadataKey?.startsWith('HEMIE_')) {

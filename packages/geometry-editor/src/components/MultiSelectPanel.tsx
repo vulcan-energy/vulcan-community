@@ -958,8 +958,8 @@ const WINDOW_SHADING_TYPE_OPTIONS = (Object.entries(WINDOW_SHADING_TYPE_LABELS) 
 const COLOUR_OPTIONS = ['Light', 'Intermediate', 'Dark'].map((value) => ({ value, label: value }));
 const FLOOR_TYPE_OPTIONS = [
   { value: 'Heated_basement', label: 'Heated Basement' },
-  { value: 'Slab_no_edge_insulation', label: 'Slab No Edge Insulation' },
-  { value: 'Slab_edge_insulation', label: 'Slab Edge Insulation' },
+  { value: 'Slab_no_edge_insulation', label: 'Ground floor, no edge insulation' },
+  { value: 'Slab_edge_insulation', label: 'Ground floor, edge insulated' },
   { value: 'Suspended_floor', label: 'Suspended Floor' },
   { value: 'Unheated_basement', label: 'Unheated Basement' },
 ] as const;

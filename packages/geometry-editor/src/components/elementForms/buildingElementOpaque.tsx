@@ -309,6 +309,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
 
     const canMarkUnheatedPitchedRoof = elementType === 'BuildingElementOpaque' && selectedShape === 'sloped-polygon';
     const canMarkExternalDoor = elementType === 'BuildingElementOpaque'
+      && !getHemieBundle(selectedElement)
       && selectedShape === 'line'
       && typeof state.pitch === 'number'
       && Number.isFinite(state.pitch)
@@ -376,11 +377,13 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       !selectedElement.parent_element;
     const orientationPitchAxis = showSlopePitchAxis && isOrientationPitchAxis(selectedElement);
 
+    // A bay or conservatory front wall is edited through its bundle fields alone.
+    if (selectedElement && getHemieBundle(selectedElement)?.role === 'front-wall') {
+      return <HemieBundleEditor key={selectedElement.id} anchor={selectedElement} />;
+    }
+
     return (
       <>
-        {selectedElement && getHemieBundle(selectedElement)?.role === 'front-wall' ? (
-          <HemieBundleEditor key={selectedElement.id} anchor={selectedElement} />
-        ) : null}
         {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
         <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
           <ParentElementDropdown
@@ -421,11 +424,6 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
                 : selectedOpaqueAreaSummary.cover ? '' : ' · No linked openings or cutouts subtracted'}
             </div>
           )}
-          {selectedOpaqueAreaSummary?.usesUnheatedPitchedRoofPlanArea ? (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Exported as horizontal ceiling/plan area for this unheated pitched roof; the sloped roof surface is not the heat-loss area.
-            </div>
-          ) : null}
         </div>
         {renderWallPitchField(
           {

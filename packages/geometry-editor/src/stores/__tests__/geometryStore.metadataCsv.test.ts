@@ -37,7 +37,7 @@ it('drops a retired HEMIE_ row on load and says what to do instead', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   const { warnings } = store.getState().loadFromCSV('Metadata,,\nHEMIE_age_band,D\nHEMIE_region,England\n');
   expect(store.getState().complianceSettings.hemieSettings).toEqual({ HEMIE_age_band: 'D' });
-  expect(warnings).toContain('HEMIE_region removed: the region now comes from the postcode. For a postcode area that spans two nations, choose the Nation under the Postcode in Dwelling Details.');
+  expect(warnings).toContain('The region setting was removed: it now comes from the postcode. For a postcode area that spans two nations, choose the Nation next to the Postcode in Global Settings.');
   expect(store.getState().generateCSV({ allowUnresolvedMigration: true })).not.toMatch(/^HEMIE_region,/m);
 });
 

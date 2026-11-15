@@ -22,7 +22,7 @@ import {
 } from "../../../geometry-editor-host/src/editorServicePorts";
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
 import { targetFieldAvailability } from "../lib/schemaCache";
-import { HEMIE_NATION, NATIONS, postcodeBorderArea } from "../lib/hemieFabric";
+import { HEMIE_NATION, NATIONS, postcodeBorderArea, postcodeUnrecognised } from "../lib/hemieFabric";
 import type { AssemblyExample } from "../lib/assemblyTypes";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
@@ -117,14 +117,14 @@ const ROOM_COUNT_COMPLIANCE_ROWS: {
 }[] = [
   {
     field: "NumberOfBedrooms",
-    label: "Number of Bedrooms",
-    evidenceShort: "Number of Bedrooms",
+    label: "Number of bedrooms",
+    evidenceShort: "Number of bedrooms",
     comparisonFieldKey: "NumberOfBedrooms",
   },
   {
     field: "NumberOfWetRooms",
-    label: "Number of Wet Rooms",
-    evidenceShort: "Number of Wet Rooms",
+    label: "Number of wet rooms",
+    evidenceShort: "Number of wet rooms",
     comparisonFieldKey: "NumberOfWetRooms",
   },
   {
@@ -517,6 +517,7 @@ async function listJsonFilesRecursively(
 
 /** `semi_detached_end_terrace` as "Semi detached end terrace". */
 const buildTypeLabel = (type: string) => {
+  if (type === "semi_detached_end_terrace") return "Semi-detached or end-terrace";
   const words = type.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
@@ -1236,6 +1237,153 @@ export function GlobalSettingsModal({
     target?.scrollIntoView?.({ block: "center" });
     target?.closest("label")?.control?.focus({ preventScroll: true });
   }, [focusRequest]);
+  // Postcode, nation and build type: where a survey starts, so shown ahead of the fabric on a construction-band target.
+  const surveyFields = (
+    <>
+      <StandardInput
+        type="text"
+        label={<span data-field-key="Postcode">Property postcode</span>}
+        value={propertyPostcode ?? ""}
+        onChange={(event) => {
+          const value = event.target.value.toUpperCase();
+          setPropertyPostcode(value || undefined);
+        }}
+        placeholder="e.g. MK40 1AA"
+        helperText={constructionBands
+          ? "Sets the nation, which sets the years of each age band."
+          : "Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."}
+        autoComplete="postal-code"
+        error={constructionBands && postcodeUnrecognised(propertyPostcode) ? "Postcode not recognised" : undefined}
+        variant="ghost"
+        size="md"
+      />
+      {constructionBands && borderArea ? (
+        <StandardDropdown
+          label={<span data-field-key={HEMIE_NATION}>Nation</span>}
+          value={complianceSettings.hemieSettings?.[HEMIE_NATION] ?? ""}
+          onChange={(value) => {
+            const others = { ...complianceSettings.hemieSettings };
+            delete others[HEMIE_NATION];
+            setComplianceSettings({ hemieSettings: value ? { ...others, [HEMIE_NATION]: value } : others });
+          }}
+          options={NATIONS.map((nation) => ({ value: nation, label: nation }))}
+          placeholder="Choose the nation"
+          helperText={`Postcode area ${borderArea} spans two nations.`}
+          variant="ghost"
+          size="md"
+        />
+      ) : null}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--spacing-xs)",
+        }}
+      >
+        <StandardDropdown
+          label={
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                flexWrap: "wrap",
+              }}
+            >
+              {complianceFieldLabel(
+                "Build type",
+                "General_build_type",
+                dwellingDetailsSuggestion.explanation
+              )}
+              {shownBuildType && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 400,
+                    color: isBuildTypeManual || fileBuildType
+                      ? "var(--text-warning)"
+                      : "var(--text-muted)",
+                  }}
+                >
+                  {isBuildTypeManual || fileBuildType
+                    ? "(manual override)"
+                    : "(auto)"}
+                </span>
+              )}
+            </div>
+          }
+          value={shownBuildType || ""}
+          onChange={(value) => {
+            if (value === shownBuildType) return;
+            const next =
+              value === ""
+                ? undefined
+                : value;
+            const patch: Parameters<
+              typeof setComplianceSettings
+            >[0] = {
+              build_type:
+                next === suggestedBuildType
+                  ? undefined
+                  : next,
+            };
+            const nextEffectiveBuildType =
+              next ?? suggestedBuildType;
+            if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType, storeyBuildTypes)) {
+              patch.storey_of_dwelling = undefined;
+              patch.storeys_in_building = undefined;
+            }
+            // The user's choice replaces the file's build type.
+            if (fileBuildType) {
+              const unread = { ...complianceSettings.unreadMetadataRows };
+              delete unread.General_build_type;
+              patch.unreadMetadataRows = unread;
+            }
+            setComplianceSettings(patch);
+          }}
+          options={[
+            {
+              value: "",
+              label: suggestedBuildType
+                ? `Auto (${suggestedBuildType})`
+                : derivedRows.has("General_build_type") ? "From the party walls" : "Select build type...",
+            },
+            ...buildTypes.map((type) => ({ value: type, label: buildTypeLabel(type) })),
+            ...(fileBuildType && !complianceSettings.build_type && !buildTypes.includes(fileBuildType)
+              ? [{ value: fileBuildType, label: fileBuildType }]
+              : []),
+          ]}
+          placeholder="Select build type..."
+          variant="ghost"
+          size="md"
+        />
+        {isBuildTypeManual &&
+          suggestedBuildType && (
+            <ResetFieldButton
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setComplianceSettings({
+                  build_type: undefined,
+                  ...(suggestedBuildType ===
+                  "house"
+                    ? {
+                        storey_of_dwelling: undefined,
+                        storeys_in_building: undefined,
+                      }
+                    : {}),
+                });
+              }}
+              title={`Reset to suggested build type (${suggestedBuildType})`}
+              ariaLabel="Reset build type to suggested value"
+              align="input-row"
+            />
+          )}
+      </div>
+    </>
+  );
+
   if (!isOpen || typeof document === "undefined") return null;
 
   return ReactDOM.createPortal(
@@ -1780,6 +1928,7 @@ export function GlobalSettingsModal({
               {calculationTargetSection}
 
               {/* With the target: it decides which inputs and defaults the model takes. */}
+              {constructionBands ? <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", marginBottom: "var(--spacing-md)" }}>{surveyFields}</div> : null}
               {requiredRows.has("IsExistingBuilding") && (
                 <div data-field-section="target" style={{ marginBottom: "var(--spacing-md)" }}>
                   <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
@@ -1844,146 +1993,7 @@ export function GlobalSettingsModal({
                           gap: "var(--spacing-md)",
                         }}
                       >
-                        <StandardInput
-                          type="text"
-                          label={<span data-field-key="Postcode">Property postcode</span>}
-                          value={propertyPostcode ?? ""}
-                          onChange={(event) => {
-                            const value = event.target.value.toUpperCase();
-                            setPropertyPostcode(value || undefined);
-                          }}
-                          placeholder="e.g. MK40 1AA"
-                          helperText={constructionBands
-                            ? "Sets the nation, which sets the years of each age band."
-                            : "Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."}
-                          autoComplete="postal-code"
-                          variant="ghost"
-                          size="md"
-                        />
-                        {constructionBands && borderArea ? (
-                          <StandardDropdown
-                            label={<span data-field-key={HEMIE_NATION}>Nation</span>}
-                            value={complianceSettings.hemieSettings?.[HEMIE_NATION] ?? ""}
-                            onChange={(value) => {
-                              const others = { ...complianceSettings.hemieSettings };
-                              delete others[HEMIE_NATION];
-                              setComplianceSettings({ hemieSettings: value ? { ...others, [HEMIE_NATION]: value } : others });
-                            }}
-                            options={NATIONS.map((nation) => ({ value: nation, label: nation }))}
-                            placeholder="Choose the nation"
-                            helperText={`Postcode area ${borderArea} spans two nations.`}
-                            variant="ghost"
-                            size="md"
-                          />
-                        ) : null}
-
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "var(--spacing-xs)",
-                          }}
-                        >
-                          <StandardDropdown
-                            label={
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "6px",
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                {complianceFieldLabel(
-                                  "Build type",
-                                  "General_build_type",
-                                  dwellingDetailsSuggestion.explanation
-                                )}
-                                {shownBuildType && (
-                                  <span
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: 400,
-                                      color: isBuildTypeManual || fileBuildType
-                                        ? "var(--text-warning)"
-                                        : "var(--text-muted)",
-                                    }}
-                                  >
-                                    {isBuildTypeManual || fileBuildType
-                                      ? "(manual override)"
-                                      : "(auto)"}
-                                  </span>
-                                )}
-                              </div>
-                            }
-                            value={shownBuildType || ""}
-                            onChange={(value) => {
-                              if (value === shownBuildType) return;
-                              const next =
-                                value === ""
-                                  ? undefined
-                                  : value;
-                              const patch: Parameters<
-                                typeof setComplianceSettings
-                              >[0] = {
-                                build_type:
-                                  next === suggestedBuildType
-                                    ? undefined
-                                    : next,
-                              };
-                              const nextEffectiveBuildType =
-                                next ?? suggestedBuildType;
-                              if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType, storeyBuildTypes)) {
-                                patch.storey_of_dwelling = undefined;
-                                patch.storeys_in_building = undefined;
-                              }
-                              // The user's choice replaces the file's build type.
-                              if (fileBuildType) {
-                                const unread = { ...complianceSettings.unreadMetadataRows };
-                                delete unread.General_build_type;
-                                patch.unreadMetadataRows = unread;
-                              }
-                              setComplianceSettings(patch);
-                            }}
-                            options={[
-                              {
-                                value: "",
-                                label: suggestedBuildType
-                                  ? `Auto (${suggestedBuildType})`
-                                  : derivedRows.has("General_build_type") ? "From the party walls" : "Select build type...",
-                              },
-                              ...buildTypes.map((type) => ({ value: type, label: buildTypeLabel(type) })),
-                              ...(fileBuildType && !complianceSettings.build_type && !buildTypes.includes(fileBuildType)
-                                ? [{ value: fileBuildType, label: fileBuildType }]
-                                : []),
-                            ]}
-                            placeholder="Select build type..."
-                            variant="ghost"
-                            size="md"
-                          />
-                          {isBuildTypeManual &&
-                            suggestedBuildType && (
-                              <ResetFieldButton
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setComplianceSettings({
-                                    build_type: undefined,
-                                    ...(suggestedBuildType ===
-                                    "house"
-                                      ? {
-                                          storey_of_dwelling: undefined,
-                                          storeys_in_building: undefined,
-                                        }
-                                      : {}),
-                                  });
-                                }}
-                                title={`Reset to suggested build type (${suggestedBuildType})`}
-                                ariaLabel="Reset build type to suggested value"
-                                align="input-row"
-                              />
-                            )}
-                        </div>
+                        {constructionBands ? null : surveyFields}
 
                         {!epcTarget && (
                         <StandardDropdown
@@ -2551,12 +2561,12 @@ export function GlobalSettingsModal({
                             }}
                           >
                             {complianceFieldLabel(
-                              "Heating Control Type",
+                              "Heating control type",
                               "HeatingControlType"
                             )}
                             {renderEvidencePill(
                               "HeatingControlType",
-                              "Heating Control Type"
+                              "Heating control type"
                             )}
                           </div>
                         }
@@ -2621,7 +2631,7 @@ export function GlobalSettingsModal({
                       />
 
                       {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
-                      {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G Compliance")} /> : (
+                      {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G compliance")} /> : (
                       <label
                         style={{
                           display: "flex",
@@ -2641,12 +2651,12 @@ export function GlobalSettingsModal({
                           style={{ cursor: "pointer" }}
                         />
                         {complianceFieldLabel(
-                          "Part G Compliance",
+                          "Part G compliance",
                           "PartGcompliance"
                         )}
                         {renderEvidencePill(
                           "PartGcompliance",
-                          "Part G Compliance"
+                          "Part G compliance"
                         )}
                       </label>
                       )}

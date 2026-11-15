@@ -105,7 +105,7 @@ describe('window_part_list on physical-opening targets', () => {
   it('says nothing more for one opening and can add a second', () => {
     const store = mount(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }] }), physicalItems);
     expect(screen.queryByText(/One opening/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Add opening' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add openable part' }));
     expect(stored(store).extra_json).toMatchObject({
       window_part_list: [{ free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8 }, {}],
     });
@@ -119,9 +119,9 @@ describe('window_part_list on physical-opening targets', () => {
     expect(result.extra_json).toMatchObject({ window_part_list: [{ mid_height_air_flow_path: 2 }] });
   });
 
-  it('offers Add opening on a closed window', () => {
+  it('offers Add openable part on a closed window', () => {
     mount(windowElement({ window_part_list: [] }), physicalItems);
-    expect(screen.getByRole('button', { name: 'Add opening' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add openable part' })).toBeInTheDocument();
   });
 
   it('offers one explicit repair for a conflicting legacy list', () => {
