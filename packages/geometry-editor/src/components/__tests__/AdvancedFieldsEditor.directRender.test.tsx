@@ -834,8 +834,8 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
  * ordinary flat element type, and it costs this sweep nothing: `AdvancedFieldsEditor`
  * mounts System through `buildSystemAdvancedUischema`, keyed on a SUBCATEGORY subtype, so
  * every one of those 30 routes hands the builder a fabric subtype it has no plants for
- * and renders zero rows. Measured, not assumed — dropping the `continue` moves
- * `routesSwept` 674 -> 704 and leaves `routesWithRows` and the inventory below untouched.
+ * and renders zero rows. Measured, not assumed — dropping the `System` filter moves
+ * the swept-route total 674 -> 704 and leaves the rendering-route total and the inventory below untouched.
  * Every other route is shared with the sweep above.
  *
  * FIXTURE-BOUNDED, exactly as the sweep above is, and for the same reason: the System
@@ -854,7 +854,7 @@ describe('R4.6a standing invariant: nullable-wrapped schemas dispatch on their i
  * therefore moves between keys and fails the comparison; it cannot hide inside a group.
  * The two counts asserted alongside close the remaining gap in both directions: a route
  * that goes empty drops out of its group, a route that gains rows joins or forms one,
- * and a route added to or removed from the sweep itself moves `routesSwept`.
+ * and a route added to or removed from the sweep itself moves the swept-route total.
  */
 type RenderedRowInventory = Record<string, string[]>;
 
@@ -884,59 +884,63 @@ function renderedControlKind(row: HTMLElement): string {
   return `other:${row.firstElementChild?.tagName ?? 'unknown'}`;
 }
 
-function sweepRenderedRows(): {
-  inventory: RenderedRowInventory;
-  routesSwept: number;
-  routesWithRows: number;
-} {
-  /** container -> row-set signature -> the subtypes that produced it ('' for System). */
-  const containers = new Map<string, Map<string, string[]>>();
-  let routesSwept = 0;
-  let routesWithRows = 0;
+/**
+ * One swept container: a profile x flat element type (every `SWEPT_SUBTYPES` route), or a
+ * profile x System subcategory (one route). Each container is its own test, so no single
+ * test mounts all 674 routes; the totals are asserted over this list and the pinned
+ * inventory below instead.
+ */
+type SweptContainer = { container: string; routes: { subtype: string; props: MountArgs }[] };
 
-  const record = (container: string, subtype: string, container_el: HTMLElement) => {
-    routesSwept += 1;
-    const rows = Array.from(container_el.querySelectorAll<HTMLElement>('[data-field-key]'));
-    if (rows.length === 0) return;
-    routesWithRows += 1;
+const SWEPT_CONTAINERS: SweptContainer[] = (['core', 'fhs'] as const).flatMap((mode) => {
+  const useFHSSchema = mode === 'fhs';
+  return [
+    ...ADVANCED_FIELD_ELEMENT_TYPES.filter((elementType) => elementType !== 'System').map((elementType) => ({
+      container: `${mode}/${elementType}`,
+      routes: SWEPT_SUBTYPES.map((subtype) => ({
+        subtype: subtype ?? '-',
+        props: { elementType, subtype, useFHSSchema, extraJson: {} },
+      })),
+    })),
+    ...SWEPT_SYSTEM_SUBTYPES.map((subtype) => ({
+      container: `${mode}/System:${subtype}`,
+      routes: [{
+        subtype: '',
+        props: { elementType: 'System', subtype, useFHSSchema, extraJson: { [subtype]: SYSTEM_PLANT_FIXTURES[subtype] ?? {} } },
+      }],
+    })),
+  ];
+});
+
+/** Mounts every route of one container and groups the routes that render rows by row-set. */
+function sweepContainer({ container, routes }: SweptContainer): RenderedRowInventory {
+  /** row-set signature -> the subtypes that produced it ('' for System). */
+  const variants = new Map<string, string[]>();
+  for (const { subtype, props } of routes) {
+    const rows = Array.from(renderEditor(props).container.querySelectorAll<HTMLElement>('[data-field-key]'));
     const signature = rows.map(renderedRowLine).join('\n');
-    const variants = containers.get(container) ?? new Map<string, string[]>();
-    containers.set(container, variants);
+    cleanup();
+    if (rows.length === 0) continue;
     variants.set(signature, [...(variants.get(signature) ?? []), subtype]);
-  };
-
-  for (const mode of ['core', 'fhs'] as const) {
-    const useFHSSchema = mode === 'fhs';
-    for (const elementType of ADVANCED_FIELD_ELEMENT_TYPES) {
-      if (elementType === 'System') continue;
-      for (const subtype of SWEPT_SUBTYPES) {
-        const { container } = renderEditor({ elementType, subtype, useFHSSchema, extraJson: {} });
-        record(`${mode}/${elementType}`, subtype ?? '-', container);
-        cleanup();
-      }
-    }
-    for (const subtype of SWEPT_SYSTEM_SUBTYPES) {
-      const { container } = renderEditor({
-        elementType: 'System',
-        subtype,
-        useFHSSchema,
-        extraJson: { [subtype]: SYSTEM_PLANT_FIXTURES[subtype] ?? {} },
-      });
-      record(`${mode}/System:${subtype}`, '', container);
-      cleanup();
-    }
   }
-
   const inventory: RenderedRowInventory = {};
-  for (const [container, variants] of containers) {
-    for (const [signature, subtypes] of variants) {
-      const key = subtypes[0] === ''
-        ? container
-        : `${container} [${subtypes.length === SWEPT_SUBTYPES.length ? 'every subtype' : [...subtypes].sort().join(' ')}]`;
-      inventory[key] = signature.split('\n');
-    }
+  for (const [signature, subtypes] of variants) {
+    const key = subtypes[0] === ''
+      ? container
+      : `${container} [${subtypes.length === SWEPT_SUBTYPES.length ? 'every subtype' : [...subtypes].sort().join(' ')}]`;
+    inventory[key] = signature.split('\n');
   }
-  return { inventory, routesSwept, routesWithRows };
+  return inventory;
+}
+
+/** `core/X [wall roof]` -> `core/X`. */
+const inventoryKeyContainer = (key: string) => key.replace(/ \[.*\]$/, '');
+
+/** How many routes a pinned key groups: its subtype list, or the one System route. */
+function inventoryKeyRoutes(key: string): number {
+  const subtypes = /\[(.*)\]$/.exec(key)?.[1];
+  if (subtypes === undefined) return 1;
+  return subtypes === 'every subtype' ? SWEPT_SUBTYPES.length : subtypes.split(' ').length;
 }
 
 /**
@@ -1448,16 +1452,25 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
 };
 
 describe('R4.6b-1 standing invariant: what every Advanced Fields row actually renders', () => {
-  it('pins property key, control kind, min/max, placeholder, label text and tooltip presence for every swept route', () => {
-    const { inventory, routesSwept, routesWithRows } = sweepRenderedRows();
-
-    // Floors would let this pass vacuously; these are the exact populations the pinned
-    // inventory below was captured from, so they are equalities.
-    expect(routesSwept).toBe(674);
-    expect(routesWithRows).toBe(387);
-
-    expect(inventory).toEqual(EXPECTED_RENDERED_ROWS);
+  // Floors would let this pass vacuously; these are the exact populations the pinned
+  // inventory below was captured from, so they are equalities.
+  it('sweeps 674 routes, 387 of which render rows, and pins no container it does not sweep', () => {
+    expect(SWEPT_CONTAINERS.reduce((total, { routes }) => total + routes.length, 0)).toBe(674);
+    const pinned = Object.keys(EXPECTED_RENDERED_ROWS);
+    expect(pinned.reduce((total, key) => total + inventoryKeyRoutes(key), 0)).toBe(387);
+    const swept = new Set(SWEPT_CONTAINERS.map(({ container }) => container));
+    expect(pinned.filter((key) => !swept.has(inventoryKeyContainer(key)))).toEqual([]);
   });
+
+  it.each(SWEPT_CONTAINERS.map((swept) => [swept.container, swept] as const))(
+    'pins property key, control kind, min/max, placeholder, label text and tooltip presence for %s',
+    (container, swept) => {
+      const expected = Object.fromEntries(
+        Object.entries(EXPECTED_RENDERED_ROWS).filter(([key]) => inventoryKeyContainer(key) === container),
+      );
+      expect(sweepContainer(swept)).toEqual(expected);
+    },
+  );
 });
 
 describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
