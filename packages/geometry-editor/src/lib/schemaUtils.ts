@@ -184,6 +184,10 @@ function searchInObject(
  * @param contextPath - Optional path to limit search scope (e.g., ['$defs', 'BuildingElement'])
  * @param elementType - Optional element type to prefer when multiple matches exist (e.g., 'BuildingElementGround')
  */
+// One answer per schema root and query: field labels and tooltips ask for the same
+// parameters on every render, and the fallback searches walk the whole schema.
+const parameterInfoByRoot = new WeakMap<SchemaNode, Map<string, ParameterInfo | null>>();
+
 export function findParameterInSchema(
   paramId: string,
   contextPath?: string[],
@@ -192,6 +196,19 @@ export function findParameterInSchema(
 ): ParameterInfo | null {
   const root = asSchemaNode(getSchemaObjectForMode(useFHSSchema));
   if (!root) return null;
+  let cache = parameterInfoByRoot.get(root);
+  if (!cache) parameterInfoByRoot.set(root, (cache = new Map()));
+  const key = JSON.stringify([paramId, contextPath ?? null, elementType ?? null]);
+  if (!cache.has(key)) cache.set(key, findParameterInRoot(root, paramId, contextPath, elementType));
+  return cache.get(key)!;
+}
+
+function findParameterInRoot(
+  root: SchemaNode,
+  paramId: string,
+  contextPath?: string[],
+  elementType?: string,
+): ParameterInfo | null {
 
   const results: SchemaSearchMatch[] = [];
 
