@@ -35,7 +35,6 @@
 // Vents, since Vents is never adjacent-like — so this module uses the shared
 // pitch value directly instead of threading that memo through ctx.
 
-import type { CSSProperties } from 'react';
 import { getElementShape, convertShapeCoordinates } from '../../lib/shapeUtils';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';

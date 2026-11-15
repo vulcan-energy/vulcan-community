@@ -164,7 +164,8 @@ import { deriveWallProperties } from '../../stores/geometryStore';
 import { getElementGrossArea, isAdjacentLikeElement } from '../../lib/elementArea';
 import { isAdjacentConditionedInternalFloorDoubled } from '../../lib/polygonSync';
 import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS, type PartyWallFabricField } from '../../lib/assemblyMaterialFabric';
-import { DerivedSource, Readout, SourceNote, isOverridden } from '../FieldSource';
+import { DerivedSource, Readout, SourceNote } from '../FieldSource';
+import { isOverridden } from '../../lib/fieldSource';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
 import type { Element } from '../../geometry/types';
@@ -446,7 +447,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
             derived={derivedBaseHeight > 0 ? derivedBaseHeight : null}
             current={state.adjacentViewerBaseHeightInput.value}
             tolerance={0.01}
-            note={<SourceNote>from the floors below</SourceNote>}
+            info={<SourceNote>from the floors below</SourceNote>}
             useLabel="Use the floors below"
             unit="m"
             fieldLabel="Base height"

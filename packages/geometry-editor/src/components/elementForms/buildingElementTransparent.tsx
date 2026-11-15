@@ -169,7 +169,8 @@ import {
   slopedPolygonNeedsRectangleRebuild,
 } from '../../lib/slopedElementDimensions';
 import { ParentElementDropdown } from '../ParentElementDropdown';
-import { DerivedSource, ParentSourceNote, Readout, SourceNote, isOverridden } from '../FieldSource';
+import { DerivedSource, ParentSourceNote, Readout, SourceNote } from '../FieldSource';
+import { isOverridden } from '../../lib/fieldSource';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, isConservatoryGlazing, windowSections, withConservatoryGlazingOpeningType, withWindowSections } from '../../lib/hemieBundles';
@@ -680,7 +681,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           <DerivedSource
             derived={state.derivedWindowMidHeight > 0 ? state.derivedWindowMidHeight : null}
             current={state.midHeightInput.value}
-            note={<SourceNote>base + height ÷ 2</SourceNote>}
+            info={<SourceNote>base + height ÷ 2</SourceNote>}
             useLabel="Use base + height ÷ 2"
             unit="m"
             fieldLabel="Mid height"
@@ -718,7 +719,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             <DerivedSource
               derived={state.derivedWindowMaxOpenArea}
               current={state.maxWindowOpenAreaInput.value}
-              note={<SourceNote>width × free area height</SourceNote>}
+              info={<SourceNote>width × free area height</SourceNote>}
               useLabel="Use width × free height"
               unit="m²"
               fieldLabel="Max window open area"

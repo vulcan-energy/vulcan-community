@@ -31,7 +31,7 @@ export type DerivedNumberFieldProps = {
   /** @deprecated No auto tag any more: the source note replaced it. Accepted so callers compile. */
   autoTagMarginLeft?: number;
   /** Note while the value follows its source. Default "from the drawing". */
-  sourceNote?: React.ReactNode;
+  sourceNote?: string;
   /** Reset wording once overridden, before the value. Default "Use the drawing". */
   useLabel?: string;
 };
@@ -101,14 +101,14 @@ export function DerivedNumberField({
           {labelAccessory}
         </div>
       }
-      source={
+      labelExtra={
         hasDerived ? (
           <DerivedSource
             derived={derivedValue}
             current={isManual ? manualValue : undefined}
             overridden={isManual}
             tolerance={matchTolerance}
-            note={sourceNote ?? <SourceNote>from the drawing</SourceNote>}
+            info={<SourceNote>{sourceNote ?? 'from the drawing'}</SourceNote>}
             useLabel={useLabel}
             unit={unit}
             fieldLabel={typeof label === 'string' ? label : undefined}

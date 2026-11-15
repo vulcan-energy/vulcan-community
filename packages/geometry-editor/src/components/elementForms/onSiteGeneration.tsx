@@ -26,7 +26,7 @@
 // and nothing else depends on these functions' identity.
 
 import { useEffect } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { Element } from '../../geometry/types';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { applyCompassOrientationToSlopedPolygonCoords } from '../../lib/openingSegmentOutward';
@@ -573,7 +573,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                       derived={derivedValue}
                       current={currentValue}
                       tolerance={epsilon}
-                      note={<SourceNote>from {hostName ?? 'the roof'}</SourceNote>}
+                      info={<SourceNote>from {hostName ?? 'the roof'}</SourceNote>}
                       useLabel={`Use ${hostName ?? 'the roof'}`}
                       unit={unitSuffix.trim() || undefined}
                       fieldLabel={fieldKey === 'base_height' ? 'Base height' : fieldKey === 'pitch' ? 'Pitch' : 'Orientation'}

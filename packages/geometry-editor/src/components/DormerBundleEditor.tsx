@@ -137,7 +137,7 @@
 // isn't centrally reset" gap) but it does not reach the specific mechanism
 // decision 8 hypothesized.
 
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { Element, ElementType, Floor } from '../geometry/types';
 import { useGeometryStore, type GeometryStoreApi } from '../stores/geometryStore';

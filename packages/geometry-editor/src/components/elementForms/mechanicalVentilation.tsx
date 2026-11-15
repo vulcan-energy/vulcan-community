@@ -46,7 +46,7 @@
 // ctx.selection, reimplemented locally rather than threaded through ctx (it
 // has no other callers here).
 
-import { useState, type CSSProperties } from 'react';
+import { useState } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import {

@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { ResetFieldButton } from './ResetFieldButton';
+import { formatSourceValue, isOverridden, openDefaultsTab } from '../lib/fieldSource';
 import './FieldSource.css';
 
 /**
@@ -13,15 +14,6 @@ import './FieldSource.css';
  * - entered by you: white text, plus one "↺ Use …" control only when there is a value to go back to.
  * A value HEM does not let you set reads as text (`Readout`), not as a dead input box.
  */
-
-// ponytail: the Defaults tab is reached through any key its section owns; phase 3 renames the tab.
-const DEFAULTS_TAB_FIELD = 'DefaultAssembly';
-
-/** Opens Global Settings on the Defaults tab (the host listens for this event). */
-// eslint-disable-next-line react-refresh/only-export-components -- event helper shared by the source notes.
-export function openDefaultsTab(): void {
-  window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field: DEFAULTS_TAB_FIELD } }));
-}
 
 /** "from <link>" style note. With `onGo`, the link part is a button that goes to the source. */
 export function SourceNote({
@@ -56,12 +48,12 @@ export function DefaultNote() {
 }
 
 /** Label on the left, its source on the right (wraps under the label when narrow). */
-export function FieldLabelRow({ label, source }: { label: React.ReactNode; source?: React.ReactNode }) {
-  if (!source) return <>{label}</>;
+export function FieldLabelRow({ label, labelExtra }: { label: React.ReactNode; labelExtra?: React.ReactNode }) {
+  if (!labelExtra) return <>{label}</>;
   return (
     <div className="field-label-row">
       {label}
-      <span className="field-label-row__source">{source}</span>
+      <span className="field-label-row__source">{labelExtra}</span>
     </div>
   );
 }
@@ -77,12 +69,6 @@ export function Readout({ value, unit, label }: { value: string | number | null 
   );
 }
 
-/** Rounds for display only: at most three decimals, no trailing zeros. */
-// eslint-disable-next-line react-refresh/only-export-components -- display helper shared by the source notes.
-export function formatSourceValue(value: number): string {
-  return String(Number(value.toFixed(3)));
-}
-
 /**
  * Source for a value that is normally derived but can be overridden: the note while the
  * value follows the source, "↺ <useLabel>: X" once it differs, nothing when nothing can be derived
@@ -91,7 +77,7 @@ export function formatSourceValue(value: number): string {
 export function DerivedSource({
   derived,
   current,
-  note,
+  info,
   onUse,
   useLabel = 'Use the drawing',
   unit,
@@ -102,7 +88,8 @@ export function DerivedSource({
 }: {
   derived: number | null | undefined;
   current: number | '' | null | undefined;
-  note: React.ReactNode;
+  /** The source note shown while the value follows it. */
+  info: React.ReactNode;
   onUse: (derived: number) => void;
   useLabel?: string;
   unit?: string;
@@ -114,7 +101,7 @@ export function DerivedSource({
   tolerance?: number;
 }) {
   if (derived === null || derived === undefined || !Number.isFinite(derived)) return null;
-  if (!(overridden ?? isOverridden(derived, current, tolerance))) return <>{note}</>;
+  if (!(overridden ?? isOverridden(derived, current, tolerance))) return <>{info}</>;
   const shown = `${formatSourceValue(derived)}${unit ? ` ${unit}` : ''}`;
   return (
     <ResetFieldButton
@@ -125,13 +112,6 @@ export function DerivedSource({
       onClick={() => onUse(derived)}
     />
   );
-}
-
-/** True when a stated number differs from its source. Blank follows the source. */
-// eslint-disable-next-line react-refresh/only-export-components -- shared predicate for the source class.
-export function isOverridden(derived: number | null | undefined, current: number | '' | null | undefined, tolerance = 0.005): boolean {
-  if (derived === null || derived === undefined || !Number.isFinite(derived)) return false;
-  return typeof current === 'number' && Number.isFinite(current) && Math.abs(current - derived) > tolerance;
 }
 
 /** "from Wall (S)": the value comes from the host element (`parent_element` holds its name); the link selects it. */

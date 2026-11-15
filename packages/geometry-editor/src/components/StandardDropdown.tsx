@@ -34,7 +34,7 @@ interface StandardDropdownProps {
   /** Display-only trailing unit. It is never included in the selected value or events. */
   unit?: string;
   /** Where the value comes from (`FieldSource.tsx`), shown at the right of the label row. */
-  source?: React.ReactNode;
+  labelExtra?: React.ReactNode;
   id?: string;
   name?: string;
   'aria-label'?: string;
@@ -56,7 +56,7 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
   onBlur,
   selectRef,
   unit,
-  source,
+  labelExtra,
   id,
   name,
   'aria-label': ariaLabel,
@@ -128,12 +128,12 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
 
   return (
     <div className={`standard-dropdown-container ${className}`}>
-      {label && (source ? (
+      {label && (labelExtra ? (
         <div className="field-label-row">
           <label htmlFor={dropdownId} className="standard-dropdown-label">
             {label}
           </label>
-          <span className="field-label-row__source">{source}</span>
+          <span className="field-label-row__source">{labelExtra}</span>
         </div>
       ) : (
         <label htmlFor={dropdownId} className="standard-dropdown-label">

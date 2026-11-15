@@ -62,7 +62,8 @@ import {
   type UnheatedPitchedRoofCeilingElevationSource,
 } from '../../lib/unheatedPitchedRoofCeiling';
 import { ParentElementDropdown } from '../ParentElementDropdown';
-import { DerivedSource, ParentSourceNote, Readout, SourceNote, isOverridden } from '../FieldSource';
+import { DerivedSource, ParentSourceNote, Readout, SourceNote } from '../FieldSource';
+import { isOverridden } from '../../lib/fieldSource';
 import { StandardInput } from '../StandardInput';
 import { CompactSegmentedControl } from '../WindowDetailControls';
 import type { Element } from '../../geometry/types';
@@ -520,7 +521,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             derived={baseHeightResetTarget?.value}
             current={state.baseHeightInput.value}
             tolerance={0.01}
-            note={<SourceNote>{baseHeightResetTarget?.note}</SourceNote>}
+            info={<SourceNote>{baseHeightResetTarget?.note}</SourceNote>}
             useLabel={baseHeightResetTarget?.note === 'from the floors below' ? 'Use the floors below' : 'Use the floor'}
             unit="m"
             fieldLabel="Base height"

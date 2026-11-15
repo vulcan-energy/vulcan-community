@@ -475,7 +475,6 @@ import { FieldValidationIndicator, ValidationIndicator, ValidationPill } from '.
 import { ProductSlotChips } from './ProductSlotChips';
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';
-import { ResetFieldButton } from './ResetFieldButton';
 import { DerivedSource, FieldLabelRow, Readout, SourceNote } from './FieldSource';
 import { formatTreatedFloorAreaMismatch, getTreatedFloorAreaLabelMismatch } from '../lib/spaceLabelDerivation';
 import { analyzeZoneSpaceLabels } from '../lib/spaceLabelGeometry';
@@ -1878,7 +1877,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       </Tooltip>
     ) : labelContent;
     // Where the value comes from sits at the right of the label row (FieldSource.tsx).
-    return <FieldLabelRow label={label} source={source} />;
+    return <FieldLabelRow label={label} labelExtra={source} />;
   };
 
   // Orchestrator-invoked dormer bundle machinery (slice-6 brief STAGE 5,
@@ -4743,7 +4742,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       derived={derivedValue > 0 ? derivedValue : null}
                       current={currentValue}
                       overridden={isCustom}
-                      note={<SourceNote>from the floors drawn</SourceNote>}
+                      info={<SourceNote>from the floors drawn</SourceNote>}
                       unit="m²"
                       fieldLabel="Floor area"
                       onUse={useDrawnFloorArea}
@@ -4910,7 +4909,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       derived={derivedH > 0 ? derivedH : null}
                       current={currentH}
                       overridden={isCustomH}
-                      note={<SourceNote>from the storey heights</SourceNote>}
+                      info={<SourceNote>from the storey heights</SourceNote>}
                       useLabel="Use the storey heights"
                       unit="m"
                       fieldLabel="Height"
