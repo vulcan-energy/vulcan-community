@@ -490,7 +490,6 @@ impl<'a> El<'a> {
     }
 }
 
-
 fn quoted(names: &[&str]) -> String {
     names
         .iter()
