@@ -490,14 +490,6 @@ impl<'a> El<'a> {
     }
 }
 
-/// The elements' names, as a note lists them.
-fn names(elements: &[&El]) -> String {
-    elements
-        .iter()
-        .map(|e| e.name)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
 
 fn quoted(names: &[&str]) -> String {
     names
