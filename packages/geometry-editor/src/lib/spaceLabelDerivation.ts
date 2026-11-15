@@ -97,6 +97,28 @@ export const DEFAULT_SPACE_LABEL_ROOM_REGISTRY: Record<string, SpaceLabelRoomRul
     livingBucket: 'rest',
     increments: { NumberOfHabitableRooms: 1 },
   },
+  // TM59:2017 Table 2 and TM59:2026 §3.7.1: "two people living in one space – a combined bedroom, small kitchen
+  // and working and living area". It is the dwelling's living room and its kitchen. HEM FHS rejects zero bedrooms
+  // (calc_n_occupants), and the studio is where its occupants sleep, so it counts as one bedroom.
+  studio: {
+    excludeFromFloorArea: false,
+    livingBucket: 'living',
+    increments: { NumberOfBedrooms: 1, NumberOfHabitableRooms: 1, NumberOfWetRooms: 1, NumberOfHotTappedRooms: 1 },
+  },
+  // TM59:2026 Table E.1 note 3: "rooms that are smaller than the minimum required size for a bedroom but can
+  // accommodate a 60 × 100 cm desk and chair for home working". Not a bedroom; a habitable room (AD F).
+  home_office: {
+    excludeFromFloorArea: false,
+    livingBucket: 'rest',
+    increments: { NumberOfHabitableRooms: 1 },
+  },
+  // Communal corridors, stairs and lobbies outside the dwellings (TM59:2017 §3.9; TM59:2026 §2.4.4; AD O 0.4, 0.7).
+  // Not part of the dwelling, so no floor area or room counts (AD O Appendix A: floor area is the residential unit's).
+  communal: {
+    excludeFromFloorArea: true,
+    livingBucket: 'none',
+    increments: {},
+  },
 };
 
 /** Unknown non-empty slugs: area counts; no automatic dwelling increments (validation warns). */
@@ -124,7 +146,8 @@ export function isLivingRoomSpaceLabel(label: SpaceLabel): boolean {
 
 export function canSpaceLabelBeMarkedOpenToLivingRoom(label: SpaceLabel): boolean {
   const roomType = normaliseRoomTypeSlug(label.room_type ?? '');
-  return roomType !== '' && roomType !== 'living_room' && roomType !== 'void';
+  const { rule } = resolveRoomTypeRule(roomType);
+  return roomType !== '' && roomType !== 'void' && rule.livingBucket === 'rest' && !rule.excludeFromFloorArea;
 }
 
 export function isSpaceLabelOpenToLivingRoom(label: SpaceLabel): boolean {
