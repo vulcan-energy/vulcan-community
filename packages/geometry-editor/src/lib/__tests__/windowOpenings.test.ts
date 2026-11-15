@@ -16,7 +16,7 @@ import {
   windowPartsCopyBlocked,
   windowPartsCopyColumns,
   buildConvertToSingleOpeningPatch,
-  buildSingleOpeningPatch,
+  buildRemainingOpeningPatch,
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   syncWindowPartListToMidHeight,
@@ -119,9 +119,15 @@ describe('window opening write path', () => {
   });
 
   it('reduces a remaining table row to the normal form', () => {
-    expect(buildSingleOpeningPatch(withList([part(1.2), part(2)]), part(2))).toEqual({
+    expect(buildRemainingOpeningPatch(withList([part(1.2), part(2)]), part(2))).toEqual({
       ...part(2),
       extra_json: { note: 'keep', window_part_list: [legacy(2)] },
+    });
+  });
+
+  it('clears what the remaining opening leaves blank, so the removed one leaves nothing behind', () => {
+    expect(buildRemainingOpeningPatch(withList([part(1.2), { free_area_height: 0.3 }]), { free_area_height: 0.3 })).toEqual({
+      free_area_height: 0.3, mid_height: '', max_window_open_area: '', extra_json: { note: 'keep' },
     });
   });
 

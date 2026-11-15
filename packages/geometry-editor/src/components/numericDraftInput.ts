@@ -133,6 +133,8 @@ export function useNumericDraftInput(
   }, [commitOnChange, integer, onCommit]);
 
   const commitRawValue = useCallback((rawValue: string) => {
+    // Focus passing through writes nothing: the shown text may be a rounded view of the stored value.
+    if (!isEditing && rawValue.trim() === currentInputValue.trim()) return;
     const parsed = parseCompleteNumericDraft(rawValue, { integer });
     setIsEditing(false);
 
@@ -144,7 +146,7 @@ export function useNumericDraftInput(
     setValueState(parsed);
     setInputValue(formatBlurredInput(rawValue, parsed, formatOnBlur));
     onCommit?.(parsed);
-  }, [currentValue, formatOnBlur, integer, onCommit]);
+  }, [currentInputValue, currentValue, formatOnBlur, integer, isEditing, onCommit]);
 
   const handleBlur = useCallback((e?: FocusEvent<HTMLInputElement>) => {
     commitRawValue(e?.currentTarget.value ?? currentInputValue);

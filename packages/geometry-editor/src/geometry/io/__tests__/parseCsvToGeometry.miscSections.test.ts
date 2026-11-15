@@ -31,14 +31,45 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
     expect(parsed.metadata.vulcanCsvVersion).toBe(1);
   });
 
-  it('keeps a window open area to 4 dp through save and load, as its equivalent area is kept', () => {
-    const csv = windowCsv('VulcanCsvVersion,2,,,,,,,,,,,,,', 1.4, 1.4).replace(',0.4,1.4,0.4,', ',0.4,1.4,1.782,');
+  it('keeps stored numbers exact through save and load', () => {
+    const csv = `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+VulcanCsvVersion,3,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+South Wall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,0,FALSE,FALSE,,"0,0,0|4,0,0","{}"
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Living,BuildingElementTransparent,1.6125,90,1.25,1.29,180,0.9,South Wall,0.125,0.645,1.545,1.782,"1.000,0.000,0.900|2.250,0.000,0.900","{}"
+
+Thermal Bridging Elements,,,,,,,,,
+Name,Zone,Type,heat_transfer_coeff,length,linear_thermal_transmittance,parent_element,coords,extra_json
+Corner,Living,ThermalBridgeLinear,,8.345,0.045,,,"{}"
+Point,Living,ThermalBridgePoint,0.004,,,,,"{}"
+
+On-Site Generation,,,,,,,,,,
+Name,Type,generation_type,pitch,orientation360,base_height,peak_power,width,height,coords,extra_json
+PV 1,OnSiteGeneration,PhotovoltaicSystem,35,180,0,3.375,1.6125,1.0125,,"{}"
+`.trim();
     const store = createGeometryStore();
     store.getState().loadFromCSV(csv);
     const reopened = createGeometryStore();
     reopened.getState().loadFromCSV(store.getState().generateCSV());
-    const window = Object.values(reopened.getState().elementsById).find((element) => element.type === 'BuildingElementTransparent');
-    expect(window?.max_window_open_area).toBe(1.782);
+    const byName = (name: string) => Object.values(reopened.getState().elementsById).find((element) => element.name === name) as any;
+
+    expect(byName('Window 1')).toMatchObject({
+      frame_area_fraction: 0.125, free_area_height: 0.645, max_window_open_area: 1.782,
+    });
+    expect(byName('Corner')).toMatchObject({ length: 8.345, linear_thermal_transmittance: 0.045 });
+    expect(byName('Point')).toMatchObject({ heat_transfer_coeff: 0.004 });
+    expect(byName('PV 1')).toMatchObject({ peak_power: 3.375, width: 1.6125, height: 1.0125 });
   });
 
   it('hydrates version-2 ventilation-zone-relative window mid-heights into editor coordinates', () => {

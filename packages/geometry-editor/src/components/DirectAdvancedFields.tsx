@@ -19,7 +19,7 @@ import { ResetFieldButton } from './ResetFieldButton';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
 import {
   buildConvertToSingleOpeningPatch,
-  buildSingleOpeningPatch,
+  buildRemainingOpeningPatch,
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
@@ -560,7 +560,7 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
         ...args,
         applyChange: (segments, next) => {
           if (Array.isArray(next) && next.length === 1 && isRecord(next[0])) {
-            args.applyChange(segments, buildSingleOpeningPatch(source, next[0] as WindowOpeningRow).extra_json?.window_part_list);
+            args.applyChange(segments, buildRemainingOpeningPatch(source, next[0] as WindowOpeningRow).extra_json?.window_part_list);
           } else {
             args.applyChange(segments, next);
           }

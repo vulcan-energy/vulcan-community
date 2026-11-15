@@ -4,7 +4,7 @@
 import type { Element } from '../../geometry/types';
 import {
   buildAddWindowOpeningPatch,
-  buildSingleOpeningPatch,
+  buildRemainingOpeningPatch,
   classifyWindowOpenings,
   windowOpeningsUseTable,
   type WindowOpeningField,
@@ -18,6 +18,8 @@ import { StandardInput } from '../StandardInput';
 import { Tooltip } from '../Tooltip';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { readExtraJsonRecord } from './formPrimitives';
+import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
+import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
 
 const PART_FIELDS: readonly { key: WindowOpeningField; label: string; unit: string }[] = [
   { key: 'mid_height', label: 'Mid height', unit: 'm' },
@@ -45,7 +47,7 @@ export function WindowOpeningParts({ source, commit }: Readonly<{
   const extra = readExtraJsonRecord(source.extra_json);
   const parts = windowOpeningsUseTable(source) ? extra.window_part_list as readonly unknown[] : null;
   const writeParts = (next: readonly unknown[]) => commit(next.length === 1
-    ? buildSingleOpeningPatch(source, readExtraJsonRecord(next[0]) as WindowOpeningRow)
+    ? buildRemainingOpeningPatch(source, readExtraJsonRecord(next[0]) as WindowOpeningRow)
     : { extra_json: { ...extra, window_part_list: next } });
   return <>
     {parts?.map((part, index) => (
@@ -98,12 +100,19 @@ const SECURITY_RISK_OPTIONS = [
   { value: 'false', label: 'No · can be left open at night' },
 ];
 
-/** The window's `security_risk`, as stored: the store keeps the storey default until the user picks one. */
+/**
+ * The window's `security_risk`, as stored: the store keeps the storey default until the user picks one.
+ * Nothing when the target's window does not take it.
+ */
 export function SecurityRiskField({ element, fieldRef, commit }: Readonly<{
   element: Element;
-  fieldRef: (node: HTMLDivElement | null) => void;
-  commit: (extraJson: Record<string, unknown>) => void;
+  fieldRef?: (node: HTMLDivElement | null) => void;
+  commit: (securityRisk: boolean) => void;
 }>) {
+  const schemaPort = useGeometrySchemaPort();
+  const windowSchema = schemaPort.availability === 'available'
+    ? schemaPort.getElementSubschema(targetSchemaMode(schemaPort), 'BuildingElementTransparent') : undefined;
+  if (!(windowSchema?.properties as Record<string, unknown> | undefined)?.security_risk) return null;
   const extra = readExtraJsonRecord(element.extra_json);
   const stored = typeof extra.security_risk === 'boolean' ? String(extra.security_risk) : '';
   return <>
@@ -113,7 +122,7 @@ export function SecurityRiskField({ element, fieldRef, commit }: Readonly<{
     <div className="element-input" ref={fieldRef}>
       <StandardDropdown id="window-security-risk" value={stored} options={SECURITY_RISK_OPTIONS} placeholder="Choose"
         variant="ghost" size="md"
-        onChange={(value) => { if (value) commit({ ...extra, security_risk: value === 'true' }); }} />
+        onChange={(value) => { if (value) commit(value === 'true'); }} />
     </div>
   </>;
 }

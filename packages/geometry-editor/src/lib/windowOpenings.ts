@@ -228,7 +228,7 @@ function extraJsonWithHeight(row: WindowOpeningSource, height: number | undefine
 }
 
 /** The one-opening normal form: the given values in the columns, one legacy entry in the list. */
-export function buildSingleOpeningPatch(
+function buildSingleOpeningPatch(
   row: WindowOpeningSource,
   opening: WindowOpeningRow,
 ): WindowOpeningPatch {
@@ -237,6 +237,17 @@ export function buildSingleOpeningPatch(
     if (opening[key] !== undefined) patch[key] = opening[key];
   }
   patch.extra_json = extraJsonWithHeight(row, opening.mid_height ?? columnNumber(row, 'mid_height'));
+  return patch;
+}
+
+/** The one opening left when a list goes down to one replaces the window's: a value it leaves blank is cleared. */
+export function buildRemainingOpeningPatch(
+  row: WindowOpeningSource,
+  opening: WindowOpeningRow,
+): WindowOpeningPatch {
+  const patch: WindowOpeningPatch = {};
+  for (const key of OPENING_FIELDS) patch[key] = opening[key] ?? '';
+  patch.extra_json = extraJsonWithHeight(row, opening.mid_height);
   return patch;
 }
 

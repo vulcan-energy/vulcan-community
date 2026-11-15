@@ -293,7 +293,7 @@ export interface ElementFormRenderCtx {
    * System-only consumer (not-yet-extracted module), nullable because the host
    * may not provide one. */
   productCatalogue: GeometryProductCatalogueContribution | null;
-  /** Host fields for the selected glazed element, shown under Max Window Open Area. */
+  /** Host fields for the selected glazed element, shown under Open area. */
   openingFields: ReactNode;
   /** The selected System row has a product slot: its picker chooses the system's product, so
    * the sample Category and Preset do not show. */

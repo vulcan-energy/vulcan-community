@@ -56,6 +56,7 @@ import {
 } from './elementForms/formPrimitives';
 // PR #31's pitchDraftInput/commitTypedPitch (useNumericDraftInput) landed in
 // elementForms/wallShared.tsx instead of here — see that file's own import comment for why.
+import { SecurityRiskField } from './elementForms/WindowOpeningParts';
 import {
   useGeometrySchemaPort,
   useGeometrySourceComparisonPort,
@@ -3796,6 +3797,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 )}
               </div>
             )}
+          {sectionKey === 'window' && element?.type === 'BuildingElementTransparent' && (
+            <div className="element-form-grid">
+              <SecurityRiskField
+                element={element}
+                commit={(securityRisk) => commitDormerThermalSectionChanges(
+                  sectionKey,
+                  { ...currentData, extra_json: { ...currentData.extra_json, security_risk: securityRisk } },
+                  element,
+                )}
+              />
+            </div>
+          )}
           <React.Suspense fallback={<LazyInlineFallback label="Opening advanced fields..." />}>
             <AdvancedFieldsEditor
               elementType={currentData.type}

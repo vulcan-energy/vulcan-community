@@ -86,7 +86,7 @@
 //   never emitted them.
 // - The renderAttributePanel case: Linked Wall (ParentElementDropdown),
 //   width/height (via ctx.renderLinearDimensionsFields), the sloped-opening
-//   rebuild button, Area, Free Area Height, Mid Height, Max Window Open
+//   rebuild button, Area, Free Area Height, Mid Height, Open
 //   Area, Frame Area Fraction, Pitch (now via wallPitchField.tsx's
 //   renderWallPitchField — this stage's SECOND caller, converging the
 //   dedup's second of three copies per decision 9; Adjacent-like was the
@@ -161,7 +161,7 @@
 // orientation360/setOrientation360, applyOrientationToGeometry.
 
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
-import { roundToFourDecimals, roundToTwoDecimals } from '../../geometry/constants';
+import { roundToTwoDecimals } from '../../geometry/constants';
 import { calculateDerivedWindowMidHeight } from '../../lib/zoneDerivation';
 import { lineFaceEnvelope } from '../../lib/profileLineFace';
 import {
@@ -181,6 +181,7 @@ import {
   decimalInputProps,
   useDecimalInput,
   formatToTwoDecimals,
+  readExtraJsonRecord,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
@@ -217,8 +218,6 @@ export interface BuildingElementTransparentFormState {
   constructionBands: boolean;
   /** The active schema's window parts are physical openings (a8/a9). */
   windowPartsPhysical: boolean;
-  /** The target's window takes `security_risk`: the Opening section asks for it. */
-  securityRiskInSchema: boolean;
   commitOpeningField: (field: WindowOpeningField) => (value: number | '') => void;
   /** Shared with the wall family — see module header comment. */
   widthInput: NumericDraftInputBinding;
@@ -267,12 +266,7 @@ function displayedOpeningValues(
   const openings = windowPartsPhysical ? classifyWindowOpenings(element as unknown as WindowOpeningSource) : null;
   const opening: WindowOpeningRow | undefined =
     openings?.kind === 'rows' && openings.rows.length === 1 ? openings.rows[0] : undefined;
-  const display = (key: WindowOpeningField): number | '' => {
-    const value = opening?.[key] ?? element[key];
-    // The open area keeps 4 dp: an equivalent area is checked against it.
-    if (typeof value !== 'number') return value ?? '';
-    return key === 'max_window_open_area' ? roundToFourDecimals(value) : roundToTwoDecimals(value);
-  };
+  const display = (key: WindowOpeningField): number | '' => opening?.[key] ?? element[key] ?? '';
   return {
     free_area_height: display('free_area_height'),
     mid_height: display('mid_height'),
@@ -445,8 +439,6 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     closeShadingExisting: useGeometryStore(isExistingBuilding),
     constructionBands: useTargetRules().constructionBands,
     windowPartsPhysical,
-    securityRiskInSchema: ctx.schemaPort.availability === 'available'
-      && !!(ctx.schemaPort.getElementSubschema(ctx.schemaMode, 'BuildingElementTransparent')?.properties as Record<string, unknown> | undefined)?.security_risk,
     commitOpeningField,
     widthInput: ctx.shared.widthInput,
     heightInput: ctx.shared.heightInput,
@@ -487,11 +479,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     hydrateWallSharedFields(state, element, state.getCurrentOrientation);
 
     // Window-specific fields.
-    const frameAreaFraction = 'frame_area_fraction' in element && typeof element.frame_area_fraction === 'number'
-      ? roundToTwoDecimals(element.frame_area_fraction) : (element.frame_area_fraction ?? '');
     const opening = displayedOpeningValues(element, state.windowPartsPhysical);
 
-    state.freeAreaFractionInput.setValue(frameAreaFraction);
+    state.freeAreaFractionInput.setValue(element.frame_area_fraction ?? '');
     state.freeAreaHeightInput.setValue(opening.free_area_height);
     state.midHeightInput.setValue(opening.mid_height);
     state.maxWindowOpenAreaInput.setValue(opening.max_window_open_area);
@@ -850,11 +840,11 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             })()}
           </>
         ) : null}
-        {selectedElement?.type === 'BuildingElementTransparent' && state.securityRiskInSchema && (
+        {selectedElement?.type === 'BuildingElementTransparent' && (
           <SecurityRiskField
             element={selectedElement}
             fieldRef={registerBaseFieldRef('security_risk')}
-            commit={(extra) => commitExistingElementDraft({ extra_json: extra })}
+            commit={(securityRisk) => commitExistingElementDraft({ extra_json: { ...readExtraJsonRecord(selectedElement.extra_json), security_risk: securityRisk } })}
           />
         )}
         {openingFields}

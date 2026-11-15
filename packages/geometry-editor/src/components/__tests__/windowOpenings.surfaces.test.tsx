@@ -16,6 +16,7 @@ import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometr
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
 import { defineGeometryInspectorContributions, type GeometryInspectorContributions } from '../../../../geometry-editor-host/src/inspectorContributions';
 import { ElementCreator } from '../ElementCreator';
+import { buildSemiDetachedWithDormer } from '../../geometry/__fixtures__/semiDetachedWithDormer';
 import { WindowPartListControl } from '../jsonformsRenderers';
 
 afterEach(cleanup);
@@ -213,6 +214,11 @@ describe('validateElement window rules', () => {
     ]);
   });
 
+  it('asks nothing about openings on construction bands, where the window states its opening type', () => {
+    const bands: GeometrySchemaPort = { ...port(physicalItems), targetRules: () => ({ constructionBands: true }) };
+    expect(messages(windowElement({ window_part_list: [part(1.2), { free_area_height: 0.5, mid_height: 2 }] }), bands)).toEqual([]);
+  });
+
   it('flags physical parts on a7 but lets a7 run divisions with different heights', () => {
     expect(messages(windowElement({ window_part_list: [part(1.2)] }), port(legacyItems))[0]).toContain('Convert to a single opening');
     const divisions = { window_part_list: [{ mid_height_air_flow_path: 1.3 }, { mid_height_air_flow_path: 2 }] };
@@ -369,6 +375,22 @@ describe('main-form window opening inputs', () => {
       .toEqual(expect.arrayContaining(['Yes · cannot be left open at night', 'No · can be left open at night']));
     fireEvent.change(select, { target: { value: 'true' } });
     expect((stored(store).extra_json as Record<string, unknown>).security_risk).toBe(true);
+  });
+
+  it('asks a dormer window for Security risk in its Window Properties and keeps the choice', () => {
+    const { elements, floors, dormerNames } = buildSemiDetachedWithDormer();
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+    store.setState({ elementsById: Object.fromEntries(elements.map((element) => [element.id, element])), elementIds: elements.map((element) => element.id), floors });
+    const byName = (name: string) => Object.values(store.getState().elementsById).find((element) => element.name === name)!;
+    render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+        <GeometryStoreProvider store={store}>
+          <ElementCreator selection={{ type: 'element', id: byName(dormerNames.frontWall).id } as never} setSelection={vi.fn()} useCard={false} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    fireEvent.change(screen.getByLabelText('Security risk'), { target: { value: 'true' } });
+    expect((byName(dormerNames.window).extra_json as Record<string, unknown>).security_risk).toBe(true);
   });
 
   it('on construction bands: host opening fields after Opening type, and no openable parts', () => {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { roundToFourDecimals, roundToTwoDecimals } from '../constants';
+import { roundToTwoDecimals } from '../constants';
 import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { derivePvDimensionsFromCoords } from '../../lib/pvPanelFootprint';
@@ -100,13 +100,14 @@ function V(d: Record<string, string>, k: string): string {
  */
 let rowText: Record<string, string> = {};
 
-function num(d: Record<string, string>, column: string, cell = V(d, column), round = roundToTwoDecimals): number | undefined {
+/** A stored number reads back exactly as saved: the save writes it unrounded. */
+function num(d: Record<string, string>, column: string, cell = V(d, column)): number | undefined {
   if (cell === '') return undefined;
   if (!NUMBER_CELL.test(cell)) {
     rowText[column] = cell;
     return undefined;
   }
-  return round(Number(cell));
+  return Number(cell);
 }
 
 /**
@@ -346,7 +347,7 @@ export function ingestGeometryTabularSections(
         const hoRaw = V(d, 'height_override');
         const hoParsed = hoRaw !== '' ? parseFloat(hoRaw) : NaN;
         const height_override =
-          hoRaw !== '' && Number.isFinite(hoParsed) ? roundToTwoDecimals(hoParsed) : undefined;
+          hoRaw !== '' && Number.isFinite(hoParsed) ? hoParsed : undefined;
         const extra = parseExtraJson(V(d, 'extra_json'), V(d, 'Name'));
         const rawSource = typeof extra?.space_label_source === 'string' ? extra.space_label_source : '';
         const source =
@@ -451,8 +452,7 @@ export function ingestGeometryTabularSections(
                 frame_area_fraction: num(d, 'frame_area_fraction'),
                 free_area_height: num(d, 'free_area_height'),
                 mid_height: num(d, 'mid_height'),
-                // 4 dp, as an equivalent area stated against it is kept: 2 dp turned a 1.782 m² opening into 1.78.
-                max_window_open_area: num(d, 'max_window_open_area', undefined, roundToFourDecimals),
+                max_window_open_area: num(d, 'max_window_open_area'),
                 coordinates: transparentCoords,
                 extra_json: transparentExtraJson,
               };
