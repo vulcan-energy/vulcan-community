@@ -144,6 +144,11 @@ import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
 // per-type validators that move into separate files in subsequent refactors.
 
+
+/** "Leakage When Stopped" -> "Enter the leakage when stopped". Capitalised words go lower case; acronyms (PV, FHS) stay. */
+const enterFieldMessage = (label: string): string =>
+  `Enter the ${label.replace(/\b([A-Z])([a-z]+)/g, (_, first: string, rest: string) => first.toLowerCase() + rest)}`;
+
 export const geoIssue = (message: string, fieldKey?: string): ValidationIssue =>
   ({ message, source: 'geometry', fieldKey });
 export const schemaIssue = (message: string, fieldKey?: string): ValidationIssue =>
@@ -2016,7 +2021,7 @@ export const validateElementCore = (
       // The converter leaves out a row with a blank angle or distance (E027).
       for (const [field, label] of [['start_angle', 'Start Angle'], ['end_angle', 'End Angle'], ['distance', 'Distance']] as const) {
         if (unused && field === 'distance') continue;
-        if (!Number.isFinite(contextElement[field])) issues.push(geo(`${label} is required`, field));
+        if (!Number.isFinite(contextElement[field])) issues.push(geo(enterFieldMessage(label), field));
       }
       // Distance is derived from geometry - calculate it rather than checking stored value
       if (contextElement.parent_element && elementsById) {
@@ -2197,7 +2202,8 @@ export const validateElementCore = (
             context.globalOrientationOffset,
           );
           const epsAng = 0.5;
-          const epsBh = 0.01;
+          // A base height entered to one decimal (6.3 for 6.32 m) is the same height.
+          const epsBh = 0.05;
           if (
             typeof onSiteElement.pitch === 'number' &&
             typeof derived.pitch === 'number' &&
@@ -2495,9 +2501,7 @@ export const validateElementCore = (
             }, schemaPort);
             const unit = fieldUnitForAdornment(presentation);
             const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
-            const message = complianceValidationEnabled
-              ? `FHS: ${displayName} required`
-              : `${displayName} required`;
+            const message = `${complianceValidationEnabled ? 'FHS: ' : ''}${enterFieldMessage(displayName)}`;
             issues.push(issueFactory(message, field));
           }
         }

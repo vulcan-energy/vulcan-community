@@ -52,5 +52,8 @@ describe('resolveIssueTarget', () => {
     expect(resolveIssueTarget('/OnSiteGeneration/PV 1/peak_power', { ...model, elements: [...model.elements, { id: 'pv', name: 'PV 1', zoneId: 'z1' }] }))
       .toMatchObject({ section: 'OnSiteGeneration', elementId: 'pv', fieldKey: 'peak_power' });
     expect(resolveIssueTarget('/OnSiteGeneration/Window 1', model).elementId).toBeUndefined(); // ambiguous name
+    // An existing building's panel field, under panels/<n>, is the panel's own field.
+    expect(resolveIssueTarget('/OnSiteGeneration/PV 1/panels/0/mounting_type', { ...model, elements: [...model.elements, { id: 'pv', name: 'PV 1', zoneId: 'z1' }] }).fieldKey)
+      .toBe('mounting_type');
   });
 });

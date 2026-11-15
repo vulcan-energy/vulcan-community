@@ -203,6 +203,9 @@ export function SaveButtonIcon({ status }: Readonly<{ status: FilenameBarActionC
   }
 }
 
+/** "1 error", "2 notices". */
+const countText = (count: number, noun: string) => `${count} ${noun}${count !== 1 ? 's' : ''}`;
+
 export const FilenameBar: React.FC<FilenameBarProps> = ({
   documentHost,
   hostModelName,
@@ -415,7 +418,9 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     return rows.sort((a, b) => locationOrder.get(a.location)! - locationOrder.get(b.location)!);
   }, [buildErrorItems, resolveTarget]);
   const displayedBuildErrorCount = displayBuildErrorRows.length;
-  // Non-blocking items only (severity 'warning'), such as a load notice: the chip says so.
+  // Non-blocking items (severity 'warning'), such as a load notice, are counted apart from errors.
+  const displayedNoticeCount = displayBuildErrorRows.filter((row) => row.item.severity === 'warning').length;
+  const displayedErrorCount = displayedBuildErrorCount - displayedNoticeCount;
   const onlyNotices = buildErrorItems.length > 0 && buildErrorItems.every((item) => item.severity === 'warning');
   const openSettingsField = useCallback((field: string) => {
     window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
@@ -561,7 +566,8 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           {showLastSaveValidationFailure ? 'Validation' : onlyNotices ? 'Notice' : saveErrorTitle}
           {displayedBuildErrorCount > 0 && (
             <span className="save-error-header-count">
-              {displayedBuildErrorCount} {onlyNotices ? 'notice' : 'error'}{displayedBuildErrorCount !== 1 ? 's' : ''}
+              {[displayedErrorCount > 0 && countText(displayedErrorCount, 'error'), displayedNoticeCount > 0 && countText(displayedNoticeCount, 'notice')]
+                .filter(Boolean).join(' · ')}
             </span>
           )}
         </div>
@@ -804,7 +810,8 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
           >
             {showLastSaveValidationFailure
               ? 'Not validated'
-              : `${onlyNotices ? 'Notice' : 'Build Error'}${displayedBuildErrorCount > 0 ? ` (${displayedBuildErrorCount})` : ''}`}
+              : onlyNotices ? `Notice (${displayedNoticeCount})`
+                : `Build Error${displayedErrorCount > 0 ? ` (${displayedErrorCount})` : ''}`}
           </button>
         ) : null}
       </div>

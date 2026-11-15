@@ -22,6 +22,7 @@ import {
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
 import { elementTypeAvailability, simplifiedThermalBridgingOffered } from '../lib/schemaCache';
+import { targetRules } from '../../../geometry-editor-host/src/schemaPort';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
 import { buildLightingPatch, lightingFormModule } from './elementForms/lighting';
@@ -4201,6 +4202,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       flipElementOrientation,
       unheatedPitchedRoofCeilingElevationSuggestion,
     };
+    // A type the target excludes (Lighting on an existing building) keeps only its note: its inputs do nothing.
+    if (targetRules(schemaPort, modelSettings).excludedElementTypes[elementType]) return null;
     const form = elementFormInstances[elementType];
     return form ? form.renderPanel(formRenderCtx) : <div>Select an element type to see attributes</div>;
   };

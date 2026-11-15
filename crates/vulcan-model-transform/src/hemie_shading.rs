@@ -367,9 +367,6 @@ pub(super) fn distant(
                 notices.push(notice(&path, format!("{name}: stated {}, the drawing gives {}. Check roof shading or reset it to the drawing.", says(r), says(d))));
             }
         }
-        if source == "none" {
-            notices.push(notice(&path, format!("{name}: Very light assumed (nothing drawn). Draw what shades this side, or choose its band.")));
-        }
         segments.insert(
             (*key).into(),
             json!({"shading_fraction": shading, "roof_shading": roof}),
@@ -404,9 +401,15 @@ pub(super) fn distant(
             drawn_roof,
         });
     }
+    // One notice for every side: a side with nothing drawn or stated says so here.
+    let assumed = if quadrants.iter().any(|q| q.source == "none") {
+        " Where nothing is drawn, very light is assumed: draw what shades that side, or choose its band."
+    } else {
+        ""
+    };
     notices.push(notice(
         SHADING_POINTER,
-        format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.", described.join("; ")),
+        format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; ")),
     ));
     Some((
         json!({"model_type": "hemie", "DwellingShadingSegments": segments}),
@@ -779,9 +782,16 @@ mod tests {
     #[test]
     fn nothing_drawn_and_nothing_stated_assumes_very_light() {
         let out = derive(&[], 180.0);
+        // One notice names every side; no side repeats it.
+        assert!(
+            out.notice("Where nothing is drawn, very light is assumed"),
+            "{:?}",
+            out.notices
+        );
         for name in NAMES {
+            assert!(out.notice(&format!("{name} (")), "{:?}", out.notices);
             assert!(
-                out.notice(&format!("{name}: Very light assumed (nothing drawn).")),
+                !out.notice(&format!("{name}: Very light")),
                 "{:?}",
                 out.notices
             );

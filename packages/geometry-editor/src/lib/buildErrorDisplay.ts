@@ -182,7 +182,8 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
       : 'These settings conflict with the selected schema.';
   } else if (!isSchemaKeywordError(item)) {
     // Converter/source diagnostics are written for users; a generic "Check X" would hide them.
-    userMessage = item.message;
+    // A first line is the summary; the lines after it show under Details.
+    userMessage = item.message.split('\n')[0]!;
   } else {
     userMessage = fieldLabel
       ? `Check ${fieldLabel}.`

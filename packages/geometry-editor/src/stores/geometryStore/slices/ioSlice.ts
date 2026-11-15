@@ -830,7 +830,8 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
   // A row the file lacks is listed by lateLoadNotice (absentMetadataRowFill).
   const one = replaced.length === 1;
   return replaced.length
-    ? [`Opening the model updated ${one ? '1 value' : `${replaced.length} values`}. Save to keep ${one ? 'it' : 'them'}: ${replaced.join('; ')}.`]
+    // The first line is the summary users see; the list shows under Details.
+    ? [`Opening the model updated ${one ? '1 value' : `${replaced.length} values`}. Save to keep ${one ? 'it' : 'them'}.\n${replaced.join('; ')}.`]
     : [];
 };
 

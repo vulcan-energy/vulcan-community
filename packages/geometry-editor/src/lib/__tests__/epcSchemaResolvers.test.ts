@@ -68,8 +68,8 @@ describe('HEM:EPC conditions in the live validation', () => {
     } as never).issues.map((issue) => issue.message).join('|');
     const none = run(wall);
     expect(none).toContain(UR);
-    expect(none).toContain('Orientation 360');
-    expect(none).toContain('Is Unheated Pitched Roof');
+    expect(none).toContain('orientation 360');
+    expect(none).toContain('is unheated pitched roof');
     expect(run({ ...wall, u_value: 0.3, thermal_resistance_construction: 3 })).toContain(UR);
     expect(run({ ...wall, u_value: 0.3 })).not.toContain(UR);
   });
