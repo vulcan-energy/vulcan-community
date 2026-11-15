@@ -1523,17 +1523,19 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       const keepU = thermalMethod === 'u_value' || (thermalMethod === 'calculation' && elementType === 'BuildingElementGround');
       if (!keepU || resistanceShown) delete advancedProperties.u_value;
       if (!keepU || !resistanceShown) delete advancedProperties.thermal_resistance_construction;
-      const first = ['u_value', 'thermal_resistance_construction', ...(thermalMethod === 'band' ? [] : ['g_value'])];
+      const first = new Set(['u_value', 'thermal_resistance_construction', ...(thermalMethod === 'band' ? [] : ['g_value'])]);
       const reordered = Object.fromEntries([
-        ...first.flatMap((key) => (advancedProperties[key] ? [[key, advancedProperties[key]] as const] : [])),
-        ...Object.entries(advancedProperties).filter(([key]) => !first.includes(key)),
+        ...[...first].flatMap((key) => (advancedProperties[key] ? [[key, advancedProperties[key]] as const] : [])),
+        ...Object.entries(advancedProperties).filter(([key]) => !first.has(key)),
       ]);
       for (const key of Object.keys(advancedProperties)) delete advancedProperties[key];
       Object.assign(advancedProperties, reordered);
     }
 
+    const only = onlyFields && new Set(onlyFields);
+    const omit = new Set(omitFields);
     for (const key of Object.keys(advancedProperties)) {
-      if ((onlyFields && !onlyFields.includes(key)) || omitFields?.includes(key)) delete advancedProperties[key];
+      if ((only && !only.has(key)) || omit.has(key)) delete advancedProperties[key];
     }
 
     let result: SchemaNode = {
@@ -1685,12 +1687,14 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       ?? statedMethod(offered, tank[1], existingBuilding ? (group.key === 'size' ? 'category' : 'year') : undefined);
     return [{ group, offered, current }];
   }) : [];
-  const tankMethodFields = useMemo(() => new Set(tankGroups.flatMap(({ offered }) => offered.flatMap((method) => method.fields))), [tankGroups]);
-  const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
+  const tankMethodFields = tankGroups.flatMap(({ offered }) => offered.flatMap((method) => method.fields)).join(' ');
+  const systemLayout = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
     if (elementType !== 'System' || !subtype || !subschema) return undefined;
-    const layout = buildSystemAdvancedUischema(subtype, subschema as Record<string, unknown>);
-    return tankMethodFields.size ? withoutLayoutLeaves(layout, tankScope, tankMethodFields) ?? undefined : layout;
-  }, [elementType, subtype, subschema, tankMethodFields, tankScope]);
+    return buildSystemAdvancedUischema(subtype, subschema as Record<string, unknown>);
+  }, [elementType, subtype, subschema]);
+  const systemAdvancedUischema = systemLayout && tankMethodFields
+    ? withoutLayoutLeaves(systemLayout, tankScope, new Set(tankMethodFields.split(' '))) ?? undefined
+    : systemLayout;
   const patchTank = (next: Record<string, unknown>) => {
     if (!tank) return;
     const base = readExtraJsonRecord(currentData.extra_json);

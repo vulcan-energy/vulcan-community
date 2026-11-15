@@ -378,7 +378,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
     // peak power and inverter defaulted unless stated; the mounting type gives the ventilation.
     const existingPv = hemDatabaseProducts && existingBuilding;
     const pvExtra = readRecord(pvElement?.extra_json);
-    const pvSizeFromCount = existingPv && (state.pvSizeChosen ? state.pvSizeChosen === 'count' : pvExtra.panel_count !== undefined);
+    const pvSizeFromCount = Boolean(existingPv && (state.pvSizeChosen ? state.pvSizeChosen === 'count' : pvExtra.panel_count !== undefined));
     const patchPvExtra = (key: string, value: unknown) => {
       if (pvElement) updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), [key]: value } } as Partial<Element>);
     };
@@ -533,7 +533,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                 }}
               />
             </div>
-            {pvSizeFromCount && <>
+            {pvSizeFromCount ? <>
             <div className="element-label">Panel count</div>
             <div className="element-input">
               <StandardInput
@@ -552,7 +552,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
               />
             </div>
             <div className="field-source-note">The panel count gives the array size; the outline only places it on the roof.</div>
-            </>}
+            </> : null}
           </>
         ) : null}
         {renderFieldLabelWithComparisonIndicator('Peak Power (kWp):', elementType, globalComparisonFieldIndicators.peak_power)}
@@ -696,7 +696,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
             </>
           );
         })()}
-        {!pvSizeFromCount && <>
+        {pvSizeFromCount ? null : <>
         {renderFieldLabel('Width (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('width')}>
           <StandardInput

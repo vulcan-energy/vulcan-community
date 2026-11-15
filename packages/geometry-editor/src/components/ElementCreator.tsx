@@ -4118,6 +4118,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       </button>
     </div>
   ) : null;
+  const hostElementFieldsForMethod = thermalMethod ? renderHostElementFields(thermalMethod) : null;
+  const hostElementFieldsPlain = thermalMethod ? null : renderHostElementFields();
   const thermalMethodControl = thermalMethod && thermalMethodOptions.length > 1 ? (
     <ThermalMethodControl methods={thermalMethodOptions} value={thermalMethod} onChange={switchThermalMethod} />
   ) : null;
@@ -4139,15 +4141,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             inspectorContributions={inspectorContributions}
             workspaceResourcePort={workspaceResourcePort}
             thermalMethod={thermalMethod}
-            onlyFields={['u_value', 'g_value']}
+            onlyFields={WINDOW_THERMAL_FIELDS}
           />
         </React.Suspense>
       )}
-      {renderHostElementFields(thermalMethod)}
+      {hostElementFieldsForMethod}
     </div>
   ) : null;
 
-  const renderWindowWallLink = () => (
+  const windowWallLink = (
     selection?.type === 'element' && !selection.isPlaceholder && selectedElement?.type === 'BuildingElementTransparent' ? (
       <WindowWallLink
         parentName={wallShared.parentElement}
@@ -5180,7 +5182,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {renderElementElevationField()}
                 </div>
 
-                {!thermalMethod && renderHostElementFields()}
+                {hostElementFieldsPlain}
 
                 {/* Advanced Fields Section - Outside grid for full width */}
                 {selection.type === 'element' || selection.type === 'global' ? (
@@ -5292,12 +5294,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           workspaceResourcePort={workspaceResourcePort}
                           className="advanced-fields-section"
                           thermalMethod={thermalMethod}
-                          hostFields={thermalMethod && elementType !== 'BuildingElementTransparent' ? renderHostElementFields(thermalMethod) : undefined}
+                          hostFields={elementType !== 'BuildingElementTransparent' ? hostElementFieldsForMethod : undefined}
                           omitFields={thermalMethod && elementType === 'BuildingElementTransparent' ? (thermalMethod === 'band' ? WINDOW_BAND_THERMAL_FIELDS : WINDOW_THERMAL_FIELDS) : undefined}
                         />
                       </React.Suspense>
                     )}
-                    {renderWindowWallLink()}
+                    {windowWallLink}
                   </div>
                 ) : null}
               </div>

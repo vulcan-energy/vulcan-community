@@ -849,6 +849,8 @@ function renderControlForProperty(args: {
 
 const NO_ENGINE_FIELDS: ReadonlySet<string> = new Set();
 const isStated = (value: unknown) => value !== undefined && value !== null && value !== '';
+/** "heat capacity, mass distribution and 3 more": what "More" holds, in a few words. */
+const moreHint = (labels: readonly string[]) => (labels.length > 4 ? `${labels.slice(0, 3).join(', ')} and ${labels.length - 3} more` : labels.join(', '));
 
 export function DirectAdvancedFields({
   schema,
@@ -989,8 +991,11 @@ export function DirectAdvancedFields({
 
   const laidOut = layout ? renderLayoutNode(layout, 'root') : null;
   collectingMore = false;
-  const moreLabels = (layout ? moreNodes.map((node) => segmentsFromLayoutScope(node.scope ?? '')) : engineEntries.map(({ key }) => [key]))
-    .map((segments) => labelForProperty(segments[segments.length - 1] ?? '', {}, elementType).toLowerCase());
+  const moreKeys = layout ? moreNodes.map((node) => { const segments = segmentsFromLayoutScope(node.scope ?? ''); return segments[segments.length - 1] ?? ''; }) : engineEntries.map(({ key }) => key);
+  const moreLabels = moreKeys.map((key) => {
+    const label = labelForProperty(key, {}, elementType);
+    return /^[A-Z][a-z]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+  });
   const moreStated = layout
     ? moreNodes.some((node) => isStated(getAtPath(data, segmentsFromLayoutScope(node.scope ?? ''))))
     : engineEntries.some(({ key }) => isStated(data[key]));
@@ -1000,7 +1005,7 @@ export function DirectAdvancedFields({
       {beforeMore}
       {(layout ? moreNodes.length : engineEntries.length) > 0 && (
         // Open while the user has stated one of these; otherwise their defaults stay out of the way.
-        <GroupAccordion label="More" hint={[...new Set(moreLabels)].join(', ')} openInitially={moreStated}>
+        <GroupAccordion label="More" hint={moreHint([...new Set(moreLabels)])} openInitially={moreStated}>
           {layout ? moreNodes.map((node, i) => renderLayoutNode(node, `more-${i}`)) : engineEntries.map(renderFlatEntry)}
         </GroupAccordion>
       )}

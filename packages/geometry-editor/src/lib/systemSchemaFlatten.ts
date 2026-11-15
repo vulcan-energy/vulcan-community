@@ -513,7 +513,9 @@ export function systemFieldDefaults(
     if (sources.some((source) => source.type === 'DirectElectricBoiler' && source.electricity_circ_pump === undefined)) out.manufacture_year ??= 'unknown';
     // `tank_descriptors` (hemie_systems.rs): a tank with no size takes the volume category
     // "Inaccessible", and with no standing loss, efficiency class or pump power the install year "unknown".
-    for (const tank of Object.values(readRecord(extra.HotWaterSource)).map(readRecord).filter((plant) => plant.type === 'StorageTank')) {
+    for (const plant of Object.values(readRecord(extra.HotWaterSource))) {
+      const tank = readRecord(plant);
+      if (tank.type !== 'StorageTank') continue;
       const has = (key: string) => tank[key] !== undefined && tank[key] !== null && tank[key] !== '';
       if (!['volume', 'external_diameter', 'external_height', 'tank_volume_category'].some(has)) out.tank_volume_category ??= 'Inaccessible';
       if (!['daily_losses', 'energy_efficiency_class', 'installation_year', 'pump_power_at_flow_rate'].some(has)) out.installation_year ??= 'unknown';
