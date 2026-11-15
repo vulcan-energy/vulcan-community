@@ -75,6 +75,14 @@ export interface HistorySlice {
    * schedules for later are not covered.
    */
   writeAs: <T>(intent: WriteIntent, write: () => T) => T;
+  /** The intent of the write in progress: `user` outside `writeAs` and document loads. */
+  writeIntent: () => WriteIntent;
+  /**
+   * Runs a document load or replace (open, undo, redo, a shared-model update) as a `derived`
+   * write that sets its own baseline: nothing is folded or captured, and followers of user edits
+   * (`writeIntent`) stay still.
+   */
+  asDocumentLoad: <T>(load: () => T) => T;
 }
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], HistorySlice>;
@@ -95,6 +103,18 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   let captureTimer: ReturnType<typeof setTimeout> | null = null;
   // Depth of the editor's own writes in progress; the change subscriber starts no capture during them.
   let systemWriteDepth = 0;
+  let systemIntent: WriteIntent = 'user';
+  const asSystem = <T>(intent: WriteIntent, run: () => T): T => {
+    const outer = systemIntent;
+    systemWriteDepth += 1;
+    if (systemWriteDepth === 1) systemIntent = intent;
+    try {
+      return run();
+    } finally {
+      systemWriteDepth -= 1;
+      systemIntent = outer;
+    }
+  };
 
   const getDocumentCsv = (): string => {
     const state = get();
@@ -197,13 +217,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     // ponytail: one export before every call (a cache hit when the dirty check ran since the
     // last change); a no-op write pays it too. Track clean state by identity if it shows.
     const before = tryDocumentCsv();
-    systemWriteDepth += 1;
-    let result: T;
-    try {
-      result = write();
-    } finally {
-      systemWriteDepth -= 1;
-    }
+    const result = asSystem(intent, write);
     if (get() === previous) return result;
     const after = tryDocumentCsv();
     if (after === null || after === before) return result;
@@ -217,12 +231,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       partial.history = history;
     }
     if (before !== null && before === state.lastSavedCsv) partial.lastSavedCsv = after;
-    systemWriteDepth += 1;
-    try {
-      set(partial);
-    } finally {
-      systemWriteDepth -= 1;
-    }
+    asSystem(intent, () => set(partial));
     documentCsvCache = { state: get(), csv: after };
     logGeometryHistory('write:absorbed', { intent, movedBaseline: partial.lastSavedCsv !== undefined });
     return result;
@@ -261,5 +270,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     undo: () => goTo(-1),
     redo: () => goTo(1),
     writeAs,
+    writeIntent: () => systemIntent,
+    asDocumentLoad: (load) => asSystem('derived', load),
   };
 };

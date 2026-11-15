@@ -231,7 +231,7 @@ describe('suspended floors', () => {
     expect(extraOf(store).area_per_perimeter_vent).toBeGreaterThan(0);
   });
 
-  it('fills the shielding location when the target schema arrives after the load', () => {
+  it('fills the shielding location when the target schema arrives after the load, leaving the model clean', () => {
     let notify = () => {};
     const port = {
       ...canonicalGeometrySchemaPort,
@@ -246,5 +246,9 @@ describe('suspended floors', () => {
     port.availability = 'available';
     notify();
     expect(extraOf(store).shield_fact_location).toBe('Average');
+    // A default write: the model stays clean and the fill is no undo step of its own.
+    store.getState().saveToHistory('probe');
+    expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
+    expect(store.getState().history).toHaveLength(1);
   });
 });

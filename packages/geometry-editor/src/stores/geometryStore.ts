@@ -1627,7 +1627,6 @@ export interface GeometryState extends
   duplicateElement: (id: string) => void;
   duplicateElements: (ids: string[]) => void;
   /** See `GroundFabricFollower`: installed per store by `createGeometryStore`. */
-  asDocumentLoad: GroundFabricFollower['asDocumentLoad'];
   withCopySources: GroundFabricFollower['withCopySources'];
 
   // Recompute orientations after global compass offset changes
@@ -7115,9 +7114,6 @@ const createGeometryState = (
     }, 0);
   },
 
-  asDocumentLoad: () => {
-    throw new Error('asDocumentLoad is installed by createGeometryStore');
-  },
   withCopySources: () => {
     throw new Error('withCopySources is installed by createGeometryStore');
   },
@@ -7856,7 +7852,7 @@ export const createGeometryStore = (
     constructionBands: (state) => targetRules(schemaPort, state.complianceSettings).constructionBands,
     acceptsShieldLocation: () => acceptsSuspendedShieldLocation(schemaPort),
   });
-  rawSetState({ asDocumentLoad: follower.asDocumentLoad, withCopySources: follower.withCopySources });
+  rawSetState({ withCopySources: follower.withCopySources });
   return store;
 };
 
