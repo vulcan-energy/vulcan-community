@@ -92,28 +92,28 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   // CSV structural fields (explicitly excluded from JSON merge - see builder.rs line 420)
   // These are used to organize/identify elements but not stored as element properties
   'name': {
-    description: 'The name of this element. Used for identification and cross-referencing between elements (e.g., windows referencing their parent wall). This field is CSV-only and is not merged into the JSON schema as an element property.',
+    description: 'The name of this element. Other elements use it to refer to this one, for example a window to its wall.',
     type: 'string',
   },
   'label:Name': {
-    description: 'The name of this element (CSV column header). Used for identification and cross-referencing between elements. This field is CSV-only and is not merged into the JSON schema as an element property.',
+    description: 'The name of this element. Other elements use it to refer to this one.',
     type: 'string',
   },
   'label:Type': {
-    description: 'The element type identifier used in CSV files (e.g., "Wall", "Window", "Floor"). This is typically set automatically based on the element type selection. This field is CSV-only and is not merged into the JSON schema as an element property. Note: The lowercase "type" field IS in the schema as a required const property (e.g., "BuildingElementOpaque").',
+    description: 'The kind of element, for example wall, window or floor.',
     type: 'string',
   },
   'label:Zone': {
-    description: 'The zone name this element belongs to. Used during CSV merge to organize elements into zones, but not stored as an element property in the final JSON. This field is CSV-only for element rows.',
+    description: 'The zone this element belongs to.',
     type: 'string',
   },
   'position_xyz': {
-    description: 'The 3D coordinates of this element. Used for geometry positioning in CSV files. This field is CSV-only and is not merged into the JSON schema.',
+    description: 'The position of this element in the drawing.',
     type: 'string',
   },
   // CSV relationship fields (intentionally ignored for schema compliance during CSV→JSON merge)
   'parent_element': {
-    description: 'The name of the parent element this element is attached to. For windows, this should be the name of the wall they are mounted in. This field is CSV-only and is intentionally ignored during JSON merge for schema compliance.',
+    description: 'The element this element is in. For a window, the wall it is in.',
     type: 'string',
   },
   'mvhr_unit': {
@@ -126,11 +126,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   // Element-specific variant for Vents
   'parent_element_Vents': {
-    description: 'The name of the parent opaque building element (wall/roof) this vent is attached to. The vent automatically inherits orientation360 and pitch from this parent element. This field is CSV-only and is intentionally ignored during JSON merge for schema compliance.',
+    description: 'The wall or roof this vent is in. The vent takes its orientation and pitch from it.',
     type: 'string',
   },
   'linked_wall': {
-    description: 'The name of the wall this window is linked to. The window inherits pitch and orientation from this wall and is visually snapped to the wall\'s internal face. This field is CSV-only and is intentionally ignored during JSON merge.',
+    description: 'The wall this window is in. The window takes its pitch and orientation from the wall.',
     type: 'string',
   },
   // CSV control fields (affect processing but not merged into schema)
@@ -515,11 +515,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   // Display labels and units for the product-less system forms (the schema's own titles are engine words).
   'System:HotWaterSource:volume': { description: 'Volume of the tank (unit: litres)', type: 'number', units: 'litres' },
-  'System:HotWaterSource:daily_losses': { description: 'Heat the full tank loses in 24 hours (unit: kWh/24h)', type: 'number' },
+  'System:HotWaterSource:daily_losses': { description: 'Heat the full tank loses in 24 hours (unit: kWh/24h)', type: 'number', units: 'kWh/24h' },
   'System:HotWaterSource:primary_flow_rate': { description: 'Flow rate through the coil (unit: L/min)', type: 'number', units: 'L/min' },
   'System:HotWaterSource:temp_flow_limit_upper': { description: 'Highest flow temperature the heat source supplies (unit: deg C)', type: 'number', units: 'deg C' },
   'System:SpaceHeatSystem:temp_flow_limit_upper': { description: 'Highest flow temperature the heat source supplies (unit: deg C)', type: 'number', units: 'deg C' },
-  'System:SpaceHeatSystem:temp_diff_emit_dsgn': { description: 'Design temperature difference between emitter flow and return (unit: K)', type: 'number' },
+  'System:SpaceHeatSystem:temp_diff_emit_dsgn': { description: 'Design temperature difference between emitter flow and return (unit: K)', type: 'number', units: 'K', correctsSchema: true },
   'System:HeatSourceWet:electricity_circ_pump': { description: 'Electrical power of the circulation pump (unit: kW)', type: 'number', units: 'kW' },
   'System:HeatSourceWet:electricity_standby': { description: 'Electrical power in standby mode (unit: kW)', type: 'number', units: 'kW' },
   'solar_absorption_coeff': { label: 'Solar absorption coefficient' },
@@ -535,6 +535,8 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: 'litres',
   },
+  'System:HotWaterSource:heat_exchanger_surface_area': { description: 'Surface area of the heat exchanger coil (unit: m²)', type: 'number', units: 'm²' },
+  'System:SpaceHeatSystem:thermal_mass': { description: 'Thermal mass of the emitters (unit: kWh/K)', type: 'number', units: 'kWh/K' },
   'System:HotWaterSource:daily_losses_declared': {
     description: "Standing heat loss (unit: kWh/day)",
     type: 'number',

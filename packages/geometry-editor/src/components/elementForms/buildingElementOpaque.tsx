@@ -564,7 +564,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
         </div>
         {canMarkUnheatedPitchedRoof ? (
           <>
-            {renderFieldLabel('Unheated Pitched Roof', elementType)}
+            {renderFieldLabel('Unheated pitched roof', elementType)}
             <div className="element-input">
               <label className="checkbox-container">
                 <input
@@ -618,7 +618,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
               />
               {unheatedPitchedRoofCeilingElevationSuggestion ? (
                 <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Blank = automatic {unheatedPitchedRoofCeilingElevationSuggestion.value} m from {unheatedPitchedRoofCeilingElevationSourceLabel(unheatedPitchedRoofCeilingElevationSuggestion.source)}. Used for 3D and auto thermal bridges; HEM base height remains the roof-plane base.
+                  Blank = automatic {unheatedPitchedRoofCeilingElevationSuggestion.value} m from {unheatedPitchedRoofCeilingElevationSourceLabel(unheatedPitchedRoofCeilingElevationSuggestion.source)}. Used for 3D and automatic thermal bridges. The roof base height stays at the roof plane.
                 </div>
               ) : null}
             </div>

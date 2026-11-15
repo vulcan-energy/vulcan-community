@@ -349,7 +349,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
         position: 'fixed',
         zIndex: 9999,
         opacity: isPositioned ? 1 : 0,
-        pointerEvents: isPositioned ? 'auto' : 'none',
+        pointerEvents: 'none',
         transition: 'opacity 0.1s'
       }}
     >

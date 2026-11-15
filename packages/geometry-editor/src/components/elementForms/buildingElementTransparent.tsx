@@ -859,7 +859,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             })()}
           </>
         ) : null}
-        {renderFieldLabel('Frame Area Fraction:', elementType)}
+        {renderFieldLabel('Frame area fraction:', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput
             {...decimalInputProps(state.freeAreaFractionInput)}

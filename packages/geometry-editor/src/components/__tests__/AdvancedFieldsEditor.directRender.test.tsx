@@ -3403,6 +3403,13 @@ describe('EPC system pickers and defaults', () => {
     expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }]);
   });
 
+  it('offers a fan or PV array the electricity supplies only, and a cylinder the model\'s cold water sources', () => {
+    const schema = { properties: { EnergySupply: { type: 'string' }, ColdWaterSource: { type: 'string' } } };
+    const out = applyEcodesignControlClassEnum(schema, { supplyNames: ['mains elec', 'mains gas'], electricSupplyNames: ['mains elec'], allElectric: true, coldWaterNames: ['mains water'] }) as { properties: Record<string, Record<string, unknown>> };
+    expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }]);
+    expect(out.properties.ColdWaterSource.oneOf).toEqual([{ const: 'mains water', title: 'Mains water' }]);
+  });
+
   it('gives a blank field the derived value of its system, and the existing-building defaults', () => {
     const extra = { SpaceHeatSystem: { 'Heating circuit': { type: 'WetDistribution' } }, HeatSourceWet: { feed: { type: 'DirectFeed' } } };
     const derived = [{ path: '/SpaceHeatSystem/Heating circuit', field: 'design_flow_temp', value: 55 },

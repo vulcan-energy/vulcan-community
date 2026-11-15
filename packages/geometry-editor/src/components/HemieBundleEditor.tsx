@@ -119,7 +119,7 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
   return (
     <>
       {fields.flatMap((field) => field.shown && !field.shown(draft) ? [] : [(
-        <FieldRow key={String(field.key)} label={`${field.label}:`}>
+        <FieldRow key={String(field.key)} label={field.label}>
           {field.kind === 'choice' ? (
             <StandardDropdown
               value={String(draft[field.key as string] ?? '')}

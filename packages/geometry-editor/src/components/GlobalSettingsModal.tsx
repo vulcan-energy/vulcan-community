@@ -161,6 +161,12 @@ function contentHashDefaultsShortHash(path: string): string | undefined {
   return CONTENT_HASH_DEFAULTS_PATH.exec(path)?.[1]?.slice(0, 8);
 }
 
+/** An EPC defaults file as words: "input/defaults/defaults_template_epc.json" -> "Defaults template EPC". */
+function epcDefaultsFileLabel(path: string): string {
+  const words = (path.split('/').pop() ?? path).replace(/\.json$/, '').replace(/_/g, ' ').replace(/\bepc\b/gi, 'EPC');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function defaultsFileLabel(path: string): string {
   const shortHash = contentHashDefaultsShortHash(path);
   return shortHash ? `This model's defaults (${shortHash})` : path;
@@ -972,10 +978,12 @@ export function GlobalSettingsModal({
 
   const defaultsListForDisplay = useMemo(() => {
     const query = defaultsSearchQuery.toLowerCase().trim();
+    const effective = (selectedDefaults || effectiveDefaultsPath).trim();
+    // An EPC model lists only EPC defaults: the file in use, shared-model copies and EPC templates.
     let filtered = availableDefaults.filter((path) =>
       `${path} ${defaultsFileLabel(path)}`.toLowerCase().includes(query)
+      && (!epcTarget || path === effective || !!contentHashDefaultsShortHash(path) || /epc/i.test(path))
     );
-    const effective = (selectedDefaults || effectiveDefaultsPath).trim();
     if (
       effective &&
       !filtered.includes(effective) &&
@@ -992,6 +1000,7 @@ export function GlobalSettingsModal({
     effectiveDefaultsPath,
     defaultsSearchQuery,
     selectedDefaults,
+    epcTarget,
   ]);
 
   useEffect(() => {
@@ -1307,7 +1316,7 @@ export function GlobalSettingsModal({
                   }}
                 >
                   {isBuildTypeManual || fileBuildType
-                    ? "(manual override)"
+                    ? "(set by you)"
                     : "(auto)"}
                 </span>
               )}
@@ -1568,8 +1577,8 @@ export function GlobalSettingsModal({
                 }}
               >
                 What you draw is the building shape. The defaults file supplies
-                other details HEM requires: schedules, default properties, and
-                similar. The file in use is highlighted at the top.
+                the other details the model needs. The file in use is
+                highlighted at the top.
               </div>
 
               {/* Search input */}
@@ -1677,7 +1686,7 @@ export function GlobalSettingsModal({
                             }}
                           />
                           <span
-                            title={shortHash ? p : undefined}
+                            title={shortHash || epcTarget ? p : undefined}
                             style={{
                               fontWeight: 600,
                               overflow: "hidden",
@@ -1699,6 +1708,8 @@ export function GlobalSettingsModal({
                                   {shortHash}
                                 </span>
                               </>
+                            ) : epcTarget ? (
+                              epcDefaultsFileLabel(p)
                             ) : (
                               p
                             )}
@@ -1942,7 +1953,7 @@ export function GlobalSettingsModal({
               {/* Dwelling Details Section */}
               <div data-field-section="dwelling" style={{ marginTop: "var(--spacing-md)" }}>
                 <GlobalSettingsAccordionHeader
-                  title="Dwelling Details"
+                  title="Dwelling details"
                   expanded={complianceSettingsExpanded}
                   onToggle={() =>
                     setComplianceSettingsExpanded(!complianceSettingsExpanded)
@@ -2067,7 +2078,7 @@ export function GlobalSettingsModal({
                                     }}
                                   >
                                     {isStoreysInDwellingManual
-                                      ? "(manual override)"
+                                      ? "(set by you)"
                                       : "(auto)"}
                                   </span>
                                 )}
@@ -2159,7 +2170,7 @@ export function GlobalSettingsModal({
                                         }}
                                       >
                                         {isStoreyOfDwellingManual
-                                          ? "(manual override)"
+                                          ? "(set by you)"
                                           : "(auto)"}
                                       </span>
                                     )}
@@ -2419,7 +2430,7 @@ export function GlobalSettingsModal({
                                         }}
                                       >
                                         {isManual
-                                          ? "(manual override)"
+                                          ? "(set by you)"
                                           : "(from space labels)"}
                                       </span>
                                     ) : null}
@@ -2582,7 +2593,7 @@ export function GlobalSettingsModal({
                         options={[
                           {
                             value: "SeparateTempControl",
-                            label: "Separate Temperature Control",
+                            label: "Separate temperature control",
                           },
                           {
                             value: "SeparateTimeAndTempControl",
@@ -2604,7 +2615,7 @@ export function GlobalSettingsModal({
                             }}
                           >
                             {complianceFieldLabel(
-                              "Cold Water Source",
+                              "Cold water source",
                               "ColdWaterSource"
                             )}
                             {renderEvidencePill(
@@ -2708,7 +2719,7 @@ export function GlobalSettingsModal({
                 }}
               >
                 <GlobalSettingsAccordionHeader
-                  title="Air Tightness"
+                  title="Air tightness"
                   expanded={airTightnessExpanded}
                   onToggle={() => setAirTightnessExpanded(!airTightnessExpanded)}
                   errorCount={0}
@@ -2921,7 +2932,7 @@ export function GlobalSettingsModal({
                                   }}
                                 >
                                   {isVentHeightManualOverride
-                                    ? "(manual override)"
+                                    ? "(set by you)"
                                     : "(auto)"}
                                 </span>
                               )}
@@ -3139,7 +3150,7 @@ export function GlobalSettingsModal({
                               }}
                             >
                               {isVentBaseHeightManualOverride
-                                ? "(manual override)"
+                                ? "(set by you)"
                                 : "(auto)"}
                             </span>
                             {renderEvidencePill(

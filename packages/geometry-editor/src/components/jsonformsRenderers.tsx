@@ -1186,7 +1186,7 @@ function renderAdvancedFieldResetToSourceButton(
           e.preventDefault();
           handleChange(path, uRounded);
         }}
-        label="Use Calc"
+        label="Use calculated"
         title="Set U-value to the ISO 13370 result from current floor geometry and advanced inputs (same as calculator)"
         ariaLabel="Use calculator result for ground U-value"
       />
@@ -2456,6 +2456,8 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   }
 
   const isReadOnly = uiOptions(uischema).readOnly === true || enabled === false;
+  // Two values that read the same (a null and 'unknown' both "Not known") are one choice.
+  options = options.filter((o, i) => options.findIndex((x) => x.label === o.label) === i || o.value === valueString);
   const selectedLabel = options.find((o) => o.value === valueString)?.label ?? valueString;
   const selectedOptionDescription = optionDescriptions.get(valueString);
   // The value actually shown as "the default" -- prefers a resolved `fieldSource`

@@ -112,7 +112,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
         : null;
 
     const required = [
-      { key: 'thermal_resistance_floor_construction', label: 'Floor construction R', ok: rFloor != null && rFloor > 0 },
+      { key: 'thermal_resistance_floor_construction', label: 'Floor construction thermal resistance', ok: rFloor != null && rFloor > 0 },
       { key: 'total_area', label: 'Total area', ok: totalArea != null && totalArea > 0 },
       { key: 'perimeter', label: 'Perimeter (auto)', ok: perimeter != null && perimeter > 0 },
       { key: 'thickness_walls', label: 'Wall thickness', ok: thicknessWalls != null && thicknessWalls > 0 },
@@ -171,7 +171,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
     const fmt = (n: number | null | undefined, decimals: number, suffix: string): string =>
       n != null && Number.isFinite(n) ? `${n.toFixed(decimals)}${suffix}` : '—';
 
-    const floorTypeDisplay = String(floorType).replace(/_/g, ' ');
+    const floorTypeDisplay = floorType === 'Slab_edge_insulation' ? 'Ground floor, edge insulated' : String(floorType).replace(/_/g, ' ');
 
     const detailRows: Array<{ key: string; label: string; ok: boolean; value: string }> = [
       { key: 'floor_type', label: 'Floor type', ok: true, value: floorTypeDisplay },
@@ -268,7 +268,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
       key: 'computed_u',
       label: 'Calculated U-value',
       ok: !!(canCalculate && computedU != null && computedU > 0),
-      value: computedU != null && computedU > 0 ? `${computedU.toFixed(4)} W/m²K` : '—',
+      value: computedU != null && computedU > 0 ? `${computedU.toFixed(2)} W/m²K` : '—',
     });
 
     return {
@@ -303,7 +303,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
         <ModalHeader title="Ground floor U-value calculator" onClose={onClose} />
         <div style={{ overflow: 'auto', padding: '0 16px 16px', flex: 1, minHeight: 0 }}>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
-            Fill required fields, then calculate and write to <code style={{ fontSize: 11 }}>u_value</code>
+            Fill the fields, then apply the calculated U-value
             {model.floorType === 'Suspended_floor' ? (
               <>
                 {' '}
@@ -408,7 +408,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
                 onClose();
               }}
             >
-              Auto-calculate
+              Calculate and apply
             </button>
           </div>
         </div>

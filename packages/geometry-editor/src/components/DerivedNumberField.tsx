@@ -102,7 +102,7 @@ export function DerivedNumberField({
                   color: isManual ? 'var(--text-warning)' : 'var(--text-muted)',
                 }}
               >
-                {isManual ? '(manual override)' : '(auto)'}
+                {isManual ? '(set by you)' : '(auto)'}
               </span>
             )}
             {labelAccessory}

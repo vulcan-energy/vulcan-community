@@ -479,7 +479,7 @@ const ELECTRIC_ONLY_TYPES = new Set([
 // eslint-disable-next-line react-refresh/only-export-components -- schema helper shared with tests.
 export function applyEcodesignControlClassEnum(
   schema: Record<string, unknown>,
-  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], dropKeys, pvDiverter = false }: {
+  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], coldWaterNames = [], allElectric = false, dropKeys, pvDiverter = false }: {
     /** The target's weather compensation curves: the curve field picks one. */
     weatherCurves?: WeatherCurves;
     existing?: boolean;
@@ -487,6 +487,10 @@ export function applyEcodesignControlClassEnum(
     supplyNames?: readonly string[];
     /** The model's electricity supplies: an electric-only system picks one of them. */
     electricSupplyNames?: readonly string[];
+    /** The model's cold water sources: a cylinder picks one of them. */
+    coldWaterNames?: readonly string[];
+    /** Every EnergySupply in the schema is electric-only (fans, PV). */
+    allElectric?: boolean;
     /** Fields nothing reads for this model, left out of the form. */
     dropKeys?: ReadonlySet<string>;
     /** An immersion heater may state that its electricity supply's PV diverter feeds it (EPC). */
@@ -526,8 +530,15 @@ export function applyEcodesignControlClassEnum(
         const hasObjectBranch = Array.isArray(readExtraJsonRecord(child).anyOf)
           && (readExtraJsonRecord(child).anyOf as unknown[]).some((branch) => readExtraJsonRecord(branch).type === 'object');
         if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
-          const names = ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
+          const names = allElectric || ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
           const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: names.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
+          delete picker.anyOf;
+          nextProperties[key] = picker;
+          changed = true;
+          continue;
+        }
+        if (key === 'ColdWaterSource' && coldWaterNames.length && child && typeof child === 'object' && !Array.isArray(child)) {
+          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: coldWaterNames.map((name) => ({ const: name, title: name === 'mains water' ? 'Mains water' : name === 'header tank' ? 'Header tank' : name })) };
           delete picker.anyOf;
           nextProperties[key] = picker;
           changed = true;
@@ -982,6 +993,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
   const energySupplyNames = useMemo(() => Object.keys(energySupplies), [energySupplies]);
   const electricSupplyNames = useMemo(() => energySupplyNames.filter((name) => readExtraJsonRecord(energySupplies[name]).fuel === 'electricity'), [energySupplies, energySupplyNames]);
+  const coldWaterNames = useMemo(() => (hemDatabaseProducts ? Object.keys(readExtraJsonRecord(readExtraJsonRecord(defaultsJson).ColdWaterSource)) : []), [hemDatabaseProducts, defaultsJson]);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   const systemDefaults = useGeometryStore((state) => state.targetValidation?.systemDefaults);
   const cooled = useGeometryStore((state) => cooledHeatSources(state.elementsById));
@@ -1066,7 +1078,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     mechanicalVentilationVentType !== 'MVHR';
   const shouldRenderMechanicalVentilationFixedEnergySupply =
     currentDataElementType === 'MechanicalVentilation' &&
-    mechanicalVentilationVentType === 'MVHR';
+    mechanicalVentilationVentType === 'MVHR' &&
+    !hemDatabaseProducts;
   const inferredMechanicalVentilationFanInputMode = useMemo<MechanicalVentilationFanInputMode>(
     () => inferMechanicalVentilationFanInputMode(advancedFieldsRecord as Record<string, unknown>),
     [advancedFieldsRecord],
@@ -1127,22 +1140,35 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const selectedExternalDetailKey =
     constructionDetails?.selectedCandidateKey(advancedFieldsData) ?? '';
 
+  // MVHR on HEM keeps its fixed supply. With one electricity supply in the model (EPC), an electric-only
+  // system, fan or PV array without a supply takes it.
+  const suppliedExtraJson = useMemo(() => {
+    const record = advancedFieldsRecord as Record<string, unknown>;
+    const only = electricSupplyNames.length === 1 ? electricSupplyNames[0] : undefined;
+    const fill = (node: unknown): unknown => {
+      if (Array.isArray(node)) return node.map(fill);
+      if (!node || typeof node !== 'object') return node;
+      const entry = node as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(entry)) out[key] = fill(value);
+      if (ELECTRIC_ONLY_TYPES.has(String(entry.type)) && entry.EnergySupply === undefined) out.EnergySupply = only;
+      return out;
+    };
+    if (shouldRenderMechanicalVentilationFixedEnergySupply) {
+      return record.EnergySupply === MVHR_FIXED_ENERGY_SUPPLY ? null : { ...record, EnergySupply: MVHR_FIXED_ENERGY_SUPPLY };
+    }
+    if (!only || !hemDatabaseProducts) return null;
+    if (elementType === 'MechanicalVentilation' || elementType === 'OnSiteGeneration') {
+      return record.EnergySupply === undefined ? { ...record, EnergySupply: only } : null;
+    }
+    if (elementType !== 'System') return null;
+    const filled = fill(record) as Record<string, unknown>;
+    return JSON.stringify(filled) === JSON.stringify(record) ? null : filled;
+  }, [advancedFieldsRecord, electricSupplyNames, shouldRenderMechanicalVentilationFixedEnergySupply, hemDatabaseProducts, elementType]);
   useEffect(() => {
-    if (!shouldRenderMechanicalVentilationFixedEnergySupply) return;
-    if ((advancedFieldsRecord as Record<string, unknown>).EnergySupply === MVHR_FIXED_ENERGY_SUPPLY) return;
-    onChange({
-      ...currentData,
-      extra_json: {
-        ...(advancedFieldsRecord as Record<string, unknown>),
-        EnergySupply: MVHR_FIXED_ENERGY_SUPPLY,
-      },
-    });
-  }, [
-    advancedFieldsRecord,
-    currentData,
-    onChange,
-    shouldRenderMechanicalVentilationFixedEnergySupply,
-  ]);
+    if (!suppliedExtraJson) return;
+    onChange({ ...currentData, extra_json: suppliedExtraJson });
+  }, [suppliedExtraJson, currentData, onChange]);
 
   const projectHeatSourceWetNames = useMemo(
     () => collectHeatSourceWetNamesFromProject(elementsById),
@@ -1496,8 +1522,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       result.required = mechanicalVentilationRequiredFields;
     }
 
-    if (elementType === 'MechanicalVentilation' && result && hemDatabaseProducts) {
-      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { supplyNames: energySupplyNames }) as typeof result;
+    if ((elementType === 'MechanicalVentilation' || elementType === 'OnSiteGeneration') && result && hemDatabaseProducts) {
+      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { supplyNames: energySupplyNames, electricSupplyNames, allElectric: true }) as typeof result;
     }
 
     if (elementType === 'System' && subtype) {
@@ -1544,6 +1570,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       result = applyEcodesignControlClassEnum(result as Record<string, unknown>, {
         supplyNames: energySupplyNames,
         electricSupplyNames,
+        coldWaterNames,
         dropKeys: unusedHeatPumpFields(advancedFieldsData, cooled),
         pvDiverter: subtype === 'HotWaterSource',
       }) as typeof result;
@@ -1608,6 +1635,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     systemDefaults,
     energySupplyNames,
     electricSupplyNames,
+    coldWaterNames,
     cooled,
     hemDatabaseProducts,
   ]);
@@ -1842,6 +1870,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return classifyOpaqueFabricVariantFromElement((currentData ?? {}) as Record<string, unknown>);
   }, [elementType, currentData]);
 
+  // A system whose product is chosen by default shows that product as the Product Id placeholder.
+  const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
+  const defaultProductField = useMemo(() => {
+    const own = (productSlots ?? []).filter((slot) => slot.row === (currentData as { name?: string } | undefined)?.name);
+    return own.length === 1 && own[0].source === 'default' && own[0].product_id != null ? { product_id: own[0].label ?? own[0].product_id } : {};
+  }, [productSlots, currentData]);
+
   const advancedFieldsConfig = useMemo<Record<string, unknown>>(
     () =>
       ({
@@ -1888,7 +1923,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         $defs: subschema?.$defs || getActiveRootSchema()?.$defs,
         systemSampleMode: systemSampleBaselineAvailable,
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
-        derivedDefaults: elementType === 'System' ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding) : undefined,
+        derivedDefaults: elementType === 'System' ? { ...systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding), ...defaultProductField } : undefined,
       }),
     [
       flat,
@@ -1915,6 +1950,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       systemSampleBaselineAvailable,
       systemSampleBaselineExtraJson,
       systemDefaults,
+      defaultProductField,
       advancedFieldsData,
       existingBuilding,
       getActiveRootSchema,
@@ -2847,7 +2883,7 @@ export function SystemModelContext({ extraJson, subtype, useFHSSchema, elementsB
   return <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: 10 }}>
     {useFHSSchema && subtype === 'SpaceHeatSystem' && <div title="Whole-dwelling setting, shared with Global Settings">
       <StandardDropdown label={renderFieldLabelWithTooltip('Heating Control Type', 'System', true)} aria-label="Heating control type (whole dwelling)" value={control ?? ''} onChange={(value) => setComplianceSettings({ HeatingControlType: value as 'SeparateTempControl' | 'SeparateTimeAndTempControl' })} options={[
-        { value: 'SeparateTempControl', label: 'Separate Temperature Control' },
+        { value: 'SeparateTempControl', label: 'Separate temperature control' },
         { value: 'SeparateTimeAndTempControl', label: 'Separate Time and Temperature Control' },
       ]} placeholder="Select control type…" variant="ghost" size="md" />
     </div>}

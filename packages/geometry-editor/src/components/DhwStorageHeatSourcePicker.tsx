@@ -112,7 +112,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
           const heater = readRecord(value);
           return <div key={name} style={{ marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{({ ImmersionHeater: 'Immersion heater', HeatPump_HWOnly: 'Hot-water-only heat pump', HeatSourceWet: 'Coil' }[String(heater.type)] ?? String(heater.type ?? 'Unknown heater'))} ({name})</span>
+              <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{({ ImmersionHeater: 'Immersion heater', HeatPump_HWOnly: 'Hot-water-only heat pump', HeatSourceWet: 'Coil' }[String(heater.type)] ?? String(heater.type ?? 'Unknown heater'))}</span>
               <button type="button" className="btn btn-nav btn-small" aria-label={`Remove heater ${name}`} onClick={() => patchHeaters(tankName, (current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== name)))}>Remove</button>
             </div>
             {heater.type === 'HeatSourceWet' && (() => {
@@ -132,7 +132,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <StandardDropdown value={choice} onChange={(value) => setChoice(value || '')} aria-label={`Heater to add to ${tankName}`} options={[
             { value: IMMERSION_VALUE, label: 'Immersion heater' },
-            { value: HWOHP_VALUE, label: 'Hot-water-only heat pump (sample)' },
+            { value: HWOHP_VALUE, label: 'Hot-water-only heat pump' },
             ...wetNames.map((name) => ({ value: `wet:${name}`, label: `Linked: ${wetLabels[name] ?? name}` })),
           ]} placeholder="Choose heater…" size="md" variant="ghost" />
           <button type="button" className="btn btn-nav btn-small" disabled={!choice} onClick={() => addHeater(tankName)}>Add heater</button>

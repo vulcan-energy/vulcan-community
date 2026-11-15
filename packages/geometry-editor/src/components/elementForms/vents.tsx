@@ -272,7 +272,7 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
             selfId={selection?.type === 'element' ? selection.id : undefined}
           />
         </div>
-        {renderFieldLabel('Mid Height Air Flow Path (m):', elementType)}
+        {renderFieldLabel('Mid height air flow path (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs(['midHeightAirFlowPath', 'mid_height_air_flow_path'])}>
           <StandardInput
             {...decimalInputProps(midHeightAirFlowPathInput)}

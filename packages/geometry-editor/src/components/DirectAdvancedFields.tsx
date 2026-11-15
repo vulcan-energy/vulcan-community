@@ -499,6 +499,10 @@ function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: 
   const rowKeys = React.useMemo(() => Array.from({ length: rowCount }, () => crypto.randomUUID()), [rowCount]);
   const baseline = getAtPath(readRecord(config.systemSampleBaselineExtraJson), segments);
   const changed = JSON.stringify(value) !== JSON.stringify(baseline);
+  // A simple cylinder has no tank controls: show one add button, not an empty table.
+  if (copy === TANK_CONTROL_TABLE_COPY && !rows.length && value == null) {
+    return <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [{}])}>{copy.addLabel}</button>;
+  }
   return <GroupAccordion label={label} count={rows.length} openInitially={rows.length <= 3}>
     <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>{copy.hint}</p>
     {config.systemSampleMode === true && changed && <div style={{ marginBottom: 8 }}>
@@ -656,7 +660,9 @@ function renderControlForProperty(args: {
   replicateRequiredError: boolean;
   applyChange: (segments: string[], value: unknown) => void;
 }): React.ReactElement {
-  const { segments, resolved, value, label, scope, schema, config, elementType, required, replicateRequiredError, applyChange } = args;
+  const { segments, resolved, value, label, scope, schema, config, elementType, replicateRequiredError, applyChange } = args;
+  // A field with a stated default is never "required": the default shows as its placeholder.
+  const required = args.required && (config as { derivedDefaults?: Record<string, unknown> }).derivedDefaults?.[segments[segments.length - 1] ?? ''] === undefined;
 
   const path = segments.join('.');
   const leafKey = segments[segments.length - 1] ?? path;

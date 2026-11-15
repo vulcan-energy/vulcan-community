@@ -11,12 +11,6 @@ import type { GeometrySchemaParameterInfo } from '../../../geometry-editor-host/
 export function formatSchemaInfoForTooltip(info: GeometrySchemaParameterInfo): React.ReactNode {
   const parts: React.ReactNode[] = [];
 
-  // Source indicator: JSON schema text vs DESNZ-defined input summaries
-  const sourceLabel =
-    info.source === 'hem_guidance' || (typeof info.jsonPath === 'string' && info.jsonPath.startsWith('#/hardcoded/'))
-      ? 'HEM Guidance'
-      : 'Schema';
-
   // Description (rendered as markdown)
   if (info.description) {
     parts.push(
@@ -45,22 +39,6 @@ export function formatSchemaInfoForTooltip(info: GeometrySchemaParameterInfo): R
 
   // Metadata section (type, units, constraints)
   const metadata: React.ReactNode[] = [];
-
-  metadata.push(
-    <span key="source" className="tooltip-metadata-item">
-      <strong>Source:</strong> {sourceLabel}
-    </span>
-  );
-
-  // Type
-  if (info.type) {
-    const typeStr = Array.isArray(info.type) ? info.type.join(' | ') : info.type;
-    metadata.push(
-      <span key="type" className="tooltip-metadata-item">
-        <strong>Type:</strong> {typeStr}
-      </span>
-    );
-  }
 
   // Units
   if (info.units) {

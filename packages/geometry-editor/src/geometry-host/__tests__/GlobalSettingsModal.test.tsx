@@ -106,7 +106,7 @@ describe("GlobalSettingsModal target-required rows", () => {
     const store = renderWith(["HasElectricitySmartMeter", "IsExistingBuilding", "Appliances_has_dryer", "Appliances_has_dishwasher",
       "Appliances_has_separate_fridge_or_freezer", "Ventilation_cross_vent_possible", "Ventilation_noise_nuisance", "PartGcompliance"]);
     await screen.findByLabelText("Shield Class");
-    await user.click(screen.getByText("Dwelling Details"));
+    await user.click(screen.getByText("Dwelling details"));
     for (const label of epcOnly) expect(screen.getByLabelText(label)).toHaveValue("");
     // Required booleans with no default are choices, never an unticked box that reads as "no".
     expect(screen.getByLabelText("Noise nuisance")).toHaveValue("");
@@ -134,7 +134,7 @@ describe("GlobalSettingsModal existing building", () => {
     const existing = await screen.findByLabelText("Existing building");
     const order = (a: Node, b: Node) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
     expect(order(screen.getByText("HEM model version"), existing)).toBeTruthy();
-    expect(order(existing, screen.getByText("Dwelling Details"))).toBeTruthy();
+    expect(order(existing, screen.getByText("Dwelling details"))).toBeTruthy();
     expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
   });
 });
@@ -187,18 +187,18 @@ describe("GlobalSettingsModal", () => {
     expect(screen.queryByTitle("Edit")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
-    expect(screen.getByText("Dwelling Details")).toBeInTheDocument();
-    expect(screen.getByText("Air Tightness")).toBeInTheDocument();
+    expect(screen.getByText("Dwelling details")).toBeInTheDocument();
+    expect(screen.getByText("Air tightness")).toBeInTheDocument();
     expect(screen.getByText("Ventilation Environment")).toBeInTheDocument();
     expect(screen.getByText("Thermal Bridging")).toBeInTheDocument();
 
-    const dwellingDetails = screen.getByText("Dwelling Details");
+    const dwellingDetails = screen.getByText("Dwelling details");
     await user.click(dwellingDetails);
     expect(screen.getByLabelText("Property postcode")).toBeInTheDocument();
     await user.click(dwellingDetails);
     expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
 
-    const airTightness = screen.getByText("Air Tightness");
+    const airTightness = screen.getByText("Air tightness");
     await user.click(airTightness);
     expect(screen.getByLabelText("Test Pressure")).toBeInTheDocument();
     await user.click(airTightness);
@@ -380,7 +380,7 @@ describe("GlobalSettingsModal", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
-    expect(screen.getByText("Dwelling Details")).toBeInTheDocument();
+    expect(screen.getByText("Dwelling details")).toBeInTheDocument();
   });
 
   it("combines defaults errors with required global-value issues in the filename indicator", async () => {
@@ -441,6 +441,6 @@ describe("GlobalSettingsModal", () => {
     expect(exists).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
-    expect(screen.getByText("Dwelling Details")).toBeInTheDocument();
+    expect(screen.getByText("Dwelling details")).toBeInTheDocument();
   });
 });
