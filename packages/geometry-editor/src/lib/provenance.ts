@@ -9,7 +9,7 @@ import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
 /**
  * Where a field's value comes from. Every "is this entered, a default or from the drawing"
  * decision asks `provenanceOf`: a source the provenance table recorded wins, and a field it has no
- * entry for is inferred from its value (FOUNDATION_PLAN.md §3, §4).
+ * entry for is inferred from its value.
  */
 export type FieldProvenance = 'user' | 'source';
 
