@@ -12,31 +12,6 @@ export type ElementTypeSectionId =
   | 'lighting-appliances'
   | 'solar-battery';
 
-export type ElementTypeDiagramKind =
-  | 'surface'
-  | 'window'
-  | 'floor'
-  | 'internal'
-  | 'unheated'
-  | 'party-wall'
-  | 'linear-bridge'
-  | 'point-bridge'
-  | 'window-shading'
-  | 'context-shading'
-  | 'ventilation-system'
-  | 'ductwork'
-  | 'terminal'
-  | 'vent'
-  | 'system'
-  | 'emitter'
-  | 'hot-water'
-  | 'pipework'
-  | 'combustion'
-  | 'lighting'
-  | 'appliance'
-  | 'solar'
-  | 'battery';
-
 export interface ElementTypeMenuSection {
   id: ElementTypeSectionId;
   label: string;
@@ -49,7 +24,6 @@ export interface ElementTypeMenuOption {
   label: string;
   subtitle: string;
   section: ElementTypeSectionId;
-  diagram: ElementTypeDiagramKind;
 }
 
 export const ELEMENT_TYPE_ORDER = [
@@ -108,117 +82,94 @@ const ELEMENT_TYPE_DETAILS: Record<ElementType, Omit<ElementTypeMenuOption, 'typ
   BuildingElementOpaque: {
     subtitle: 'External wall, roof or door',
     section: 'fabric',
-    diagram: 'surface',
   },
   BuildingElementTransparent: {
     subtitle: 'External window or rooflight',
     section: 'fabric',
-    diagram: 'window',
   },
   BuildingElementGround: {
     subtitle: 'Ground-contact floor',
     section: 'fabric',
-    diagram: 'floor',
   },
   BuildingElementAdjacentConditionedSpace: {
     subtitle: 'Boundary to heated space',
     section: 'fabric',
-    diagram: 'internal',
   },
   BuildingElementAdjacentUnconditionedSpace_Simple: {
     subtitle: 'Boundary to loft, garage, void or exposed floor',
     section: 'fabric',
-    diagram: 'unheated',
   },
   BuildingElementPartyWall: {
     subtitle: 'Wall shared with another dwelling',
     section: 'fabric',
-    diagram: 'party-wall',
   },
   ThermalBridgeLinear: {
     subtitle: 'Line heat-loss junction',
     section: 'thermal-bridges',
-    diagram: 'linear-bridge',
   },
   ThermalBridgePoint: {
     subtitle: 'Point heat-loss junction',
     section: 'thermal-bridges',
-    diagram: 'point-bridge',
   },
   WindowShading: {
     subtitle: 'Overhangs, reveals and fins',
     section: 'shading',
-    diagram: 'window-shading',
   },
   ContextShading: {
     subtitle: 'Nearby buildings or obstructions',
     section: 'shading',
-    diagram: 'context-shading',
   },
   Vents: {
     subtitle: 'Passive background or purge opening',
     section: 'ventilation',
-    diagram: 'vent',
   },
   MechanicalVentilation: {
     subtitle: 'Whole-dwelling, MVHR or room system',
     section: 'ventilation',
-    diagram: 'ventilation-system',
   },
   MechanicalVentilationDuctwork: {
     subtitle: 'Supply, extract, intake or exhaust run',
     section: 'ventilation',
-    diagram: 'ductwork',
   },
   MechanicalVentilationTerminal: {
     subtitle: 'MVHR intake or exhaust terminal',
     section: 'ventilation',
-    diagram: 'terminal',
   },
   System: {
     subtitle: 'PCDB and heating, hot water & cooling presets',
     section: 'heating-hot-water',
-    diagram: 'system',
   },
   WetEmitter: {
     subtitle: 'Radiator, UFH or fan coil',
     section: 'heating-hot-water',
-    diagram: 'emitter',
   },
   HotWaterDemand: {
     subtitle: 'Tap, shower, bath or outlet',
     section: 'heating-hot-water',
-    diagram: 'hot-water',
   },
   WaterPipework: {
     subtitle: 'Connects heat source and hot water cylinder',
     section: 'heating-hot-water',
-    diagram: 'pipework',
   },
   CombustionAppliances: {
     subtitle: 'Legacy appliance and flue',
     section: 'heating-hot-water',
-    diagram: 'combustion',
   },
   Lighting: {
     subtitle: 'Lighting points and controls',
     section: 'lighting-appliances',
-    diagram: 'lighting',
   },
   Appliance: {
     subtitle: 'Electric appliance load',
     section: 'lighting-appliances',
-    diagram: 'appliance',
   },
   OnSiteGeneration: {
     subtitle: 'PV array or collector',
     section: 'solar-battery',
-    diagram: 'solar',
   },
   ElectricBattery: {
     subtitle: 'Electrical storage',
     section: 'solar-battery',
-    diagram: 'battery',
   },
 };
 

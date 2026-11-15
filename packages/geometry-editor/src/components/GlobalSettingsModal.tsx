@@ -169,8 +169,7 @@ function epcDefaultsFileLabel(path: string): string {
 }
 
 function defaultsFileLabel(path: string): string {
-  const shortHash = contentHashDefaultsShortHash(path);
-  return shortHash ? `This model's defaults (${shortHash})` : path;
+  return contentHashDefaultsShortHash(path) ? "This model's defaults" : path;
 }
 
 
@@ -1698,17 +1697,7 @@ export function GlobalSettingsModal({
                             }}
                           >
                             {shortHash ? (
-                              <>
-                                This model's defaults{" "}
-                                <span
-                                  style={{
-                                    fontWeight: 400,
-                                    color: "var(--text-muted)",
-                                  }}
-                                >
-                                  {shortHash}
-                                </span>
-                              </>
+                              defaultsFileLabel(p)
                             ) : epcTarget ? (
                               epcDefaultsFileLabel(p)
                             ) : (

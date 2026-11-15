@@ -101,7 +101,7 @@
 .element-type-picker__option {
   width: 100%;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   padding: 7px 8px;
@@ -122,52 +122,6 @@
 .element-type-picker__option.is-selected {
   background: var(--surface-overlay-selected, var(--accent-bg));
   border-color: var(--accent-primary);
-}
-
-.element-type-picker__diagram {
-  width: 48px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  color: var(--accent-primary);
-}
-
-.element-type-picker__diagram-svg {
-  width: 40px;
-  height: 40px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.1;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.element-type-picker__diagram-svg .diagram-fill {
-  fill: currentColor;
-  fill-opacity: 0.13;
-}
-
-.element-type-picker__diagram-svg .diagram-emphasis {
-  stroke-width: 2.8;
-}
-
-.element-type-picker__diagram-svg .diagram-hatch {
-  opacity: 0.58;
-  stroke-width: 1.55;
-}
-
-.element-type-picker__diagram-svg .diagram-dashed {
-  opacity: 0.68;
-  stroke-width: 1.7;
-  stroke-dasharray: 2.5 2.5;
-}
-
-.element-type-picker__diagram-svg .diagram-heat-flow {
-  opacity: 0.72;
-  stroke-width: 1.8;
 }
 
 .element-type-picker__option-text {
@@ -225,13 +179,5 @@
 @media (max-width: 520px) {
   .element-type-picker__menu {
     padding: 6px;
-  }
-
-  .element-type-picker__option {
-    grid-template-columns: 46px minmax(0, 1fr);
-  }
-
-  .element-type-picker__diagram {
-    width: 44px;
   }
 }

@@ -338,7 +338,7 @@ describe("GlobalSettingsModal", () => {
     );
 
     const label = await screen.findByText(/This model's defaults/);
-    expect(label).toHaveTextContent("This model's defaults 01234567");
+    expect(label).toHaveTextContent(/^This model's defaults$/);
     expect(screen.queryByText(hashPath)).not.toBeInTheDocument();
     expect(screen.getByText("input/defaults/defaults_template.json")).toBeInTheDocument();
 
