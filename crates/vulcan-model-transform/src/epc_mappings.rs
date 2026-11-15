@@ -174,7 +174,10 @@ pub(crate) fn map_appliances(
     model["Appliances"] = Value::Object(appliances);
 }
 
-const PV_PANEL_KEYS: [&str; 8] = [
+/// `mounting_type` and `panel_count` are read only by an existing building's PV form.
+const PV_PANEL_KEYS: [&str; 10] = [
+    "mounting_type",
+    "panel_count",
     "peak_power",
     "ventilation_strategy",
     "pitch",
@@ -481,49 +484,137 @@ pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationE
     }
 }
 
-/// Every opaque element states `solar_absorption_coeff` (EPC requires it). A new build must
-/// author the coefficient; the colour-to-coefficient map (HEMIE) applies only to an existing
-/// building. `from_colour` lists the element paths whose coefficient came from a colour.
+/// Every opaque element states `solar_absorption_coeff` (EPC requires it): its own, or the
+/// DESNZ-defined coefficient for its colour (Light, Intermediate or Dark), on a new build and an
+/// existing building alike. `from_colour` lists the element paths whose coefficient came from a
+/// colour; each is reported.
 pub(crate) fn check_solar_absorption(
-    model: &mut Value,
+    model: &Value,
     from_colour: &[String],
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
 ) {
-    let existing = model["IsExistingBuilding"] == true;
-    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
+    for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
         for (name, element) in zone_value["BuildingElement"]
-            .as_object_mut()
+            .as_object()
             .into_iter()
             .flatten()
         {
             let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
-            let from_a_colour = from_colour.contains(&path);
-            if existing && from_a_colour {
-                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (the default colour map for an existing building).", element["solar_absorption_coeff"])));
-            }
-            if !existing && from_a_colour {
-                if let Some(element) = element.as_object_mut() {
-                    element.remove("solar_absorption_coeff");
-                }
+            if from_colour.contains(&path) {
+                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (the default colour map).", element["solar_absorption_coeff"])));
             }
             if element["type"] == "BuildingElementOpaque"
                 && element.get("solar_absorption_coeff").is_none()
             {
-                let message = match (existing, from_a_colour) {
-                    (false, true) => format!("Element '{name}' gives a colour, which only an existing building may use. A new build states its solar absorption coefficient."),
-                    (false, false) => format!("Element '{name}' needs its solar absorption coefficient. There is no default."),
-                    (true, _) => format!("Element '{name}' needs its solar absorption coefficient or its surface colour (Light, Intermediate or Dark). There is no default."),
-                };
                 errors.push(error(
                     "E_EPC_SOLAR_ABSORPTION",
                     format!("{path}/solar_absorption_coeff"),
-                    message,
+                    format!("Element '{name}' needs its solar absorption coefficient or its surface colour (Light, Intermediate or Dark). There is no default."),
                 ));
             }
         }
     }
 }
+
+/// Inputs a new build states and an existing building may leave to a DESNZ-defined default: the
+/// model path, the `type` that has the field (empty: any), the field, and the existing-building
+/// default (None: HEMIE applies it). Values: direct feed maximum power 15 kW, mixer shower 9 L/min;
+/// the rest are HEMIE's (air conditioning and heat-pump warm-air convective fraction, instant
+/// heater power and convective type, storage heater units, immersion power and position, coil
+/// position, solar loop inputs, buffer tank pump flow rate).
+const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 15] = [
+    (
+        &["HeatSourceWet", "*"],
+        "DirectFeed",
+        "power_max",
+        Some(15.0),
+    ),
+    (
+        &["HotWaterDemand", "Shower", "*"],
+        "MixerShower",
+        "flowrate",
+        Some(9.0),
+    ),
+    (
+        &["SpaceCoolSystem", "*"],
+        "AirConditioning",
+        "frac_convective",
+        None,
+    ),
+    (
+        &["SpaceHeatSystem", "*"],
+        "WarmAir",
+        "frac_convective",
+        None,
+    ),
+    (
+        &["SpaceHeatSystem", "*"],
+        "InstantElecHeater",
+        "rated_power",
+        None,
+    ),
+    (
+        &["SpaceHeatSystem", "*"],
+        "InstantElecHeater",
+        "convective_type",
+        None,
+    ),
+    (
+        &["SpaceHeatSystem", "*"],
+        "ElecStorageHeater",
+        "n_units",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "ImmersionHeater",
+        "power",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "ImmersionHeater",
+        "heater_position",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "HeatSourceWet",
+        "heater_position",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "SolarThermalSystem",
+        "sol_loc",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "SolarThermalSystem",
+        "heater_position",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "SolarThermalSystem",
+        "collector_mass_flow_rate",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "SolarThermalSystem",
+        "solar_loop_piping_hlc",
+        None,
+    ),
+    (
+        &["HeatSourceWet", "*", "BufferTank"],
+        "",
+        "pump_fixed_flow_rate",
+        None,
+    ),
+];
 
 /// DESNZ's defaults for HEM:EPC inputs, each applied only when the input is absent and
 /// reported; values the converter works out from the model are reported too.
@@ -546,6 +637,7 @@ pub(crate) fn apply_desnz_defaults(
     notices: &mut Vec<SchemaOmission>,
     derived: &mut Vec<crate::DerivedDefault>,
 ) {
+    let existing = model["IsExistingBuilding"] == true;
     let mut derive = |path: String, field: &str, value: Value| {
         derived.push(crate::DerivedDefault {
             path,
@@ -664,8 +756,78 @@ pub(crate) fn apply_desnz_defaults(
                 used.push(format!("temp_diff_emit_dsgn {diff} ({source})"));
             }
         }
+        // No DESNZ default for the rest (plan questions E40, E59): each one missing is an error
+        // naming the system, before the run fails on it.
+        let path = json_pointer(&["SpaceHeatSystem", name]);
+        let mut need = |field: &str, why: String| {
+            errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("Wet distribution '{name}': state its {} on its Systems row. There is no default {why}.", field.replace('_', " "))));
+        };
+        if !system.contains_key("design_flow_temp") {
+            need(
+                "design_flow_temp",
+                "when its emitters differ in type".into(),
+            );
+        }
+        if !system.contains_key("temp_diff_emit_dsgn") {
+            need(
+                "temp_diff_emit_dsgn",
+                match &source {
+                    Some(source) => format!("for a {source} heat source"),
+                    None => "when its heat sources differ in type".into(),
+                },
+            );
+        }
+        let radiators = system["emitters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|e| e["wet_emitter_type"] == "radiator");
+        if existing && radiators && system.get("thermal_mass").is_none_or(Value::is_null) {
+            need(
+                "thermal_mass",
+                "for the radiators of an existing building".into(),
+            );
+        }
         if !used.is_empty() {
-            notices.push(notice(&json_pointer(&["SpaceHeatSystem", name]), format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on its Systems row to change them.", used.join(", "))));
+            notices.push(notice(&path, format!("Wet distribution '{name}' does not state {}, so it uses the defaults. State them on its Systems row to change them.", used.join(", "))));
+        }
+    }
+    // DESNZ-defined values an existing building takes when they are not stated, and a new build
+    // must state (DESNZ: a new build gives full information). HEMIE applies the existing-building
+    // defaults of every system with a HEMIE form itself; these are the ones it does not.
+    for (pattern, kind, field, default) in STATED_OR_DEFAULTED {
+        let mut found = Vec::new();
+        collect(model, pattern, Vec::new(), &mut found);
+        for (segments, system) in found {
+            // A mixer shower's product gives its flow rate.
+            let Some(system) = system.as_object_mut().filter(|s| {
+                (kind.is_empty() || s.get("type") == Some(&json!(kind)))
+                    && !(kind == "MixerShower" && s.contains_key("product_id"))
+            }) else {
+                continue;
+            };
+            if system.get(field).is_some_and(|v| !v.is_null()) {
+                continue;
+            }
+            let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
+            let path = json_pointer(&segments);
+            let name = segments[..segments.len() - usize::from(kind.is_empty())]
+                .last()
+                .copied()
+                .unwrap_or_default();
+            let words = field.replace('_', " ");
+            match (existing, default) {
+                (true, Some(value)) => {
+                    system.insert(field.into(), json!(value));
+                    notices.push(notice(&path, format!("'{name}' does not state its {words}, so it uses the default, {value}. State it on its row to change it.")));
+                }
+                (true, None) => {}
+                (false, _) => {
+                    // A blank value, so the schema adds no second error for it.
+                    system.remove(field);
+                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", if kind.is_empty() { "buffer tank" } else { kind })));
+                }
+            }
         }
     }
     // DESNZ-defined: an unstated design outdoor air flow rate is the greater of 13 l/s plus
@@ -1008,6 +1170,43 @@ const SYSTEM_REFERENCES: [SystemReference; 7] = [
         &[],
     ),
 ];
+
+/// A cylinder's immersion heater that states `pv_diverter` true takes surplus PV through a
+/// diverter on its electricity supply (`EnergySupply.<supply>.diverter`). Another heat source,
+/// or a second diverter on one supply, is an error naming it.
+pub(crate) fn map_pv_diverter(model: &mut Value, errors: &mut Vec<ValidationError>) {
+    let mut diverters: Vec<(String, String, String)> = Vec::new();
+    for (cylinder, source) in model["HotWaterSource"]
+        .as_object_mut()
+        .into_iter()
+        .flatten()
+    {
+        for (name, heat_source) in source["HeatSource"].as_object_mut().into_iter().flatten() {
+            let Some(heat_source) = heat_source.as_object_mut() else {
+                continue;
+            };
+            if heat_source.remove("pv_diverter") != Some(json!(true)) {
+                continue;
+            }
+            let path = json_pointer(&["HotWaterSource", cylinder, "HeatSource", name]);
+            match heat_source.get("EnergySupply").and_then(Value::as_str) {
+                Some(supply) if heat_source.get("type") == Some(&json!("ImmersionHeater")) => {
+                    diverters.push((path, name.clone(), supply.to_string()))
+                }
+                _ => errors.push(error("E_EPC_PV_DIVERTER", path, format!("Cylinder '{cylinder}': heat source '{name}' states a PV diverter, which only an immersion heater with an electricity supply takes. Remove it."))),
+            }
+        }
+    }
+    for (path, name, supply) in diverters {
+        match model
+            .pointer_mut(&json_pointer(&["EnergySupply", &supply]))
+            .filter(|e| e["fuel"] == "electricity" && e.get("diverter").is_none())
+        {
+            Some(entry) => entry["diverter"] = json!({ "HeatSource": name }),
+            None => errors.push(error("E_EPC_PV_DIVERTER", path, format!("Immersion heater '{name}' states a PV diverter, but its supply '{supply}' is not an electricity supply or already has one. Give one immersion heater on an electricity supply the diverter."))),
+        }
+    }
+}
 
 /// The system catalogue's fail-loud rules: a system type the converter cannot express is an
 /// error naming it, and a reference between systems must name an entry of the right type.
@@ -1665,6 +1864,38 @@ mod tests {
             })
             .collect();
         assert_eq!(table, schema);
+    }
+
+    #[test]
+    fn a_circuit_with_no_desnz_default_is_named_for_each_missing_field() {
+        let mut model = json!({
+            "IsExistingBuilding": true,
+            "HeatSourceWet": {"stove": {"type": "SolidFuelBoiler"}},
+            "SpaceHeatSystem": {"c": {"type": "WetDistribution", "HeatSource": {"name": "stove"}, "emitters": [{"wet_emitter_type": "radiator"}]}}
+        });
+        let mut errors = Vec::new();
+        apply_desnz_defaults(
+            &mut model,
+            false,
+            &mut errors,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        );
+        let found: Vec<&str> = errors
+            .iter()
+            .map(|e| e.path.as_str())
+            .filter(|p| p.starts_with("/SpaceHeatSystem"))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "/SpaceHeatSystem/c/temp_diff_emit_dsgn",
+                "/SpaceHeatSystem/c/thermal_mass"
+            ]
+        );
+        assert!(errors[0]
+            .message
+            .contains("for a SolidFuelBoiler heat source"));
     }
 
     #[test]

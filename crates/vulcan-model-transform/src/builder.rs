@@ -2175,6 +2175,7 @@ impl JSONBuilder {
             crate::epc_mappings::map_pv_panels(result);
         }
         if self.profile.states_cylinder_coil_and_tank_controls() {
+            crate::epc_mappings::map_pv_diverter(result, &mut errors);
             crate::epc_mappings::map_cylinder_coils(result, &mut errors);
         }
         if self.profile.references_products() {
@@ -2235,6 +2236,7 @@ impl JSONBuilder {
                 &mut self.product_candidates.borrow_mut(),
             );
             crate::epc_products::apply_weather_curves(result, db, &mut errors, &mut notices);
+            crate::epc_products::check_product_fuels(result, db, &mut errors);
             crate::epc_products::derive_zone_frac_convective(
                 result,
                 db,
@@ -3773,37 +3775,25 @@ impl JSONBuilder {
                                 supply_obj.remove("ElectricBattery");
                             }
                         }
-
-                        // Remove unreferenced EnergySupply entries that are now effectively empty.
-                        let keys_to_remove: Vec<String> = energy_supply_obj
-                            .iter()
-                            .filter_map(|(key, value)| {
-                                if key == "mains elec"
-                                    || referenced_energy_supplies.contains(key.as_str())
-                                {
-                                    return None;
-                                }
-                                let supply_obj = value.as_object()?;
-                                let is_effectively_empty = supply_obj.is_empty()
-                                    || (supply_obj.len() == 1
-                                        && (supply_obj.contains_key("fuel")
-                                            || supply_obj.contains_key("is_export_capable")))
-                                    || (supply_obj.len() == 2
-                                        && supply_obj.contains_key("fuel")
-                                        && supply_obj.contains_key("is_export_capable"));
-                                if is_effectively_empty {
-                                    Some(key.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        for key in keys_to_remove {
-                            energy_supply_obj.remove(&key);
-                        }
                     }
                 }
             }
+        }
+        // Remove unreferenced EnergySupply entries that are effectively empty (the defaults file
+        // offers one per fuel; only those a system or appliance names are kept).
+        if let Some(energy_supply_obj) = result
+            .get_mut("EnergySupply")
+            .and_then(Value::as_object_mut)
+        {
+            energy_supply_obj.retain(|key, value| {
+                key == "mains elec"
+                    || referenced_energy_supplies.contains(key.as_str())
+                    || value.as_object().is_none_or(|supply| {
+                        supply
+                            .keys()
+                            .any(|k| !matches!(k.as_str(), "fuel" | "is_export_capable"))
+                    })
+            });
         }
 
         // Always calculate env_area from building elements (matching Python logic)

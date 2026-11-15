@@ -8985,6 +8985,33 @@
     },
     "mains gas": {
       "fuel": "mains_gas"
+    },
+    "LPG bulk": {
+      "fuel": "LPG_bulk"
+    },
+    "LPG bottled": {
+      "fuel": "LPG_bottled"
+    },
+    "LPG condition 11F": {
+      "fuel": "LPG_condition_11F"
+    },
+    "wood logs": {
+      "fuel": "wood_logs"
+    },
+    "wood pellets": {
+      "fuel": "wood_pellets"
+    },
+    "wood chips": {
+      "fuel": "wood_chips"
+    },
+    "house coal": {
+      "fuel": "house_coal"
+    },
+    "anthracite": {
+      "fuel": "anthracite"
+    },
+    "smokeless fuel": {
+      "fuel": "smokeless_fuel"
     }
   },
   "Control": {
