@@ -3259,10 +3259,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // uses; a switch is the user's choice until the next element is selected.
   const thermalElement = selection?.type === 'element' && !selection.isPlaceholder && !selectedIsDormerAnchor
     && selectedElement && thermalMethodElementType(selectedElement.type) ? selectedElement : null;
-  const thermalMethodOptions = thermalElement ? thermalMethods(thermalElement.type, constructionBands) : [];
   const thermalGroundU = useMemo(() => (thermalElement?.type === 'BuildingElementGround'
     ? computeGroundUValueFromElementModel(thermalElement as unknown as Record<string, unknown>, readExtraJsonRecord(thermalElement.extra_json), thermalElement.floor_type)
     : null), [thermalElement]);
+  // An existing building's floor offers its calculation only when the drawing gives one (or an assembly already does).
+  const thermalMethodOptions = thermalElement
+    ? thermalMethods(thermalElement.type, constructionBands,
+      (thermalGroundU != null && thermalGroundU > 0) || !!parseVulcanAssemblyV1FromExtraJson(thermalElement.extra_json))
+    : [];
   const [thermalMethodChosen, setThermalMethodChosen] = useKeyedState<ThermalMethod | null>(thermalElement?.id ?? '', null);
   const thermalMethod: ThermalMethod | undefined = !thermalElement ? undefined
     : thermalMethodChosen && thermalMethodOptions.some((option) => option.value === thermalMethodChosen)

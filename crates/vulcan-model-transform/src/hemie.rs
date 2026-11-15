@@ -1078,7 +1078,9 @@ impl Ctx<'_> {
                 // glazing type without a documented U- and g-value, glazing gap without a
                 // documented U-value unless the glazing is single.
                 let documented = has(c, "u_value") && has(c, "g_value");
-                if !documented && !has(c, "frame_material") {
+                // HEMIE takes the frame area fraction from the frame material unless it is
+                // stated, documented values or not (`window.py` `frame_area_fraction`).
+                if !has(c, "frame_material") && (!documented || !has(c, "frame_area_fraction")) {
                     need("frame_material");
                 }
                 if !documented && !has(c, "glazing_type") {
@@ -4332,6 +4334,15 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .find_map(|w| w["windows"].get(0).cloned())
             .expect("window");
         model["Zone"]["constructions"][window["construction"].as_str().unwrap()].clone()
+    }
+
+    #[test]
+    fn a_documented_window_still_needs_its_frame_material_or_frame_fraction() {
+        let no_frame = |extra: &str| window_house(extra, "").replace("\"\"frame_material\"\":\"\"wood or PVC\"\",", "");
+        let (_, errors, _) = run(&no_frame(r#","u_value":1.4,"g_value":0.6"#));
+        assert!(errors.iter().any(|e| e.message.contains("frame_material") || e.message.contains("frame material")), "{errors:#?}");
+        let (_, errors, _) = run(&no_frame(r#","u_value":1.4,"g_value":0.6,"frame_area_fraction":0.25"#));
+        assert!(!errors.iter().any(|e| e.message.contains("frame_material") || e.message.contains("frame material")), "{errors:#?}");
     }
 
     #[test]

@@ -19,6 +19,8 @@ it('offers the methods each target takes', () => {
   expect(thermalMethods('BuildingElementTransparent', true).map((m) => m.label)).toEqual(['Age band', 'U-value']);
   expect(thermalMethods('BuildingElementTransparent', false)).toEqual([]);
   expect(thermalMethods('BuildingElementPartyWall', true)).toEqual([]);
+  // No calculated U-value (incomplete drawing): an existing building's floor offers no calculation.
+  expect(thermalMethods('BuildingElementGround', true, false).map((m) => m.value)).toEqual(['band', 'u_value']);
 });
 
 it('opens on the method the stored values state; a U-value wins over a band', () => {
@@ -37,11 +39,18 @@ it('opens on the method the stored values state; a U-value wins over a band', ()
 it('clears the old method only, in one patch', () => {
   // A wall's band and type give its heat capacity, so a U-value keeps them.
   expect(bandOnlyFields('external_wall')).toEqual([]);
+  expect(bandOnlyFields('window')).toEqual(['age_band', 'glazing_gap']);
+  expect(bandOnlyFields('flat_roof')).toEqual(['insulation_thickness']);
   expect(thermalMethodSwitchPatch(wall({ age_band: 'D', wall_construction_type: 'cavity' }), 'band', 'u_value', { constructionBands: true, constructionType: 'external_wall' }).extra_json)
     .toEqual({ age_band: 'D', wall_construction_type: 'cavity' });
-  const window = el({ type: 'BuildingElementTransparent', extra_json: { age_band: 'D', glazing_type: 'double', glazing_gap: 12, frame_material: 'wood', g_value: 0.6 } });
+  // A window with no g-value takes it from its glazing type, so the glazing type stays.
+  const window = el({ type: 'BuildingElementTransparent', extra_json: { age_band: 'D', glazing_type: 'double', glazing_gap: 12, frame_material: 'wood' } });
   expect(thermalMethodSwitchPatch(window, 'band', 'u_value', { constructionBands: true, constructionType: 'window' }).extra_json)
-    .toEqual({ frame_material: 'wood', g_value: 0.6 });
+    .toEqual({ glazing_type: 'double', frame_material: 'wood' });
+  // A roof's insulation location sets its type and default mass class; its age band reaches its rooflights.
+  const roof = el({ type: 'BuildingElementOpaque', pitch: 40, extra_json: { age_band: 'C', insulation_location: 'at_joists', insulation_thickness: 100 } });
+  expect(thermalMethodSwitchPatch(roof, 'band', 'u_value', { constructionBands: true, constructionType: 'unheated_pitched_roof' }).extra_json)
+    .toEqual({ age_band: 'C', insulation_location: 'at_joists' });
   const entered = el({ type: 'BuildingElementOpaque', pitch: 90, u_value: 0.4, extra_json: { u_value: 0.4, areal_heat_capacity: 'Medium' } });
   expect(thermalMethodSwitchPatch(entered, 'u_value', 'band', { constructionBands: true })).toEqual({ u_value: undefined, extra_json: { areal_heat_capacity: 'Medium' } });
   expect(thermalMethodSwitchPatch(wall({ ...assembly, u_value: 0.2, mass_distribution_class: 'IE' }), 'calculation', 'u_value', { constructionBands: false }).extra_json)
@@ -69,8 +78,10 @@ it('finds the planes of one roof over one building part', () => {
     coordinates: [{ x: x0, y: 0, z: 0 }, { x: x0 + 4, y: 0, z: 0 }, { x: x0 + 4, y: 4, z: 0 }, { x: x0, y: 4, z: 0 }] });
   const roof = (id: string, x0: number, y0: number) => el({ id, name: id, type: 'BuildingElementOpaque', pitch: 40, is_unheated_pitched_roof: true,
     coordinates: [{ x: x0, y: y0, z: 5 }, { x: x0 + 4, y: y0, z: 5 }, { x: x0 + 4, y: y0 + 2, z: 6 }, { x: x0, y: y0 + 2, z: 6 }] });
-  const elements = [ground('g1', 0), ground('g2', 10), roof('S', 0, 0), roof('N', 0, 2), roof('Ext', 10, 0), wall({})];
+  const elements = [ground('g1', 0), ground('g2', 10), roof('S', 0, 0), roof('N', 0, 2), roof('Ext', 10, 0), wall({}), roof('Off1', 30, 0), roof('Off2', 30, 2)];
   expect(sharedRoofPlanes(elements[2]!, elements).map((e) => e.id)).toEqual(['N']);
   expect(sharedRoofPlanes(elements[4]!, elements)).toEqual([]);
   expect(sharedRoofPlanes(elements[5]!, elements)).toEqual([]);
+  // Planes over no ground floor: the part is not known, so no sharing is claimed.
+  expect(sharedRoofPlanes(elements[6]!, elements)).toEqual([]);
 });

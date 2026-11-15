@@ -138,6 +138,7 @@ const COLLAPSED_HEATING_FIELDS: ReadonlySet<string> = new Set([
 ]);
 /** An existing building's PV: HEM:EPC defaults the inverter unless stated. */
 const COLLAPSED_PV_FIELDS: ReadonlySet<string> = new Set(['inverter_peak_power_ac', 'inverter_peak_power_dc', 'inverter_is_inside', 'inverter_type']);
+const stated = (value: unknown) => value !== undefined && value !== null && value !== '';
 const NEW_BUILD_TANK_NO_DEFAULT: ReadonlySet<string> = new Set(['location']);
 /** The solar absorption coefficient each outside colour gives (DESNZ-defined). */
 const COLOUR_ABSORPTION: Readonly<Record<string, number>> = { Light: 0.3, Intermediate: 0.6, Dark: 0.9 };
@@ -1156,8 +1157,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const [resistanceChosen, setResistanceChosen] = useKeyedState<boolean>(currentData?.id ?? '', false);
   const takesResistance = thermalMethod === 'u_value' && elementType !== 'BuildingElementTransparent' && elementType !== 'BuildingElementGround'
     && !!getActiveElementSubschema(elementType, subtype)?.properties?.thermal_resistance_construction;
-  const statedResistance = advancedFieldsRecord.thermal_resistance_construction;
-  const resistanceShown = takesResistance && (resistanceChosen || (statedResistance !== undefined && statedResistance !== null && statedResistance !== ''));
+  // The converter takes a stated U-value over R, so R shows only while no U-value is stated.
+  const resistanceShown = takesResistance && !stated(advancedFieldsRecord.u_value)
+    && (resistanceChosen || stated(advancedFieldsRecord.thermal_resistance_construction));
   const constructionDetails = inspectorContributions.constructionDetails;
   const externalDetailProfilesEnabled = constructionDetails?.isEnabled() ?? false;
   const currentElementData = useMemo(() => currentDataAsElement(currentData), [currentData]);

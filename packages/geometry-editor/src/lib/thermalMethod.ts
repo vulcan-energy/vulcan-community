@@ -23,7 +23,12 @@ export const thermalMethodElementType = (type: string | undefined): boolean => !
  * The methods an element type offers, in order; fewer than two means no choice to show. An
  * existing building takes the age band; a window has no layers.
  */
-export function thermalMethods(elementType: string, constructionBands: boolean): { value: ThermalMethod; label: string }[] {
+export function thermalMethods(
+  elementType: string,
+  constructionBands: boolean,
+  /** A ground floor on an existing building has a calculated U-value to take (its drawing is complete). */
+  groundCalculated = true,
+): { value: ThermalMethod; label: string }[] {
   if (!METHOD_TYPES.has(elementType)) return [];
   const band = { value: 'band' as const, label: 'Age band' };
   const entered = { value: 'u_value' as const, label: 'U-value' };
@@ -32,6 +37,7 @@ export function thermalMethods(elementType: string, constructionBands: boolean):
     label: constructionBands || elementType === 'BuildingElementGround' ? 'Calculation' : 'Layers',
   };
   if (elementType === 'BuildingElementTransparent') return constructionBands ? [band, entered] : [];
+  if (constructionBands && elementType === 'BuildingElementGround' && !groundCalculated) return [band, entered];
   return constructionBands ? [band, calculation, entered] : [entered, calculation];
 }
 
@@ -66,12 +72,17 @@ export function inferThermalMethod(
 
 /**
  * The existing-building construction fields that only work out the U-value, so a stated U-value
- * or calculation replaces them. A wall's age band, wall type and added insulation stay: HEM:EPC
- * builds the wall's layers from them for its heat capacity, and needs the wall type without layers.
+ * or calculation replaces them. What else HEM:EPC reads stays:
+ * - a wall's age band, wall type and added insulation (its layers give the heat capacity, and the
+ *   converter needs the wall type without layers);
+ * - a window's glazing type (its g-value unless one is stated, `window.py` `g_value`);
+ * - a roof's age band (its rooflights take it, `roof.py`) and insulation location (the roof type
+ *   and its default mass distribution class).
  */
 export function bandOnlyFields(constructionType: string | undefined): readonly string[] {
   if (!constructionType || constructionType.endsWith('_wall')) return [];
-  if (constructionType === 'window') return ['age_band', 'glazing_type', 'glazing_gap'];
+  if (constructionType === 'window') return ['age_band', 'glazing_gap'];
+  if (constructionType.endsWith('_roof')) return ['insulation_thickness'];
   return ['age_band', 'insulation_location', 'insulation_thickness'];
 }
 

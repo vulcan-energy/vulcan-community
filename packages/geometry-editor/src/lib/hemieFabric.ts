@@ -288,6 +288,8 @@ export function sharedRoofPlanes(element: Element, elements: readonly Element[],
     return grounds.findIndex((ground) => isPointInPolygon2D(centre, ground.coordinates));
   };
   const own = part(element);
+  // Over no ground floor the part is not known here: claim no sharing rather than a false one.
+  if (own < 0) return [];
   return elements.filter((other) => other.id !== element.id && !other.isPlaceholder && planePitch(other) !== undefined
     && hemieConstructionType(other, elements, buildType) === type && part(other) === own);
 }
