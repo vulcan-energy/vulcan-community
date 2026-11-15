@@ -43,6 +43,22 @@ export interface ArealHeatCapacityInput {
 /** HEM:FHS 1.0.0a7, the target an unpinned CSV converts as: classes only, on the surface scale. */
 export const A7_AREAL_HEAT_CAPACITY_INPUT: ArealHeatCapacityInput = Object.freeze({ classes: 'surface', numberTypes: Object.freeze([]) });
 
+/** A host's areal heat capacity input for a pinned target id; undefined for a pin it cannot resolve. */
+export type PinnedArealHeatCapacity = (targetBundleId: string) => ArealHeatCapacityInput | undefined;
+
+/**
+ * The areal heat capacity a document's own target takes, from its TargetBundleId: an unpinned
+ * document converts as HEM:FHS 1.0.0a7 (the legacy rule); a pin goes to the host's resolver.
+ * Undefined when the host has no resolver or cannot resolve the pin: the caller keeps the
+ * values as they are and says so.
+ */
+export function documentArealHeatCapacity(
+  targetBundleId: string | undefined,
+  pinned: PinnedArealHeatCapacity | undefined,
+): ArealHeatCapacityInput | undefined {
+  return targetBundleId === undefined ? A7_AREAL_HEAT_CAPACITY_INPUT : pinned?.(targetBundleId);
+}
+
 /** A host's per-target rules the schema cannot state. */
 export interface TargetRules {
   /** Checks that the model is complete and consistent for this target, such as a wet emitter needing a heat source. */

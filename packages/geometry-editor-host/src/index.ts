@@ -87,11 +87,13 @@ export {
 
 export {
   A7_AREAL_HEAT_CAPACITY_INPUT,
+  documentArealHeatCapacity,
   targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,
   type ArealHeatCapacityInput,
   type ArealHeatCapacityScale,
+  type PinnedArealHeatCapacity,
   type TargetRules,
   type GeometrySchemaMode,
   type GeometrySchemaNode,

@@ -151,18 +151,19 @@ export function dropAssemblyEnvelopeOnFabricOverride(
 }
 
 /**
- * Fits a loaded element's areal heat capacity to its target. A value an applied assembly wrote
+ * A loaded element's `extra_json` with its areal heat capacity fitted to its target, or undefined
+ * when it already fits. A value an applied assembly wrote
  * (it still equals the envelope's) is derived: it is worked out again from the assembly's layer
  * sum, so a class written on another target's scale follows this target's. A user's own value has
  * no envelope (overriding removes it) and stays, except that a number where the target takes a
  * class becomes the nearest class on the target's scale.
  */
-export function alignArealHeatCapacityWithTarget(
+export function alignedArealHeatCapacity(
   element: { type: string; extra_json?: unknown },
   input: ArealHeatCapacityInput,
-): void {
+): Record<string, unknown> | undefined {
   const extra = element.extra_json;
-  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return;
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return undefined;
   const record = extra as Record<string, unknown>;
   const write = arealHeatCapacityWrite(input, element.type);
   const value = record.areal_heat_capacity;
@@ -171,11 +172,13 @@ export function alignArealHeatCapacityWithTarget(
   const written = envelope?.arealHeatCapacityWrittenToElement_J_m2K;
   if (typeof layerSum === 'number' && typeof written === 'number' && sameFabricValue('areal_heat_capacity', value, written)) {
     const derived = resolveFabricArealHeatCapacityForElement(layerSum, write);
-    record.areal_heat_capacity = derived;
-    envelope!.arealHeatCapacityWrittenToElement_J_m2K = write === 'number' ? derived : arealHeatCapacityJPerM2KFromBand(derived, write);
-    return;
+    const derivedJ = write === 'number' ? derived : arealHeatCapacityJPerM2KFromBand(derived, write);
+    if (derived === value && derivedJ === written) return undefined;
+    return { ...record, areal_heat_capacity: derived, vulcan_assembly_v1: { ...envelope, arealHeatCapacityWrittenToElement_J_m2K: derivedJ } };
   }
   if (typeof value === 'number' && write !== 'number') {
-    record.areal_heat_capacity = arealHeatCapacityBandFromJPerM2K(value, write) ?? value;
+    const band = arealHeatCapacityBandFromJPerM2K(value, write);
+    return band === undefined ? undefined : { ...record, areal_heat_capacity: band };
   }
+  return undefined;
 }

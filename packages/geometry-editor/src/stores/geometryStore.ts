@@ -37,8 +37,8 @@ import {
   targetRules,
   targetSchemaMode,
   unavailableGeometrySchemaPort,
-  type ArealHeatCapacityInput,
   type GeometrySchemaPort,
+  type PinnedArealHeatCapacity,
 } from '../../../geometry-editor-host/src/schemaPort';
 import {
   unavailableGeometryWorkspaceResourcePort,
@@ -2902,11 +2902,13 @@ export interface CreateGeometryStoreOptions {
    */
   defaultsPathForTarget?: (targetBundleId: string) => string | undefined;
   /**
-   * The areal heat capacity a pinned target takes (undefined for an unpinned CSV or an unknown pin:
-   * HEM:FHS 1.0.0a7's). A load keeps a number where the target takes one, snaps it to the nearest
-   * class on the target's scale elsewhere, and re-derives the class an applied assembly wrote.
+   * The host's areal heat capacity input per pinned target (`documentArealHeatCapacity` gives an
+   * unpinned document HEM:FHS 1.0.0a7's). A load and a target change keep a number where the target
+   * takes one, snap it to the nearest class on the target's scale elsewhere, and re-derive the
+   * value an applied assembly wrote. Absent (a host with no target catalogue) or undefined for a
+   * pin, the values stay as they are and the load says so: the editor never guesses a target.
    */
-  arealHeatCapacityForTarget?: (targetBundleId: string | undefined) => ArealHeatCapacityInput | undefined;
+  arealHeatCapacityForPin?: PinnedArealHeatCapacity;
   /**
    * Whether the document's own pinned target references database products (`TargetRules.
    * hemDatabaseProducts`); undefined for a pin the host does not know. Export-time values follow
@@ -3227,7 +3229,7 @@ const createGeometryState = (
   ...createIoSlice({
     defaultDefaultsPath,
     defaultsPathForTarget: options.defaultsPathForTarget,
-    arealHeatCapacityForTarget: options.arealHeatCapacityForTarget,
+    arealHeatCapacityForPin: options.arealHeatCapacityForPin,
     hemDatabaseProductsForTarget: options.hemDatabaseProductsForTarget,
     hostDocumentMetadataKeys,
     modelSchemaProfilePort,
