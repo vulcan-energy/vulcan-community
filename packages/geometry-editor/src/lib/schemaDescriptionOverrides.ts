@@ -1362,8 +1362,6 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   'high_loss_environment': {
     label: 'High heat loss location',
-    description: 'Tick if the unit is in a place that loses a lot of heat.',
-    type: 'boolean',
   },
   'areal_heat_capacity': { label: 'Heat capacity per area' },
   'pipework_type': {

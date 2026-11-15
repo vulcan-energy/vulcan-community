@@ -516,11 +516,12 @@ export function applyEcodesignControlClassEnum(
           const childRecord = child as Record<string, unknown>;
           const childWithoutEnum = { ...childRecord };
           delete childWithoutEnum.enum;
-          // EPC states the class as a nullable reference: the nullable wrapper would hide the worded options.
+          // EPC states the class as a nullable reference: the nullable wrapper would hide the worded options, so keep null in the type.
+          const nullable = Array.isArray(childWithoutEnum.anyOf) && childWithoutEnum.anyOf.some((branch) => readExtraJsonRecord(branch).type === 'null');
           delete childWithoutEnum.anyOf;
           nextProperties[key] = {
             ...childWithoutEnum,
-            type: 'integer',
+            type: nullable ? ['integer', 'null'] : 'integer',
             description: typeof childRecord.description === 'string'
               ? `${childRecord.description} ${ECODESIGN_CONTROL_CLASS_DESCRIPTION}`
               : ECODESIGN_CONTROL_CLASS_DESCRIPTION,
@@ -1860,13 +1861,16 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return classifyOpaqueFabricVariantFromElement((currentData ?? {}) as Record<string, unknown>);
   }, [elementType, currentData]);
 
-  // A system whose product is chosen by default shows that product as the Product Id placeholder.
+  // A plant whose product the target chooses by default shows that product as its Product Id placeholder, by the field's own path.
   const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
   const selectedName = useGeometryStore((state) => (state.selection?.type === 'element' ? state.elementsById[state.selection.id]?.name : undefined));
-  const defaultProductField = useMemo(() => {
-    const own = (productSlots ?? []).filter((slot) => slot.row === selectedName);
-    return own.length === 1 && own[0].source === 'default' && own[0].product_id != null ? { product_id: own[0].label ?? own[0].product_id } : {};
-  }, [productSlots, selectedName]);
+  const defaultProducts = useMemo(() => Object.fromEntries(
+    (productSlots ?? []).flatMap((slot) => (
+      slot.row === selectedName && slot.source === 'default' && slot.product_id != null
+        ? [[`${slot.path}/product_id`, slot.label ?? slot.product_id]]
+        : []
+    )),
+  ), [productSlots, selectedName]);
 
   const advancedFieldsConfig = useMemo<Record<string, unknown>>(
     () =>
@@ -1916,7 +1920,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
         // An existing building takes these from the DESNZ-defined construction tables: keep them out of the way.
         collapsedEngineFields: existingBuilding && hemDatabaseProducts && elementType !== 'System' ? COLLAPSED_ENGINE_FIELDS : undefined,
-        derivedDefaults: elementType === 'System' ? { ...systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding), ...defaultProductField } : undefined,
+        derivedDefaults: elementType === 'System' ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding) : undefined,
+        defaultProducts: elementType === 'System' ? defaultProducts : undefined,
       }),
     [
       flat,
@@ -1943,7 +1948,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       systemSampleBaselineAvailable,
       systemSampleBaselineExtraJson,
       systemDefaults,
-      defaultProductField,
+      defaultProducts,
       hemDatabaseProducts,
       advancedFieldsData,
       existingBuilding,
@@ -2141,7 +2146,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       if (mechanicalVentilationVentType === 'MVHR') {
         const nextRecord = { ...(nextExtra as Record<string, unknown>) };
         deleteProperties(nextRecord, MECHANICAL_VENTILATION_FLAT_POSITION_FIELDS);
-        nextRecord.EnergySupply = MVHR_FIXED_ENERGY_SUPPLY;
+        if (!hemDatabaseProducts) nextRecord.EnergySupply = MVHR_FIXED_ENERGY_SUPPLY;
         nextExtra = nextRecord;
       }
     }

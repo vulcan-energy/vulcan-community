@@ -83,6 +83,8 @@ type RendererConfig = {
   derivedDefaults?: Readonly<Record<string, unknown>>;
   systemSampleMode?: boolean;
   systemSamplePathSegments?: string[];
+  /** Default products the target picks, by the model pointer of the plant's `product_id`. */
+  defaultProducts?: Readonly<Record<string, unknown>>;
   useFHSSchemaForValidation?: boolean;
 };
 
@@ -664,6 +666,10 @@ function getAdvancedDefaultValue(
       elementStoreyInput(config?.currentElementData),
       floorStoreyInputs(config?.floors),
     );
+  }
+  if (config?.defaultProducts && config.systemSamplePathSegments) {
+    const own = config.defaultProducts[`/${config.systemSamplePathSegments.map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`];
+    if (own !== undefined) return own;
   }
   if (config?.derivedDefaults && config.derivedDefaults[propKey] !== undefined) return config.derivedDefaults[propKey];
   // R4.6b-2: `path` is gone from this signature. It carried exactly one thing into

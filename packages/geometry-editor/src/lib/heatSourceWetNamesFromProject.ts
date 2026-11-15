@@ -30,11 +30,12 @@ export function collectHeatSourceWetNameLabelsFromProject(elementsById: Record<s
     if (!ex || typeof ex !== 'object' || Array.isArray(ex)) continue;
     const hsw = (ex as Record<string, unknown>).HeatSourceWet;
     if (!hsw || typeof hsw !== 'object' || Array.isArray(hsw)) continue;
-    for (const key of Object.keys(hsw as Record<string, unknown>)) {
+    const keys = Object.keys(hsw as Record<string, unknown>);
+    for (const key of keys) {
       if (!key || out[key]) continue;
       const elementName = typeof el.name === 'string' ? el.name.trim() : '';
-      // The element's name is the one the user gave; the key inside it is internal.
-      out[key] = elementName || key;
+      // The element's name stands alone when it holds one heat source; with several, the key tells them apart.
+      out[key] = keys.length === 1 ? elementName || key : elementName && elementName !== key ? `${elementName} (${key})` : key;
     }
   }
   return out;

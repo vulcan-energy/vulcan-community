@@ -664,8 +664,11 @@ function renderControlForProperty(args: {
   applyChange: (segments: string[], value: unknown) => void;
 }): React.ReactElement {
   const { segments, resolved, value, label, scope, schema, config, elementType, replicateRequiredError, applyChange } = args;
-  // A field with a stated default is never "required": the default shows as its placeholder.
-  const required = args.required && (config as { derivedDefaults?: Record<string, unknown> }).derivedDefaults?.[segments[segments.length - 1] ?? ''] === undefined;
+  // An unstated field whose default the run applies is not "required": the default shows as its placeholder.
+  const defaults = config as { derivedDefaults?: Record<string, unknown>; defaultProducts?: Record<string, unknown> };
+  const pointer = `/${segments.map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`;
+  const defaultApplies = defaults.derivedDefaults?.[segments[segments.length - 1] ?? ''] !== undefined || defaults.defaultProducts?.[pointer] !== undefined;
+  const required = args.required && !(defaultApplies && (value == null || value === ''));
 
   const path = segments.join('.');
   const leafKey = segments[segments.length - 1] ?? path;

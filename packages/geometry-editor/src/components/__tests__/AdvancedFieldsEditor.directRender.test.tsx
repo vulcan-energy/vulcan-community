@@ -1750,6 +1750,21 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     }
   });
 
+  it('keeps the electricity supply a user chose for an MVHR on a products target', async () => {
+    const schemaPort = {
+      ...canonicalGeometrySchemaPort,
+      targetRules: () => ({
+        modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: true, hemDatabaseProducts: true, excludedElementTypes: {},
+      }),
+    };
+    const onChange = vi.fn();
+    const extraJson = { vent_type: 'MVHR', EnergySupply: 'electricity 2', design_outdoor_air_flow_rate: 120, mvhr_eff: 0.9, mvhr_location: 'inside' };
+    const { container } = renderEditor({ elementType: 'MechanicalVentilation', useFHSSchema: true, currentDataExtra: { vent_type: 'MVHR' }, extraJson, onChange, schemaPort });
+    fireEvent.change(within(fieldRow(container, 'design_outdoor_air_flow_rate')).getByRole('textbox'), { target: { value: '150' } });
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    expect(onChange.mock.calls.at(-1)?.[0].extra_json.EnergySupply).toBe('electricity 2');
+  });
+
   it('config 5 -- MechanicalVentilation, MVHR, FHS: measured + sfp fan modes, + interaction characterization (number-entry / unset)', async () => {
     const measuredExtraJson = {
       EnergySupply: 'mains elec',
