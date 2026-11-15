@@ -41,6 +41,8 @@ export interface HardcodedFieldInfo {
   units?: string;
   /** Explicit meaning for numeric values whose schema has no useful physical unit. */
   unitSemantic?: FieldUnitSemantic;
+  /** The schema's own description or unit is wrong for what HEM reads; this override replaces both. */
+  correctsSchema?: boolean;
   /** UI-only numeric model field included in completeness diagnostics. */
   modelAuthoring?: boolean;
   /**
@@ -173,11 +175,13 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: '°C',
   },
-  // Minimum and maximum flow rates are litres per minute; the constant design flow rate is litres per second.
+  // Wet distribution flow rates are litres per minute: HEM divides design, minimum and maximum flow by 60 (emitters).
   'design_flow_rate': {
-    description: 'Constant flow rate of the heating circuit when the heat source cannot change its flow rate, in litres per second (L/s). A value in L/min is 60 times too large: 3.6 L/min is 0.06 L/s.',
+    description: 'Design flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60: 0.06 L/s is 3.6 L/min.',
     type: 'number',
-    units: 'L/s',
+    units: 'L/min',
+    // The schema text says l/s, but HEM divides this value by 60 (heating_systems/emitters.py).
+    correctsSchema: true,
   },
   'min_flow_rate': {
     description: 'Minimum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',

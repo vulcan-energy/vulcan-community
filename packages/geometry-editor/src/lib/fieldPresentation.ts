@@ -315,7 +315,8 @@ export function resolveFieldPresentation(
     opaqueFabricVariant: context.opaqueFabricVariant,
     label: context.label,
   });
-  const schemaDescription = schemaDescriptionFor(context, schemaInfo);
+  const correctsSchema = overrideMetadata?.info.correctsSchema === true;
+  const schemaDescription = correctsSchema ? undefined : schemaDescriptionFor(context, schemaInfo);
   const overrideDescription = overrideMetadata?.info.description?.trim() || undefined;
   const description = schemaDescription ?? overrideDescription;
   const descriptionSource = schemaDescription
@@ -329,8 +330,8 @@ export function resolveFieldPresentation(
   const schemaMetadataSource = schemaInfo?.jsonPath
     ?? (context.schemaNode ? 'schemaNode' : undefined);
   const parsedDescriptionUnit = extractDescriptionUnit(schemaDescription);
-  let structuredUnit = structuredUnitFromNode(exactNode);
-  if (!structuredUnit && schemaInfo?.source !== 'hem_guidance' && schemaInfo?.units && !parsedDescriptionUnit) {
+  let structuredUnit = correctsSchema ? undefined : structuredUnitFromNode(exactNode);
+  if (!correctsSchema && !structuredUnit && schemaInfo?.source !== 'hem_guidance' && schemaInfo?.units && !parsedDescriptionUnit) {
     structuredUnit = schemaInfo.units;
   }
   pushCandidate(candidates, 'schema_structured', structuredUnit, schemaMetadataSource);
