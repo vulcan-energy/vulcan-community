@@ -18,17 +18,14 @@ import { validateValueAgainstPropertyNode } from '../lib/schemaCache';
 import { ResetFieldButton } from './ResetFieldButton';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
 import {
-  buildAddWindowOpeningPatch,
   buildConvertToSingleOpeningPatch,
   buildSingleOpeningPatch,
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
-  type WindowOpeningPatch,
   type WindowOpeningRow,
   type WindowOpeningSource,
 } from '../lib/windowOpenings';
-import { useTargetRules } from '../hooks/useTargetRules';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { Element } from '../geometry/types';
 import { resolveSchemaPointer } from '../lib/schemaRefResolver';
@@ -531,23 +528,31 @@ function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: 
   </GroupAccordion>;
 }
 
-/** a8/a9 window parts: the main form owns one opening; the table owns two or more. */
+/**
+ * a8/a9 window parts. The selected window's main form owns its openings (one in its inputs, more as rows);
+ * here only a list it cannot read is converted, and a list without a window (bulk edits) shows as a table.
+ */
 function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderControlForProperty>[0] }) {
   const selected = useGeometryStore((state) => (
     state.selection?.type === 'element' ? state.getElementById(state.selection.id) : undefined
   ));
   const updateElement = useGeometryStore((state) => state.updateElement);
-  // On a target with construction bands the window form puts this button beside the glazing sections.
-  const { constructionBands } = useTargetRules();
   const element = selected?.type === 'BuildingElementTransparent' ? selected : undefined;
   const source: WindowOpeningSource = element
     ? element as unknown as WindowOpeningSource
     : { extra_json: { window_part_list: args.value } };
   const openings = classifyWindowOpenings(source);
-  const commit = (patch: WindowOpeningPatch) => {
-    if (element) updateElement(element.id, patch as Partial<Element>);
-    else args.applyChange(args.segments, patch.extra_json?.window_part_list);
-  };
+
+  if (element) {
+    if (openings.kind !== 'repair' || openings.reason === 'incomplete_parts') return null;
+    return <div style={{ fontSize: 12 }}>
+      <p role="alert" style={{ marginTop: 0 }}>{windowOpeningRepairMessages(openings).join(' ')}</p>
+      <button type="button" className="btn btn-nav btn-small" onClick={() => updateElement(element.id, buildConvertToSingleOpeningPatch(source) as Partial<Element>)}>
+        Convert to a single opening
+      </button>
+      <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>This removes the current window part list. The window keeps one opening.</p>
+    </div>;
+  }
 
   if (windowOpeningsUseTable(source)) {
     return <SystemPerformanceTable
@@ -555,7 +560,7 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
         ...args,
         applyChange: (segments, next) => {
           if (Array.isArray(next) && next.length === 1 && isRecord(next[0])) {
-            commit(buildSingleOpeningPatch(source, next[0] as WindowOpeningRow));
+            args.applyChange(segments, buildSingleOpeningPatch(source, next[0] as WindowOpeningRow).extra_json?.window_part_list);
           } else {
             args.applyChange(segments, next);
           }
@@ -565,26 +570,9 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
       issues={openings.kind === 'repair' ? openings.partIssues : undefined}
     />;
   }
-
-  if (openings.kind === 'repair' && openings.reason !== 'incomplete_parts') {
-    return <div style={{ fontSize: 12 }}>
-      <p role="alert" style={{ marginTop: 0 }}>{windowOpeningRepairMessages(openings).join(' ')}</p>
-      {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildConvertToSingleOpeningPatch(source))}>
-        Convert to a single opening
-      </button>}
-      {element && <p style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>This removes the current window part list. The window keeps one opening.</p>}
-    </div>;
-  }
-
-  // A closed window's message is the validation issue, which links to the field; a complete
-  // single opening has nothing to say beyond the main form.
-  const status = openings.kind === 'needs_input'
-    ? 'One opening. Complete the free area height, mid height and max open area in the main form.'
+  return openings.kind === 'repair'
+    ? <p role="alert" style={{ fontSize: 12, marginTop: 0 }}>{windowOpeningRepairMessages(openings).join(' ')}</p>
     : null;
-  return <div style={{ fontSize: 12 }}>
-    {status && <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>}
-    {element && !constructionBands && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add openable part</button>}
-  </div>;
 }
 
 /** A value that is one of a few named bands or a number (a construction's areal heat capacity). */

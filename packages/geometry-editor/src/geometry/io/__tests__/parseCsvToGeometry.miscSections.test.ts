@@ -31,6 +31,16 @@ Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,${midHeig
     expect(parsed.metadata.vulcanCsvVersion).toBe(1);
   });
 
+  it('keeps a window open area to 4 dp through save and load, as its equivalent area is kept', () => {
+    const csv = windowCsv('VulcanCsvVersion,2,,,,,,,,,,,,,', 1.4, 1.4).replace(',0.4,1.4,0.4,', ',0.4,1.4,1.782,');
+    const store = createGeometryStore();
+    store.getState().loadFromCSV(csv);
+    const reopened = createGeometryStore();
+    reopened.getState().loadFromCSV(store.getState().generateCSV());
+    const window = Object.values(reopened.getState().elementsById).find((element) => element.type === 'BuildingElementTransparent');
+    expect(window?.max_window_open_area).toBe(1.782);
+  });
+
   it('hydrates version-2 ventilation-zone-relative window mid-heights into editor coordinates', () => {
     const parsed = parseCsvToGeometry(windowCsv('VulcanCsvVersion,2,,,,,,,,,,,,,', 1.4, 1.4));
     const window = parsed.elements.find((element) => element.type === 'BuildingElementTransparent');

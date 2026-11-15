@@ -161,7 +161,7 @@
 // orientation360/setOrientation360, applyOrientationToGeometry.
 
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
-import { roundToTwoDecimals } from '../../geometry/constants';
+import { roundToFourDecimals, roundToTwoDecimals } from '../../geometry/constants';
 import { calculateDerivedWindowMidHeight } from '../../lib/zoneDerivation';
 import { lineFaceEnvelope } from '../../lib/profileLineFace';
 import {
@@ -187,11 +187,11 @@ import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { CloseShadingFields } from './CloseShadingFields';
+import { SecurityRiskField, WindowOpeningParts } from './WindowOpeningParts';
 import { isExistingBuilding } from '../../lib/windowOpenings';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import {
-  buildAddWindowOpeningPatch,
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   windowOpeningRepairMessages,
@@ -217,6 +217,8 @@ export interface BuildingElementTransparentFormState {
   constructionBands: boolean;
   /** The active schema's window parts are physical openings (a8/a9). */
   windowPartsPhysical: boolean;
+  /** The target's window takes `security_risk`: the Opening section asks for it. */
+  securityRiskInSchema: boolean;
   commitOpeningField: (field: WindowOpeningField) => (value: number | '') => void;
   /** Shared with the wall family — see module header comment. */
   widthInput: NumericDraftInputBinding;
@@ -267,7 +269,9 @@ function displayedOpeningValues(
     openings?.kind === 'rows' && openings.rows.length === 1 ? openings.rows[0] : undefined;
   const display = (key: WindowOpeningField): number | '' => {
     const value = opening?.[key] ?? element[key];
-    return typeof value === 'number' ? roundToTwoDecimals(value) : (value ?? '');
+    // The open area keeps 4 dp: an equivalent area is checked against it.
+    if (typeof value !== 'number') return value ?? '';
+    return key === 'max_window_open_area' ? roundToFourDecimals(value) : roundToTwoDecimals(value);
   };
   return {
     free_area_height: display('free_area_height'),
@@ -305,7 +309,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
   };
   const freeAreaHeightInput = useDecimalInput('', commitOpeningField('free_area_height'), { commitOnChange: true });
   const midHeightInput = useDecimalInput('', commitOpeningField('mid_height'), { commitOnChange: true });
-  const maxWindowOpenAreaInput = useDecimalInput('', commitOpeningField('max_window_open_area'), { commitOnChange: true });
+  const maxWindowOpenAreaInput = useDecimalInput('', commitOpeningField('max_window_open_area'), { commitOnChange: true, formatOnBlur: 'number' });
 
   // Table edits and "Convert to a single opening" write the store outside these inputs.
   const storedOpening = windowPartsPhysical && selectedWindow?.type === 'BuildingElementTransparent'
@@ -441,6 +445,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     closeShadingExisting: useGeometryStore(isExistingBuilding),
     constructionBands: useTargetRules().constructionBands,
     windowPartsPhysical,
+    securityRiskInSchema: ctx.schemaPort.availability === 'available'
+      && !!(ctx.schemaPort.getElementSubschema(ctx.schemaMode, 'BuildingElementTransparent')?.properties as Record<string, unknown> | undefined)?.security_risk,
     commitOpeningField,
     widthInput: ctx.shared.widthInput,
     heightInput: ctx.shared.heightInput,
@@ -611,11 +617,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       : null;
     const openingsInTable = state.windowPartsPhysical && !!windowSource && windowOpeningsUseTable(windowSource);
     const openings = state.windowPartsPhysical && windowSource ? classifyWindowOpenings(windowSource) : null;
-    const openingNote = openingsInTable
-      ? 'This window has separate openings. Edit them in Advanced Fields.'
-      : openings?.kind === 'repair'
-        ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a Mid Height replaces the parts with one opening.' : ''}`
-        : null;
+    const openingNote = !openingsInTable && openings?.kind === 'repair'
+      ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a mid height replaces the parts with one opening.' : ''}`
+      : null;
 
     return (
       <>
@@ -657,7 +661,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         </div>
         {!openingsInTable && !state.constructionBands && <>
-        {renderFieldLabel('Free Area Height (m):', elementType)}
+        {renderFieldLabel('Free area height (m)', elementType)}
         <div
           className="element-input"
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -675,7 +679,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value)} issue={getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value) || undefined} />
         </div>
         {renderFieldLabel(
-          'Mid Height (m):',
+          'Mid height (m)',
           elementType,
           undefined,
           <DerivedSource
@@ -712,7 +716,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         </div>
         {renderFieldLabel(
-          'Max Window Open Area (m²):',
+          'Open area (m²)',
           elementType,
           undefined,
           state.freeAreaHeightInput.value !== '' ? (
@@ -722,7 +726,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
               info={<SourceNote>width × free area height</SourceNote>}
               useLabel="Use width × free height"
               unit="m²"
-              fieldLabel="Max window open area"
+              fieldLabel="Open area"
               onUse={(value) => {
                 state.maxWindowOpenAreaInput.setValue(value);
                 state.commitOpeningField('max_window_open_area')(value);
@@ -746,9 +750,11 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('maxWindowOpenArea', state.maxWindowOpenAreaInput.value)} issue={getFieldValidationIssue('maxWindowOpenArea', state.maxWindowOpenAreaInput.value) || undefined} />
         </div>
-        {openingFields}
         </>}
         {openingNote ? <div className="field-source-note">{openingNote}</div> : null}
+        {windowSource && state.windowPartsPhysical && !state.constructionBands && (
+          <WindowOpeningParts source={windowSource} commit={(patch) => commitExistingElementDraft(patch as Partial<Element>)} />
+        )}
         {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
             <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type</div>
@@ -838,17 +844,20 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                   <button type="button" className="btn btn-small btn-secondary" onClick={() => save([...sections, { windowType: '' }])}>
                     Add glazing section
                   </button>
-                  {state.windowPartsPhysical && (
-                    <button type="button" className="btn btn-small btn-secondary" onClick={() => commitExistingElementDraft(buildAddWindowOpeningPatch(selectedElement as unknown as WindowOpeningSource) as Partial<Element>)}>
-                      Add openable part
-                    </button>
-                  )}
                   </div>
                 </div>
               );
             })()}
           </>
         ) : null}
+        {selectedElement?.type === 'BuildingElementTransparent' && state.securityRiskInSchema && (
+          <SecurityRiskField
+            element={selectedElement}
+            fieldRef={registerBaseFieldRef('security_risk')}
+            commit={(extra) => commitExistingElementDraft({ extra_json: extra })}
+          />
+        )}
+        {openingFields}
         {renderFieldLabel('Frame area fraction:', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput

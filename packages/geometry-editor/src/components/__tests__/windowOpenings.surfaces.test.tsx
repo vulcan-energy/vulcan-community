@@ -14,6 +14,7 @@ import type { BuildingElementTransparent, Element } from '../../geometry/types';
 import { validateElementCore } from '../../geometry/validation/validateElement';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
+import { defineGeometryInspectorContributions, type GeometryInspectorContributions } from '../../../../geometry-editor-host/src/inspectorContributions';
 import { ElementCreator } from '../ElementCreator';
 import { WindowPartListControl } from '../jsonformsRenderers';
 
@@ -67,10 +68,10 @@ const windowElement = (extra?: Record<string, unknown>, overrides: Partial<Build
   ...overrides,
 }) as unknown as BuildingElementTransparent;
 
-function mount(element: Element, items: unknown, onChange = vi.fn()) {
+function mount(element: Element, items: unknown, onChange = vi.fn(), selected = true) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   act(() => store.setState({
-    selection: { type: 'element', id: element.id },
+    selection: selected ? { type: 'element', id: element.id } : null,
     elementsById: { [element.id]: element },
     elementIds: [element.id],
   }));
@@ -95,33 +96,17 @@ const stored = (store: ReturnType<typeof createGeometryStore>) =>
   store.getState().elementsById['window-1'] as BuildingElementTransparent;
 
 describe('window_part_list on physical-opening targets', () => {
-  it('shows a table with row-level issues for two or more parts, and no legacy presets', () => {
-    mount(windowElement({ window_part_list: [part(1.2), { free_area_height: 0.5, mid_height: 2 }] }), physicalItems);
+  it('shows a table with row-level issues for two or more parts when no window is selected', () => {
+    mount(windowElement({ window_part_list: [part(1.2), { free_area_height: 0.5, mid_height: 2 }] }), physicalItems, vi.fn(), false);
     expect(screen.getByRole('table', { name: /window parts/i })).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Part 2 needs max open area');
+    expect(screen.getByRole('alert')).toHaveTextContent('Part 2 needs open area');
     expect(screen.queryByText('Presets')).toBeNull();
   });
 
-  it('says nothing more for one opening and can add a second', () => {
-    const store = mount(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }] }), physicalItems);
-    expect(screen.queryByText(/One opening/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Add openable part' }));
-    expect(stored(store).extra_json).toMatchObject({
-      window_part_list: [{ free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8 }, {}],
-    });
-  });
-
-  it('writes the normal form when a removal leaves one part', () => {
-    const store = mount(windowElement({ window_part_list: [part(1.2), part(2)] }), physicalItems);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove window part 1' }));
-    const result = stored(store);
-    expect(result).toMatchObject(part(2));
-    expect(result.extra_json).toMatchObject({ window_part_list: [{ mid_height_air_flow_path: 2 }] });
-  });
-
-  it('offers Add openable part on a closed window', () => {
-    mount(windowElement({ window_part_list: [] }), physicalItems);
-    expect(screen.getByRole('button', { name: 'Add openable part' })).toBeInTheDocument();
+  it('leaves a selected window\'s openings to its main form', () => {
+    mount(windowElement({ window_part_list: [part(1.2), part(2)] }), physicalItems);
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add openable part' })).toBeNull();
   });
 
   it('offers one explicit repair for a conflicting legacy list', () => {
@@ -224,7 +209,7 @@ describe('validateElement window rules', () => {
     expect(messages(windowElement(undefined, blankColumns as never), unavailableGeometrySchemaPort)).toEqual([
       'Free Area Height is required',
       'Mid Height is required',
-      'Max Window Open Area is required',
+      'Open area is required',
     ]);
   });
 
@@ -251,7 +236,7 @@ describe('validateElement window rules', () => {
     expect(messages(windowElement(undefined, { free_area_height: 0, mid_height: 0, max_window_open_area: 0 }), port(legacyItems))).toEqual([
       'Free Area Height should not be 0',
       'Mid Height should not be 0',
-      'Max Window Open Area should not be 0',
+      'Open area should not be 0',
     ]);
     expect(messages(windowElement({ window_part_list: [] }, { free_area_height: 0, mid_height: 1, max_window_open_area: 0.4 }), port(legacyItems)))
       .toEqual(['Free Area Height should not be 0']);
@@ -305,8 +290,8 @@ describe('main-form window opening inputs', () => {
   });
   afterAll(resetGeometrySchemaAssetsForTests);
 
-  function renderForm(element: Element) {
-    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: canonicalGeometrySchemaPort });
+  function renderForm(element: Element, schemaPort: GeometrySchemaPort = canonicalGeometrySchemaPort, inspectorContributions?: GeometryInspectorContributions) {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
     store.setState({
       elementsById: { [element.id]: element },
       elementIds: [element.id],
@@ -314,9 +299,10 @@ describe('main-form window opening inputs', () => {
       zoneIds: ['zone-1'],
     });
     render(
-      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+      <GeometryEditorServicePortsProvider schemaPort={schemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
         <GeometryStoreProvider store={store}>
-          <ElementCreator selection={{ type: 'element', id: element.id } as never} setSelection={vi.fn()} useCard={false} />
+          <ElementCreator selection={{ type: 'element', id: element.id } as never} setSelection={vi.fn()} useCard={false}
+            inspectorContributions={inspectorContributions} />
         </GeometryStoreProvider>
       </GeometryEditorServicePortsProvider>,
     );
@@ -325,15 +311,80 @@ describe('main-form window opening inputs', () => {
 
   it('shows the three inputs when the schema moved them into the parts', () => {
     renderForm(windowElement());
-    for (const name of [/^Free Area Height/, /^Mid Height/, /^Max Window Open Area/]) {
+    for (const name of [/^Free area height/, /^Mid height/, /^Open area/]) {
       expect(screen.getByText(name)).toBeInTheDocument();
     }
   });
 
-  it('gives way to the table for two or more parts', () => {
-    renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
-    expect(screen.queryByText(/^Free Area Height/)).toBeNull();
-    expect(screen.getByText(/This window has separate openings/)).toBeInTheDocument();
+  it('shows two or more parts as rows, each field required', () => {
+    renderForm(windowElement({ window_part_list: [part(1.2), { free_area_height: 0.5, mid_height: 2 }] }));
+    expect(screen.queryByText(/^Free area height \(m\)/)).toBeNull();
+    expect(screen.getByText('Opening 2')).toBeInTheDocument();
+    expect(screen.getByLabelText('Mid height', { selector: '#window-opening-1-mid_height' })).toHaveValue('2');
+    expect(screen.getByLabelText('Open area', { selector: '#window-opening-1-max_window_open_area' })).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('edits a part in its row', () => {
+    const store = renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
+    const input = screen.getByLabelText('Open area', { selector: '#window-opening-1-max_window_open_area' });
+    fireEvent.change(input, { target: { value: '0.35' } });
+    fireEvent.blur(input);
+    expect(stored(store).extra_json).toMatchObject({ window_part_list: [part(1.2), { ...part(2), max_window_open_area: 0.35 }] });
+  });
+
+  it('adds a second opening from the main form', () => {
+    const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add openable part' }));
+    expect(stored(store).extra_json).toMatchObject({
+      window_part_list: [{ free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8 }, {}],
+    });
+  });
+
+  it('writes the normal form when a removal leaves one part', () => {
+    const store = renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove opening 1' }));
+    const result = stored(store);
+    expect(result).toMatchObject(part(2));
+    expect(result.extra_json).toMatchObject({ window_part_list: [{ mid_height_air_flow_path: 2 }] });
+  });
+
+  const hostOpening = defineGeometryInspectorContributions({ openingFields: { render: () => <div data-testid="host-opening" /> } });
+  const after = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it.each([
+    ['one opening', undefined],
+    ['several parts', { window_part_list: [part(1.2), part(2)] }],
+  ])('shows the host opening fields once, right after Opening and Security risk: %s', (_name, extra) => {
+    renderForm(windowElement(extra), canonicalGeometrySchemaPort, hostOpening);
+    const host = screen.getByTestId('host-opening');
+    expect(after(screen.getByText('Add openable part'), host)).toBe(true);
+    expect(after(screen.getByLabelText('Security risk'), host)).toBe(true);
+    expect(after(host, screen.getByText('Frame area fraction'))).toBe(true);
+  });
+
+  it('asks for Security risk in plain words and saves the same boolean', () => {
+    const store = renderForm(windowElement({ security_risk: false }));
+    const select = screen.getByLabelText('Security risk');
+    expect(Array.from(select.querySelectorAll('option')).map((option) => option.textContent))
+      .toEqual(expect.arrayContaining(['Yes · cannot be left open at night', 'No · can be left open at night']));
+    fireEvent.change(select, { target: { value: 'true' } });
+    expect((stored(store).extra_json as Record<string, unknown>).security_risk).toBe(true);
+  });
+
+  it('on construction bands: host opening fields after Opening type, and no openable parts', () => {
+    const bands: GeometrySchemaPort = {
+      ...canonicalGeometrySchemaPort,
+      targetRules: () => ({ constructionBands: true }) as never,
+    };
+    renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }), bands, hostOpening);
+    expect(after(screen.getByText('Add glazing section'), screen.getByTestId('host-opening'))).toBe(true);
+    expect(screen.queryByText('Add openable part')).toBeNull();
+    expect(screen.queryByText('Opening 1')).toBeNull();
+  });
+
+  it('offers Add openable part on a closed window', () => {
+    renderForm(windowElement({ window_part_list: [] }));
+    expect(screen.getByRole('button', { name: 'Add openable part' })).toBeInTheDocument();
   });
 
   const inputFor = (label: RegExp) => {
@@ -376,7 +427,7 @@ describe('main-form window opening inputs', () => {
     await act(async () => {});
     fireEvent.change(inputFor(/^Height/), { target: { value: '1.4' } });
     await act(async () => {});
-    expect(inputFor(/^Mid Height/).value).toBe('1.5');
+    expect(inputFor(/^Mid height/).value).toBe('1.5');
   });
 
   it('says that entering a mid height collapses conflicting legacy parts', () => {

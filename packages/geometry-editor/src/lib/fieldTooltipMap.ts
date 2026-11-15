@@ -96,6 +96,7 @@ const ELEMENT_TYPE_FIELD_MAP: Record<string, Record<string, string>> = {
     'free_area_height': 'free_area_height',
     'mid_height': 'mid_height',
     'max_window_open_area': 'max_window_open_area',
+    'open_area': 'max_window_open_area',
     'frame_area_fraction': 'frame_area_fraction',
     /** Advanced-field schema title for `security_risk` */
     'security_risk?': 'security_risk',

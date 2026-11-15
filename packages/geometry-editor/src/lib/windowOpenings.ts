@@ -36,12 +36,12 @@ const LEGACY_KEY = 'mid_height_air_flow_path';
 const PART_FIELD_LABELS: Record<WindowOpeningField, string> = {
   free_area_height: 'free height',
   mid_height: 'mid height',
-  max_window_open_area: 'max open area',
+  max_window_open_area: 'open area',
 };
 
 const REPAIR_MESSAGES = {
   conflicting_heights:
-    'The window parts have different heights. This HEM version needs one opening, or parts with their own free height and max open area.',
+    'The window parts have different heights. This HEM version needs one opening, or parts with their own free height and open area.',
   unsupported_list: 'The window part list has entries this HEM version cannot use.',
 } as const;
 

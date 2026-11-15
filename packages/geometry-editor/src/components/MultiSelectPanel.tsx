@@ -3194,7 +3194,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderNumberRow(
           'maxOpenArea',
-          'Max Window Open Area (m²)',
+          'Open area (m²)',
           maxOpenAreaSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.50',

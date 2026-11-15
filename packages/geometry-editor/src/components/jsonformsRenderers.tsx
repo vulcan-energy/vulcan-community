@@ -1177,10 +1177,10 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, fontSize: 12 }}>
         <div style={{ whiteSpace: 'pre-line' }}>
           {physicalParts.map((part, idx) => (
-            `Part ${idx + 1}: free height ${String(part.free_area_height ?? 'blank')} m, mid height ${String(part.mid_height ?? 'blank')} m, max open area ${String(part.max_window_open_area ?? 'blank')} m²`
+            `Part ${idx + 1}: free height ${String(part.free_area_height ?? 'blank')} m, mid height ${String(part.mid_height ?? 'blank')} m, open area ${String(part.max_window_open_area ?? 'blank')} m²`
           )).join('\n')}
         </div>
-        <div role="alert">This HEM version cannot use window parts with their own free height and max open area.</div>
+        <div role="alert">This HEM version cannot use window parts with their own free height and open area.</div>
         {selection?.type === 'element' && currentElement ? (
           <div>
             <button

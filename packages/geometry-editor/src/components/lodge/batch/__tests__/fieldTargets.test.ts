@@ -36,7 +36,7 @@ describe('FIELD_TARGETS', () => {
     expect(getFieldTargetById('g_value')?.label).toBe('G Value');
     expect(getFieldTargetById('frame_area_fraction')?.label).toBe('Frame Area Fraction');
     expect(getFieldTargetById('free_area_height')?.label).toBe('Free Area Height');
-    expect(getFieldTargetById('max_window_open_area')?.label).toBe('Max Window Open Area');
+    expect(getFieldTargetById('max_window_open_area')?.label).toBe('Open area');
     expect(getFieldTargetById('security_risk')?.label).toBeUndefined();
     expect(getFieldTargetById('window_security_risk')?.label).toBe('Security risk');
     expect(getFieldTargetById('areal_heat_capacity_opaque')?.label).toBe('Areal Heat Capacity');

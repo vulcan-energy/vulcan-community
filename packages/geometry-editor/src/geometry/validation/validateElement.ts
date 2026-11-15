@@ -265,13 +265,13 @@ function formatNumberForIssue(value: number): string {
 const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
   free_area_height: 'Free Area Height should not be 0',
   mid_height: 'Mid Height should not be 0',
-  max_window_open_area: 'Max Window Open Area should not be 0',
+  max_window_open_area: 'Open area should not be 0',
 };
 
 const WINDOW_OPENING_FIELD_REQUIRED: Record<WindowOpeningField, string> = {
   free_area_height: 'Free Area Height is required',
   mid_height: 'Mid Height is required',
-  max_window_open_area: 'Max Window Open Area is required',
+  max_window_open_area: 'Open area is required',
 };
 
 /** A zero and a blank field need different wording. */
@@ -342,7 +342,7 @@ function validateWindowOpenings(
     }
     if (openings.kind === 'rows' && openings.source === 'parts' && physical === false) {
       issues.unshift(geoIssue(
-        'This HEM version cannot use window parts with their own free height and max open area. Use "Convert to a single opening" in Advanced Fields.',
+        'This HEM version cannot use window parts with their own free height and open area. Use "Convert to a single opening" in Advanced Fields.',
         'window_part_list',
       ));
     }

@@ -2353,6 +2353,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/elementForms/WindowOpeningParts.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/WindowOpeningParts.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/elementForms/windowShading.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/windowShading.tsx",
       "license": "AGPL-3.0-only",
@@ -2878,7 +2886,7 @@
       "license": "CC-BY-4.0",
       "rights_status": "approved",
       "classification": "public_community_sample_model",
-      "evidence": "Derived from resources/sample_project/input/base_models/example_semi_detached.csv, the model this editor ships as its sample project; the Metadata target rows differ."
+      "evidence": "Byte-identical to resources/sample_project/input/base_models/example_semi_detached.csv, the model this editor already ships as its sample project."
     },
     {
       "path": "packages/geometry-editor/src/geometry/__fixtures__/semiDetachedWithDormer.ts",

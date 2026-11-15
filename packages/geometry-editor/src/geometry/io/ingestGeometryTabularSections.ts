@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { roundToTwoDecimals } from '../constants';
+import { roundToFourDecimals, roundToTwoDecimals } from '../constants';
 import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { derivePvDimensionsFromCoords } from '../../lib/pvPanelFootprint';
@@ -100,13 +100,13 @@ function V(d: Record<string, string>, k: string): string {
  */
 let rowText: Record<string, string> = {};
 
-function num(d: Record<string, string>, column: string, cell = V(d, column)): number | undefined {
+function num(d: Record<string, string>, column: string, cell = V(d, column), round = roundToTwoDecimals): number | undefined {
   if (cell === '') return undefined;
   if (!NUMBER_CELL.test(cell)) {
     rowText[column] = cell;
     return undefined;
   }
-  return roundToTwoDecimals(Number(cell));
+  return round(Number(cell));
 }
 
 /**
@@ -451,7 +451,8 @@ export function ingestGeometryTabularSections(
                 frame_area_fraction: num(d, 'frame_area_fraction'),
                 free_area_height: num(d, 'free_area_height'),
                 mid_height: num(d, 'mid_height'),
-                max_window_open_area: num(d, 'max_window_open_area'),
+                // 4 dp, as an equivalent area stated against it is kept: 2 dp turned a 1.782 m² opening into 1.78.
+                max_window_open_area: num(d, 'max_window_open_area', undefined, roundToFourDecimals),
                 coordinates: transparentCoords,
                 extra_json: transparentExtraJson,
               };

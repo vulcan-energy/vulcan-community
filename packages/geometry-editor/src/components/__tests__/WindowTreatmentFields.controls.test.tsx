@@ -10,7 +10,7 @@ import { WindowTreatmentFields } from '../WindowTreatmentFields';
 const subschema = { properties: { treatment: { type: 'array', items: { properties: { controls: { enum: ['auto_motorised', 'manual'] } } } } } };
 const resources = { availability: 'unavailable' } as never;
 
-function renderControls(controls: string, schema: typeof subschema | null) {
+function renderControls(controls: string, schema: typeof subschema | null, note?: string) {
   render(
     <GeometryEditorServicePortsProvider
       schemaPort={{ ...canonicalGeometrySchemaPort, getElementSubschema: () => schema, getRootSchema: () => ({ $defs: {} }) }}
@@ -22,6 +22,7 @@ function renderControls(controls: string, schema: typeof subschema | null) {
           treatmentUi={null}
           onPatch={vi.fn()}
           elementType="BuildingElementTransparent"
+          note={note}
         />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>,
@@ -44,5 +45,10 @@ describe('WindowTreatmentFields controls', () => {
 
   it('keeps every option when no schema declares them', () => {
     expect(renderControls('manual_motorised', null)).toContain('Linked lights / HVAC');
+  });
+
+  it('shows the host note under the fields', () => {
+    renderControls('manual', subschema, 'Overheating does not count curtains.');
+    expect(screen.getByText('Overheating does not count curtains.')).toBeTruthy();
   });
 });

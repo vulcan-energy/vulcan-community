@@ -219,11 +219,16 @@ export type GeometryInspectorElementFieldsContribution = Readonly<{
 }>;
 
 /**
- * Host fields shown on a glazed element directly under Max Window Open Area. A field marks
+ * Host fields shown on a glazed element right after its Opening section. A field marks
  * its row with `data-host-field-key` so validation rows can focus it.
  */
 export type GeometryInspectorOpeningFieldsContribution = Readonly<{
   render: ComponentType<GeometryInspectorElementFieldsContext>;
+}>;
+
+/** A host's one-line note under a window's Blinds / curtains, from its saved treatment; null for none. */
+export type GeometryWindowTreatmentNoteContribution = Readonly<{
+  note(treatment: unknown, treatmentUi: unknown): string | null;
 }>;
 
 export type GeometrySpaceLabelFieldsContext = Readonly<{
@@ -246,6 +251,7 @@ export type GeometryInspectorContributions = Readonly<{
   constructionDetails: GeometryConstructionDetailsContribution | null;
   elementFields: GeometryInspectorElementFieldsContribution | null;
   openingFields: GeometryInspectorOpeningFieldsContribution | null;
+  windowTreatmentNote: GeometryWindowTreatmentNoteContribution | null;
   spaceLabelFields: GeometrySpaceLabelFieldsContribution | null;
 }>;
 
@@ -259,6 +265,7 @@ export function defineGeometryInspectorContributions(
     constructionDetails: contributions.constructionDetails ?? null,
     elementFields: contributions.elementFields ?? null,
     openingFields: contributions.openingFields ?? null,
+    windowTreatmentNote: contributions.windowTreatmentNote ?? null,
     spaceLabelFields: contributions.spaceLabelFields ?? null,
   });
 }

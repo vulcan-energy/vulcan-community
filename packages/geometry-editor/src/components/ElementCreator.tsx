@@ -2898,7 +2898,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         case 'midHeight':
           return value === 0 && ['BuildingElementOpaque', 'BuildingElementTransparent'].includes(elementType) ? 'Mid Height should not be 0' : null;
         case 'maxWindowOpenArea':
-          return value === 0 && ['BuildingElementOpaque', 'BuildingElementTransparent'].includes(elementType) ? 'Max Window Open Area should not be 0' : null;
+          return value === 0 && ['BuildingElementOpaque', 'BuildingElementTransparent'].includes(elementType) ? 'Open area should not be 0' : null;
         case 'totalArea':
           return (!value || value === 0) && elementType === 'BuildingElementGround' ? 'Total Area cannot be 0' : null;
         case 'perimeter':

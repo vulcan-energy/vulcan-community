@@ -1235,7 +1235,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'g_value | G-Value | textbox | 0 | 1 | - | tip',
-    'security_risk | Security risk | select | - | - | - | tip',
     'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
   ],
   'fhs/BuildingElementGround [- Exposed_floor Slab_no_edge_insulation ceiling door fancoil floor radiator roof ufh wall]': [
@@ -1636,7 +1635,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
   });
 
-  it('config 3 -- BuildingElementTransparent, FHS: window_part_list + security_risk direct-render characterization', async () => {
+  it('config 3 -- BuildingElementTransparent, FHS: window_part_list direct-render characterization; security_risk is the main form\'s', () => {
     const baseExtraJson = {
       frame_area_fraction: 0.3,
       g_value: 0.5,
@@ -1646,25 +1645,17 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       security_risk: false,
       window_part_list: [{ mid_height_air_flow_path: 1.5 }],
     };
-    const onChange = vi.fn();
     const { container } = assertDirectCharacterization(
       {
         elementType: 'BuildingElementTransparent',
         useFHSSchema: true,
         extraJson: baseExtraJson,
-        onChange,
+        onChange: vi.fn(),
       },
       [
         row('treatment', 'Blinds / curtains', OTHER('DIV')),
         row('u_value', 'U-Value', TEXT('0.01')),
         row('g_value', 'G-Value', TEXT('0')),
-        // R4.3b CHARACTERIZATION CHANGE: was CHECKBOX under R4.3's executed-table
-        // pickDirectControl (BooleanControl won on type before enum was ever
-        // consulted). R4.3b's enum-first dispatch routes this FHS boolean-with-enum
-        // (`{type:'boolean', enum:[true,false]}`, inlined by AdvancedFieldsEditor's
-        // subschema memo -- see the inline comment there) to EnumControl instead --
-        // an expected delta, not a surprise (see the R4.3b brief's "Known effects").
-        row('security_risk', 'Security risk', SELECT),
         row('window_part_list', 'Window Part List', TEXT(null)),
       ],
     );
@@ -1674,63 +1665,8 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     const windowPartRow = fieldRow(container, 'window_part_list');
     expect(windowPartRow.querySelector('select')).toBeNull();
     expect(windowPartRow.querySelector('input[type="checkbox"]')).toBeNull();
-
-    // security_risk: R4.3b routes this to EnumControl -- a real <select>, not a
-    // checkbox. EnumControl's propKey-gated Yes/No label mapping
-    // (jsonformsRenderers.tsx) was dead code until this slice made this field
-    // reachable through it; the underlying option VALUES stay 'true'/'false'
-    // (String(v) off the schema's `enum: [true, false]`).
-    const securityRow = fieldRow(container, 'security_risk');
-    expect(securityRow.querySelector('input[type="checkbox"]')).toBeNull();
-    const select = within(securityRow).getByRole('combobox');
-    const options = Array.from(select.querySelectorAll('option')) as HTMLOptionElement[];
-    expect(options.map((o) => ({ value: o.value, label: o.textContent }))).toEqual(
-      expect.arrayContaining([
-        { value: 'true', label: 'Yes' },
-        { value: 'false', label: 'No' },
-      ]),
-    );
-
-    // Interaction: selecting "Yes" coerces the dropdown's string value back to a real
-    // boolean (EnumControl's `coerceDropdownValue`, coerceType derived from the enum
-    // being all-boolean) -- the onChange payload carries `security_risk: true`, not
-    // the string 'true'.
-    fireEvent.change(select, { target: { value: 'true' } });
-    await waitFor(() =>
-      expect(onChange).toHaveBeenLastCalledWith({
-        type: 'BuildingElementTransparent',
-        extra_json: { ...baseExtraJson, security_risk: true },
-      }),
-    );
-    cleanup();
-
-    // R4.3b presentation amendment (Baz-requested, post-screenshot-review): an unset
-    // enum field with a RESOLVABLE default should show that default INLINE in the
-    // closed select (label-mapped), matching the look the retired TextControl-fallback
-    // dropdown had -- not just the "Default: X" helper line underneath. security_risk
-    // is the one enum field this test harness (`createGeometryStore({
-    // defaultDefaultsPath: null })`, no defaults file loaded) can actually resolve a
-    // default for: `getAdvancedDefaultValue` special-cases it
-    // (`windowSecurityRiskDefaultForElement`, storey-derived) independent of the
-    // defaults store, and ALWAYS returns a boolean. This fixture has no
-    // coordinates/floorId, so the resolved storey is undefined ->
-    // `windowSecurityRiskDefaultForStorey(undefined)` === false -- the placeholder
-    // option should therefore read "No" (the Yes/No-mapped label for `false`), not the
-    // raw "false".
-    const { security_risk: _unsetSecurityRisk, ...extraJsonWithoutSecurityRisk } = baseExtraJson;
-    void _unsetSecurityRisk;
-    const { container: unsetContainer } = renderEditor({
-      elementType: 'BuildingElementTransparent',
-      useFHSSchema: true,
-      extraJson: extraJsonWithoutSecurityRisk,
-    });
-    const unsetSecurityRow = fieldRow(unsetContainer, 'security_risk');
-    const unsetSelect = within(unsetSecurityRow).getByRole('combobox') as HTMLSelectElement;
-    expect(unsetSelect.value).toBe('');
-    const placeholderOption = unsetSelect.querySelector('option[value=""]');
-    expect(placeholderOption).not.toBeNull();
-    expect(placeholderOption?.textContent).toBe('No');
-    expect(placeholderOption).toHaveAttribute('disabled');
+    // The window's Opening section asks for security_risk.
+    expect(container.querySelector('[data-field-key="security_risk"]')).toBeNull();
   });
 
   it('shows invalid persisted suspended-floor enum values before interaction', () => {

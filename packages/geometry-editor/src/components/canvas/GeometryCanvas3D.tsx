@@ -544,7 +544,7 @@ const WindowVentilationFaceLayers: React.FC<{
           <VentilationMicroLabel
             position={[W / 2 + 0.06, H / 2 + 0.04, layers.maxOpen]}
             color={readRootCssVar('--canvas-3d-vent-max-open', '#fbbf24')}
-            title="Max open area"
+            title="Open area"
             detail={
               typeof v.max_window_open_area === 'number' && Number.isFinite(v.max_window_open_area)
                 ? `${v.max_window_open_area.toFixed(3)} m²`
