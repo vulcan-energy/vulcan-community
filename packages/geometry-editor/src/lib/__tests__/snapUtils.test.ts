@@ -1172,11 +1172,19 @@ describe('getNearbySnapWallSegments', () => {
     let seed = 7;
     const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
     const coord = () => Math.round((rand() * 40 - 20) * 4) / 4 + (rand() < 0.3 ? rand() * 0.01 : 0);
-    const segments: SnapWallSegmentTarget[] = Array.from({ length: 200 }, (_, order) => ({
-      elementId: `e${order}`, elementName: `e${order}`, order,
-      A: { x: coord(), y: coord() },
-      B: rand() < 0.4 ? { x: coord(), y: coord() } : { x: coord(), y: coord() },
-    }));
+    const half = () => Math.round(coord() * 2) / 2;
+    const segments: SnapWallSegmentTarget[] = Array.from({ length: 300 }, (_, order) => {
+      const kind = order % 6;
+      const A = kind === 4 ? { x: half(), y: half() } : { x: coord(), y: coord() };
+      const d = half() || 0.5;
+      const B = kind === 0 ? { x: A.x, y: coord() } // vertical
+        : kind === 1 ? { x: coord(), y: A.y } // horizontal
+        : kind === 2 ? { ...A } // zero length
+        : kind === 3 ? { x: A.x + rand() * 0.01, y: A.y - rand() * 0.01 } // very short
+        : kind === 4 ? { x: A.x + d, y: A.y + (rand() < 0.5 ? d : -d) } // 45 degrees through cell corners
+        : { x: coord(), y: coord() };
+      return { elementId: `e${order}`, elementName: `e${order}`, order, A, B };
+    });
     const cache = buildGeometrySnapCacheFromTargets([], segments);
     const cell = (v: number) => Math.floor(v / 0.5);
     const distSq = (p: { x: number; y: number }, { A, B }: SnapWallSegmentTarget) => {
@@ -1184,9 +1192,15 @@ describe('getNearbySnapWallSegments', () => {
       const t = v2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - A.x) * vx + (p.y - A.y) * vy) / v2));
       return (p.x - A.x - t * vx) ** 2 + (p.y - A.y - t * vy) ** 2;
     };
-    for (let i = 0; i < 2000; i += 1) {
-      const point = { x: coord(), y: coord() };
-      const tolerance = [0.05, 0.3, 1.2][i % 3]!;
+    for (let i = 0; i < 4000; i += 1) {
+      const tolerance = [0.05, 0.3, 1.2, 0.25, 0.5][i % 5]!;
+      // Half the queries land within tolerance of a random segment, the rest anywhere.
+      const seg = segments[Math.floor(rand() * segments.length)]!;
+      const t = rand();
+      const point = i % 2 === 0 ? { x: coord(), y: coord() } : {
+        x: seg.A.x + t * (seg.B.x - seg.A.x) + (rand() * 2 - 1) * tolerance * 0.7,
+        y: seg.A.y + t * (seg.B.y - seg.A.y) + (rand() * 2 - 1) * tolerance * 0.7,
+      };
       // The previous index: every segment in every cell of its bounding box.
       const qx = [cell(point.x - tolerance), cell(point.x + tolerance)];
       const qy = [cell(point.y - tolerance), cell(point.y + tolerance)];
@@ -1199,7 +1213,13 @@ describe('getNearbySnapWallSegments', () => {
         }
       }
       const near = (list: readonly SnapWallSegmentTarget[]) => list.filter((s) => distSq(point, s) <= tolerance * tolerance + 1e-12);
-      expect(near(getNearbySnapWallSegments(cache, point, tolerance))).toEqual(near(expected));
+      const actual = getNearbySnapWallSegments(cache, point, tolerance);
+      // A point on the segment always queries a cell that holds it.
+      const onSegment = { x: seg.A.x + t * (seg.B.x - seg.A.x), y: seg.A.y + t * (seg.B.y - seg.A.y) };
+      expect(getNearbySnapWallSegments(cache, onSegment, 0)).toContain(seg);
+      expect(near(actual)).toEqual(near(expected));
+      // Every candidate the old index also gave keeps its old relative order.
+      expect(actual.filter((s) => expected.includes(s))).toEqual(expected.filter((s) => actual.includes(s)));
     }
   });
 
