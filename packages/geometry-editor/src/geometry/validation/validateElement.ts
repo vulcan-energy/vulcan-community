@@ -1134,6 +1134,11 @@ export const validateElementCore = (
   element: Element,
   context: ValidationContext,
 ): ValidationResult => {
+  // A type the target excludes (lighting on an existing building) shows no inputs and the run
+  // leaves it out, so it has nothing to check.
+  if (targetRules(context.schemaPort, context.complianceSettings ?? {}).excludedElementTypes[element.type]) {
+    return { hasIssues: false, issues: [], hasWarnings: false, warnings: [], hasMissingElements: false, missingElements: [] };
+  }
   // Optional debug instrumentation (off by default).
   // Enable in DevTools:
   //   window.__VULCAN_VALIDATE_DEBUG__ = { enabled: true, logEvery: 200 }

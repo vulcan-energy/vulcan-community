@@ -486,3 +486,11 @@ describe('window section width fractions', () => {
     expect(issues([1, undefined])).toHaveLength(1);
   });
 });
+
+describe('element types the target excludes', () => {
+  it('checks nothing on a type the target leaves out of the run', () => {
+    const lighting = { id: 'l', name: 'Lights', type: 'Lighting', coordinates: [] } as unknown as Element;
+    const schemaPort = { ...unavailableGeometrySchemaPort, targetRules: () => ({ excludedElementTypes: { Lighting: { reason: 'An existing building does not take this.' } } }) };
+    expect(validateElementCore(lighting, { schemaPort, complianceValidationEnabled: true } as never)).toMatchObject({ hasIssues: false, issues: [] });
+  });
+});
