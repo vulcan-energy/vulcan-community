@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element } from '../geometry/types';
-import type { DefaultsLookup } from './defaultsCache';
 import { GLOBAL_ELEMENT_TYPES_FOR_NAME_SCOPE } from './elementNameDuplicates';
-import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
+import { SUBTYPE_FIELDS } from './fieldDefault';
 
 /**
  * Where a field's value comes from. Every "is this entered, a default or from the drawing"
@@ -34,6 +33,12 @@ export type ProvenanceTable = Readonly<Record<string, Readonly<Record<string, Pr
 
 export const PROVENANCE_METADATA_KEY = 'Provenance';
 
+/**
+ * The value an element field takes when nobody entered it (`elementFieldSource`), or `null` when
+ * the defaults are not loaded and nothing can be told.
+ */
+export type FieldSourceOf = ((element: Element, field: string) => unknown) | null;
+
 const DEFAULT_TOLERANCE = 0.005;
 
 /**
@@ -56,11 +61,13 @@ export function provenanceOf(
     : 'source';
 }
 
-// Identity and the drawing's own dimensions: a drag changes them in the user's write, and their
-// authored overrides have markers of their own (overrideProvenance.ts).
+// Identity, the type discriminators that choose which defaults apply, and the drawing's own
+// dimensions: a drag changes them in the user's write, and their authored overrides have markers
+// of their own (overrideProvenance.ts).
 const UNRECORDED_FIELDS = new Set([
   'id', 'type', 'name', 'zoneId', 'parent_element', 'floorId', 'isPlaceholder',
   'width', 'height', 'area', 'pitch', 'orientation360', 'base_height',
+  ...SUBTYPE_FIELDS,
 ]);
 
 type Scalar = string | number | boolean;
@@ -75,19 +82,17 @@ function fieldValue(element: Element, field: string): unknown {
 
 /**
  * Whether the value alone cannot tell this entry, so it must be kept: a preset always; a user entry
- * only on a value equal to its default, which would otherwise read as the default. Without loaded
- * defaults nothing can be told, so every entry is kept.
+ * only on a value equal to its source (default or assembly), which would otherwise read as that
+ * source. Without loaded defaults nothing can be told, so every entry is kept.
  */
-function keepsEntry(source: ProvenanceSource, element: Element, field: string, defaults: DefaultsLookup | null): boolean {
+function keepsEntry(source: ProvenanceSource, element: Element, field: string, sourceOf: FieldSourceOf): boolean {
   const value = fieldValue(element, field);
   if (isBlank(value)) return false;
-  if (source !== 'user' || !defaults) return true;
-  const variant = element.type === 'BuildingElementOpaque'
-    ? classifyOpaqueFabricVariantFromElement(element as unknown as Record<string, unknown>)
-    : undefined;
-  const fallback = defaults.getDefaultValueForElementField(field, element.type, variant);
+  if (source !== 'user' || !sourceOf) return true;
+  const fallback = sourceOf(element, field);
+  if (isBlank(fallback)) return false;
   if (typeof value === 'number' && typeof fallback === 'number') return Math.abs(value - fallback) <= DEFAULT_TOLERANCE;
-  return value === fallback;
+  return String(value) === String(fallback);
 }
 
 function changedFields(before: Element, after: Element): string[] {
@@ -104,23 +109,24 @@ function changedFields(before: Element, after: Element): string[] {
 }
 
 /**
- * Records `source` for every scalar field an edit changed on an element that existed before it
- * (creating or removing an element records nothing). Returns `table` itself when nothing changed.
+ * Records `source` for every scalar field an edit changed on an element that existed before it.
+ * Creating an element records nothing, and committing a drawn placeholder is its creation; removing
+ * one records nothing. Returns `table` itself when nothing changed.
  */
 export function recordProvenance(
   table: ProvenanceTable,
   before: Readonly<Record<string, Element>>,
   after: Readonly<Record<string, Element>>,
   source: ProvenanceSource,
-  defaults: DefaultsLookup | null,
+  sourceOf: FieldSourceOf,
 ): ProvenanceTable {
   let next: Record<string, Record<string, ProvenanceSource>> | null = null;
   for (const id in after) {
     const previous = before[id];
     const element = after[id];
-    if (!previous || previous === element) continue;
+    if (!previous || previous === element || previous.isPlaceholder) continue;
     for (const field of changedFields(previous, element)) {
-      const keep = keepsEntry(source, element, field, defaults);
+      const keep = keepsEntry(source, element, field, sourceOf);
       const current = (next ?? table)[id]?.[field];
       if (keep ? current === source : current === undefined) continue;
       next ??= { ...table };
@@ -137,6 +143,16 @@ export function recordProvenance(
 const recordKey = (element: Element, zoneNameById: ReadonlyMap<string, string>): string =>
   `e:${GLOBAL_ELEMENT_TYPES_FOR_NAME_SCOPE.has(element.type) ? element.type : zoneNameById.get(element.zoneId ?? '') ?? ''}/${element.name}`;
 
+/** Each element's key; elements that share a name in one scope have none, as no key names one of them. */
+function uniqueRecordKeys(elements: readonly Element[], zoneNameById: ReadonlyMap<string, string>): Map<Element, string> {
+  const byKey = new Map<string, Element[]>();
+  for (const element of elements) {
+    const key = recordKey(element, zoneNameById);
+    byKey.set(key, [...(byKey.get(key) ?? []), element]);
+  }
+  return new Map([...byKey].flatMap(([key, named]) => (named.length === 1 ? [[named[0], key] as const] : [])));
+}
+
 /**
  * The `Provenance` Metadata row's value: JSON with sorted keys, `e:<zone or global type>/<name>`
  * then field, holding the entries the saved values cannot tell. `null` when there are none, so a
@@ -146,14 +162,14 @@ export function provenanceMetadataValue(
   table: ProvenanceTable,
   elements: readonly Element[],
   zoneNameById: ReadonlyMap<string, string>,
-  defaults: DefaultsLookup | null,
+  sourceOf: FieldSourceOf,
 ): string | null {
   const saved: Record<string, Record<string, ProvenanceSource>> = {};
-  for (const element of elements) {
+  for (const [element, key] of uniqueRecordKeys(elements, zoneNameById)) {
     const entries = table[element.id];
     if (!entries) continue;
     for (const field of Object.keys(entries).sort()) {
-      if (keepsEntry(entries[field], element, field, defaults)) (saved[recordKey(element, zoneNameById)] ??= {})[field] = entries[field];
+      if (keepsEntry(entries[field], element, field, sourceOf)) (saved[key] ??= {})[field] = entries[field];
     }
   }
   const keys = Object.keys(saved).sort();
@@ -177,7 +193,7 @@ export function parseProvenanceMetadataValue(raw: string): Record<string, Record
   return parsed as Record<string, Record<string, ProvenanceSource>>;
 }
 
-/** The table for loaded elements from a parsed row; entries naming no element are dropped. */
+/** The table for loaded elements from a parsed row; entries naming no element, or several, are dropped. */
 export function provenanceTableFromMetadata(
   saved: Readonly<Record<string, Readonly<Record<string, ProvenanceSource>>>> | undefined,
   elements: readonly Element[],
@@ -185,8 +201,8 @@ export function provenanceTableFromMetadata(
 ): ProvenanceTable {
   if (!saved) return {};
   const table: Record<string, Record<string, ProvenanceSource>> = {};
-  for (const element of elements) {
-    const entries = saved[recordKey(element, zoneNameById)];
+  for (const [element, key] of uniqueRecordKeys(elements, zoneNameById)) {
+    const entries = saved[key];
     if (entries) table[element.id] = { ...entries };
   }
   return table;

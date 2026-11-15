@@ -1088,7 +1088,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       state.provenance,
       exportElements,
       new Map(state.zones.map((zone) => [zone.id, zone.name])),
-      state.defaultsJson ? state.defaultsLookup : null,
+      rawState.fieldSourceOf(),
     );
     if (provenance) lines.push(`${PROVENANCE_METADATA_KEY},${escapeCSV(provenance)},,,,,,,,,,,,,`);
 

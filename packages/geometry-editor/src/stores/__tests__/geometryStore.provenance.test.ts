@@ -34,7 +34,8 @@ function model(): string {
   return builder.getState().generateCSV({ allowUnresolvedMigration: true });
 }
 
-const wallId = (store: Store) => store.getState().elementIds.find((id) => store.getState().elementsById[id]?.name === 'Front wall')!;
+const idOfName = (store: Store, name: string) => store.getState().elementIds.find((id) => store.getState().elementsById[id]?.name === name)!;
+const wallId = (store: Store) => idOfName(store, 'Front wall');
 const setU = (store: Store, u_value: number) => {
   const id = wallId(store);
   store.getState().updateElement(id, { extra_json: { ...store.getState().elementsById[id]!.extra_json, u_value } });
@@ -103,4 +104,38 @@ it('an unreadable row is reported and dropped', () => {
   const { warnings } = store.getState().loadFromCSV(csv);
   expect(warnings.join('\n')).toMatch(/Provenance row could not be read/);
   expect(store.getState().provenance).toEqual({});
+});
+
+it('drawing an element records nothing: committing a placeholder is its creation', () => {
+  const store = open(model());
+  const zoneId = store.getState().zones[0]!.id;
+  const id = store.getState().createPlaceholderElement(zoneId, 'MechanicalVentilationDuctwork');
+  const fill = { duct_type: 'supply', length: 10, internal_diameter_mm: 200 } as const;
+  for (const [field, value] of Object.entries(fill)) {
+    expect(store.getState().fieldSourceOf()!(store.getState().elementsById[id]!, field), field).toBe(value);
+  }
+  store.getState().updateElement(id, { ...fill, name: 'Supply duct', coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }] } as never);
+  expect(store.getState().provenance).toEqual({});
+  expect(store.getState().getDocumentCsv()).not.toContain('Provenance,');
+});
+
+it('an entry for one of two elements that share a name in a zone is neither saved nor loaded', () => {
+  const store = open(model());
+  const zoneId = store.getState().zones[0]!.id;
+  store.getState().addElements([{
+    type: 'BuildingElementOpaque', name: 'Side wall', zoneId, height: 2.4, width: 4, area: 9.6,
+    pitch: 90, base_height: 0, parent_element: null, extra_json: { u_value: 0.3 },
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 4, z: 0 }],
+  }] as never);
+  setU(store, defaultU(store));
+  const saved = store.getState().getDocumentCsv();
+  expect(saved).toContain('e:Living/Front wall');
+
+  // A file can name two elements alike (the editor itself refuses it).
+  const twins = open(saved.replaceAll('Side wall', 'Front wall'));
+  expect(twins.getState().provenance).toEqual({});
+  const first = twins.getState().elementIds.find((id) => twins.getState().elementsById[id]?.extra_json?.u_value === 0.3);
+  twins.getState().updateElement(first!, { extra_json: { ...twins.getState().elementsById[first!]!.extra_json, u_value: defaultU(twins) } });
+  expect(Object.keys(twins.getState().provenance)).toEqual([first]);
+  expect(twins.getState().getDocumentCsv()).not.toContain('Provenance,');
 });

@@ -234,6 +234,8 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       }
     }
     if (intent === 'user' || systemWriteDepth > 0) return write();
+    // A pending user capture takes the change into the user's step: nothing to compare or move.
+    if (captureTimer !== null) return asSystem(intent, write);
     const previous = get();
     // ponytail: one export before every call (a cache hit when the dirty check ran since the
     // last change); a no-op write pays it too. Track clean state by identity if it shows.
@@ -244,9 +246,9 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     if (after === null || after === before) return result;
     const state = get();
     const partial: Partial<HistorySlice> & { lastSavedCsv?: string } = {};
-    // A pending capture takes the change into the user's step; otherwise it joins the head step.
+    // No capture is pending (see above), so the change joins the head step.
     const head = state.history[state.historyIndex];
-    if (captureTimer === null && head) {
+    if (head) {
       const history = state.history.slice();
       history[state.historyIndex] = { ...head, csv: stripModelVersionRow(after), floors: state.floors };
       partial.history = history;
@@ -267,7 +269,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
         previous.elementsById,
         state.elementsById,
         recordSource,
-        state.defaultsJson ? state.defaultsLookup : null,
+        state.fieldSourceOf(),
       );
       if (provenance !== state.provenance) set({ provenance });
     }
