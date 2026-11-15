@@ -13,6 +13,7 @@ import { ROW_ONLY_ELEMENT_TYPES } from '../geometry/io/geometryCsvLayouts';
 import type { DefaultsLookup, OpaqueFabricVariant } from './defaultsCache';
 import { parseWindShieldLocation } from './groundUValueCalculator';
 import { readRecord } from './jsonTypes';
+import { normalizeMechanicalVentilationVentType } from './mechanicalVentilationBranches';
 import { classifyOpaqueFabricVariant, classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
 
 // Every control looks its default up on every render, and a miss walks the whole tree:
@@ -394,21 +395,24 @@ const SUBTYPE_FIELD: Partial<Record<Element['type'], string>> = {
   ContextShading: 'shading_type',
   HotWaterDemand: 'subcategory',
   MechanicalVentilation: 'vent_type',
-  MechanicalVentilationDuctwork: 'duct_type',
   System: 'subcategory',
   WetEmitter: 'subcategory',
   WindowShading: 'shading_type',
 };
 
-/** The subtype the element's editor passes to the defaults lookup. */
+/**
+ * The subtype the element's editor passes to the defaults lookup. A duct has none: its editor
+ * reads the first template duct that has the field, whatever its `duct_type`.
+ */
 export function elementSubtype(element: Element): string | undefined {
   const field = SUBTYPE_FIELD[element.type];
   const value = field ? (element as unknown as Record<string, unknown>)[field] : undefined;
+  if (element.type === 'MechanicalVentilation') return normalizeMechanicalVentilationVentType(value);
   return typeof value === 'string' && value ? value : undefined;
 }
 
-/** The element fields that pick a subtype (they choose which defaults apply, not a value). */
-export const SUBTYPE_FIELDS: ReadonlySet<string> = new Set(Object.values(SUBTYPE_FIELD));
+/** The element fields that pick a type or subtype (they choose which defaults apply, not a value). */
+export const SUBTYPE_FIELDS: ReadonlySet<string> = new Set([...Object.values(SUBTYPE_FIELD), 'duct_type']);
 
 /**
  * The value an element field takes when nobody entered it, as its editor shows it: the applied

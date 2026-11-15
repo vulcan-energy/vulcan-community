@@ -93,6 +93,12 @@ export interface HistorySlice {
    * (`writeIntent`) stay still.
    */
   asDocumentLoad: <T>(load: () => T) => T;
+  /**
+   * Runs a follower's writes inside the user edit that triggered them, as `derived`: they ride in
+   * that edit's step and record no source. No export, so it costs nothing per edit. Only for code
+   * that runs while the user's edit is being applied.
+   */
+  asEditFollowUp: <T>(write: () => T) => T;
 }
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], HistorySlice>;
@@ -234,8 +240,6 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       }
     }
     if (intent === 'user' || systemWriteDepth > 0) return write();
-    // A pending user capture takes the change into the user's step: nothing to compare or move.
-    if (captureTimer !== null) return asSystem(intent, write);
     const previous = get();
     // ponytail: one export before every call (a cache hit when the dirty check ran since the
     // last change); a no-op write pays it too. Track clean state by identity if it shows.
@@ -246,9 +250,11 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     if (after === null || after === before) return result;
     const state = get();
     const partial: Partial<HistorySlice> & { lastSavedCsv?: string } = {};
-    // No capture is pending (see above), so the change joins the head step.
+    // A pending capture of a user edit takes the change into that step. Otherwise it joins the head
+    // step, also when the pending capture follows a change that left the document as it was (a
+    // selection): that capture then finds nothing new.
     const head = state.history[state.historyIndex];
-    if (head) {
+    if (head && (captureTimer === null || (before !== null && stripModelVersionRow(before) === head.csv))) {
       const history = state.history.slice();
       history[state.historyIndex] = { ...head, csv: stripModelVersionRow(after), floors: state.floors };
       partial.history = history;
@@ -306,5 +312,6 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     writeAs,
     writeIntent: () => systemIntent,
     asDocumentLoad: (load) => asSystem('derived', load),
+    asEditFollowUp: (write) => asSystem('derived', write),
   };
 };

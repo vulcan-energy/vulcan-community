@@ -649,7 +649,7 @@ export function followGroundFabricOnEdit<
     updateElement: (id: string, patch: Partial<Element>) => void;
     getDefaultsLookup: () => Pick<DefaultsLookup, 'getDefaultValueForElementField'>;
     writeIntent: () => string;
-    writeAs: <T>(intent: 'derived', write: () => T) => T;
+    asEditFollowUp: <T>(write: () => T) => T;
   },
 >(
   store: { subscribe: (listener: (state: S, previous: S) => void) => () => void; getState: () => S },
@@ -665,8 +665,8 @@ export function followGroundFabricOnEdit<
     try {
       const { updateElement } = state;
       const before = previous.elementsById;
-      // A derived write: it rides in the user's step and records no source for the fields it fills.
-      state.writeAs('derived', () => {
+      // A derived follow-up: it rides in the user's step and records no source for the fields it fills.
+      state.asEditFollowUp(() => {
         // Defaults first: the wall U and the U-value of a new suspended floor read them.
         fillSuspendedFloorDefaults(state.elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
         syncSuspendedGroundFabricFromWalls(store.getState().elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
