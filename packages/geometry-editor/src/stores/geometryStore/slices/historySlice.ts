@@ -36,6 +36,13 @@ export type HistoryEntry = {
   label: string;
 };
 
+/**
+ * Who a store write is for. `user` and `preset` are the user's gesture: they mark the model dirty
+ * and become an undo step. `default` and `derived` are the editor's own fills and follow-ups: they
+ * neither dirty the model nor add a step (see `writeAs`).
+ */
+export type WriteIntent = 'user' | 'default' | 'preset' | 'derived';
+
 export interface HistorySlice {
   history: HistoryEntry[];
   historyIndex: number;
@@ -60,6 +67,13 @@ export interface HistorySlice {
   seedHistory: (label: string, csv?: string) => void;
   undo: () => void;
   redo: () => void;
+  /**
+   * Runs `write` as a write of `intent`. Store actions are user writes unless run here. A `default`
+   * or `derived` write, unless nested in a user write, is folded into the current undo step, and a
+   * model that equalled its saved baseline stays clean: the baseline moves with it. Writes that
+   * `write` schedules for later are not covered.
+   */
+  writeAs: <T>(intent: WriteIntent, write: () => T) => T;
 }
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], HistorySlice>;
@@ -78,6 +92,8 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   // Keyed by state identity: any store change misses, history bookkeeping keeps it.
   let documentCsvCache: { state: GeometryState; csv: string } | null = null;
   let captureTimer: ReturnType<typeof setTimeout> | null = null;
+  // Depth of the editor's own writes in progress; the change subscriber starts no capture during them.
+  let systemWriteDepth = 0;
 
   const getDocumentCsv = (): string => {
     const state = get();
@@ -161,9 +177,52 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     logGeometryHistory(index < 0 ? 'undo:applied' : 'redo:applied', { toIndex: target });
   };
 
-  // Every document change (re)starts the capture window.
+  const tryDocumentCsv = (): string | null => {
+    try {
+      return getDocumentCsv();
+    } catch {
+      return null;
+    }
+  };
+
+  const writeAs = <T>(intent: WriteIntent, write: () => T): T => {
+    if (intent === 'user' || intent === 'preset' || systemWriteDepth > 0) return write();
+    // A pending user edit is its own step; capturing it also caches the text compared below.
+    if (captureTimer !== null) capture('auto');
+    const before = tryDocumentCsv();
+    const wasClean = before !== null && before === get().lastSavedCsv;
+    systemWriteDepth += 1;
+    let result: T;
+    try {
+      result = write();
+    } finally {
+      systemWriteDepth -= 1;
+    }
+    const after = tryDocumentCsv();
+    if (after === null || after === before) return result;
+    const state = get();
+    const head = state.history[state.historyIndex];
+    const partial: Partial<HistorySlice> & { lastSavedCsv?: string } = {};
+    if (head) {
+      const history = state.history.slice();
+      history[state.historyIndex] = { ...head, csv: stripModelVersionRow(after), floors: state.floors };
+      partial.history = history;
+    }
+    if (wasClean) partial.lastSavedCsv = after;
+    systemWriteDepth += 1;
+    try {
+      set(partial);
+    } finally {
+      systemWriteDepth -= 1;
+    }
+    documentCsvCache = { state: get(), csv: after };
+    logGeometryHistory('write:absorbed', { intent, wasClean });
+    return result;
+  };
+
+  // Every user change (re)starts the capture window.
   api.subscribe((state, previous) => {
-    if (isHistoryOnlyChange(state, previous)) return;
+    if (systemWriteDepth > 0 || isHistoryOnlyChange(state, previous)) return;
     if (captureTimer !== null) clearTimeout(captureTimer);
     captureTimer = setTimeout(() => {
       captureTimer = null;
@@ -193,5 +252,6 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     },
     undo: () => goTo(-1),
     redo: () => goTo(1),
+    writeAs,
   };
 };

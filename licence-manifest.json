@@ -4778,6 +4778,14 @@
       "classification": "public_candidate_defaults_compatibility"
     },
     {
+      "path": "packages/geometry-editor/src/lib/deriveForExport.ts",
+      "source_path": "packages/geometry-editor/src/lib/deriveForExport.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/developmentContext.ts",
       "source_path": "packages/geometry-editor/src/lib/developmentContext.ts",
       "license": "AGPL-3.0-only",
@@ -5372,6 +5380,14 @@
     {
       "path": "packages/geometry-editor/src/lib/profileLineFace.ts",
       "source_path": "packages/geometry-editor/src/lib/profileLineFace.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/provenance.ts",
+      "source_path": "packages/geometry-editor/src/lib/provenance.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

@@ -54,6 +54,7 @@ import {
   fillSuspendedFloorDefaults,
   missingSuspendedShieldLocations,
 } from '../../../lib/groundSuspendedFabricSync';
+import { deriveForExport } from '../../../lib/deriveForExport';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -917,7 +918,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const state: GeometryState = {
       ...rawState,
       elementsById: projectOverrideMarkersForExport(
-        rawState.elementsById,
+        deriveForExport(rawState.elementsById, targetRules(options.schemaPort, rawState.complianceSettings)),
         OVERRIDE_PROVENANCE_REGISTRY.element,
       ),
       spaceLabelsById: projectOverrideMarkersForExport(
@@ -1898,7 +1899,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
                 if (defaultsLoadVersion !== loadedCsvWorkScheduler.defaultsVersion) return;
                 try {
                   const parsed = JSON.parse(content);
-                  set({ defaultsJson: parsed, defaultsLoading: false });
+                  // The Metadata rows these defaults fill are the editor's write: the load stays clean.
+                  get().writeAs('default', () => set({ defaultsJson: parsed, defaultsLoading: false }));
                 } catch (error) {
                   console.warn('[DefaultsCache] Failed to parse CSV defaults JSON:', error);
                   set({ defaultsLoading: false });
@@ -2489,11 +2491,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const shieldLocations = missingSuspendedShieldLocations(state.elementsById, acceptsSuspendedShieldLocation(options.schemaPort));
     const hasShieldLocations = Object.keys(shieldLocations).length > 0;
     if (!fill && settings === state.complianceSettings && !hasShieldLocations) return;
-    set({
+    get().writeAs('default', () => set({
       ...(hasShieldLocations ? { elementsById: { ...state.elementsById, ...shieldLocations } } : {}),
       complianceSettings: fill ? { ...settings, ...fill.patch } : settings,
       ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
-    });
+    }));
   }
   const unsubscribeSchema = options.schemaPort.subscribe?.(followTarget);
 

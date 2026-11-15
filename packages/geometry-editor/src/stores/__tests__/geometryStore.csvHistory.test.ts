@@ -314,4 +314,51 @@ describe('CSV document history', () => {
     expect(hostOf()).toBe(wallId);
     expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
   });
+
+  describe('writeAs', () => {
+    const coldWater = (store: Store, value: string) => store.getState().setComplianceSettings({ ColdWaterSource: value });
+
+    it('a default or derived write on a clean model keeps it clean and adds no step', () => {
+      for (const intent of ['default', 'derived'] as const) {
+        const store = loadedStore();
+        store.getState().writeAs(intent, () => coldWater(store, 'header tank'));
+        settle();
+        const state = store.getState();
+        expect(state.getDocumentCsv(), intent).toBe(state.lastSavedCsv);
+        expect(state.history, intent).toHaveLength(1);
+        expect(state.history[0]!.csv, intent).toContain('header tank');
+      }
+    });
+
+    it('a user or preset write marks the model dirty and is an undo step', () => {
+      for (const intent of ['user', 'preset'] as const) {
+        const store = loadedStore();
+        store.getState().writeAs(intent, () => coldWater(store, 'header tank'));
+        settle();
+        expect(store.getState().getDocumentCsv(), intent).not.toBe(store.getState().lastSavedCsv);
+        expect(store.getState().history, intent).toHaveLength(2);
+      }
+    });
+
+    it('folds into the step of a pending edit, which stays its own step and keeps the model dirty', () => {
+      const store = loadedStore();
+      const saved = store.getState().lastSavedCsv;
+      store.getState().updateElement(idOf(store, 'Living wall'), { name: 'Front wall' });
+      store.getState().writeAs('derived', () => coldWater(store, 'header tank'));
+      settle();
+      expect(store.getState().lastSavedCsv).toBe(saved);
+      expect(store.getState().history).toHaveLength(2);
+      expect(store.getState().history[1]!.csv).toContain('header tank');
+      store.getState().undo();
+      expect(store.getState().getDocumentCsv()).toBe(saved);
+    });
+
+    it('a write nested in a system write is part of it', () => {
+      const store = loadedStore();
+      store.getState().writeAs('derived', () => store.getState().writeAs('user', () => coldWater(store, 'header tank')));
+      settle();
+      expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
+      expect(store.getState().history).toHaveLength(1);
+    });
+  });
 });

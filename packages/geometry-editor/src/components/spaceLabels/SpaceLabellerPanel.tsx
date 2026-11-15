@@ -65,6 +65,7 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
   const elementsById = useGeometryStore((s) => s.elementsById);
   const floors = useGeometryStore((s) => s.floors);
   const syncInferredSpaceLabelsForZone = useGeometryStore((s) => s.syncInferredSpaceLabelsForZone);
+  const writeAs = useGeometryStore((s) => s.writeAs);
 
   const wallFingerprint = useMemo(() => {
     const els = elementIds.map((id) => elementsById[id]).filter(Boolean);
@@ -73,19 +74,21 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
 
   const [footprintNotice, setFootprintNotice] = useState<string | null>(null);
 
+  // Spaces inferred from the walls are the editor's write: opening the labeller or moving a wall
+  // neither dirties the model nor adds an undo step of its own.
   useLayoutEffect(() => {
-    const r = syncInferredSpaceLabelsForZone(zoneId);
+    const r = writeAs('derived', () => syncInferredSpaceLabelsForZone(zoneId));
     if (r.changed && r.previousCount === 0 && r.footprintCount > 0) {
       // The layout effect synchronizes the external geometry store before paint; this notice
       // records the result of that one-time zone transition for the user.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFootprintNotice('Spaces inferred from walls — assign room types where needed.');
     }
-  }, [zoneId, syncInferredSpaceLabelsForZone]);
+  }, [zoneId, syncInferredSpaceLabelsForZone, writeAs]);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      const r = syncInferredSpaceLabelsForZone(zoneId);
+      const r = writeAs('derived', () => syncInferredSpaceLabelsForZone(zoneId));
       if (r.changed) {
         setFootprintNotice(
           r.roomTypesCleared > 0
@@ -95,7 +98,7 @@ export const SpaceLabellerPanel: React.FC<SpaceLabellerPanelProps> = ({
       }
     }, 420);
     return () => clearTimeout(t);
-  }, [wallFingerprint, zoneId, syncInferredSpaceLabelsForZone]);
+  }, [wallFingerprint, zoneId, syncInferredSpaceLabelsForZone, writeAs]);
 
   useEffect(() => {
     if (!footprintNotice) return undefined;
