@@ -646,6 +646,20 @@
       "modifications": "Generated Cargo.toml disables the default network and filesystem resolver features; VULCAN_PROVENANCE.md records the remaining non-functional differences."
     },
     {
+      "path": "third_party/energyplus-patches/**",
+      "source_path": "third_party/energyplus-patches/**",
+      "license": "LicenseRef-EnergyPlus",
+      "rights_status": "approved",
+      "classification": "first_party_patch_to_third_party_dependency",
+      "component": "EnergyPlus",
+      "version": "26.1.0",
+      "source": "https://github.com/NREL/EnergyPlus",
+      "source_revision": "6f2e40d10250a105b49966baa24d843711e61048",
+      "provenance": "third_party/energyplus-patches/README.md",
+      "license_notice": "third_party/energyplus-patches/LICENSE",
+      "modifications": "0006-afn-zero-leakage.patch lets AirflowNetwork leakage coefficients be 0 and fixes the pressure level of sealed zone groups; distributed under the EnergyPlus licence."
+    },
+    {
       "path": "docs/**",
       "license": "CC-BY-4.0",
       "rights_status": "approved"

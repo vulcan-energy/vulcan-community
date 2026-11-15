@@ -1,0 +1,135 @@
+diff --git a/idd/Energy+.idd.in b/idd/Energy+.idd.in
+index 8f9912a..ac6cd7d 100644
+--- a/idd/Energy+.idd.in
++++ b/idd/Energy+.idd.in
+@@ -25658,7 +25658,7 @@ AirflowNetwork:MultiZone:Surface:Crack,
+       \type real
+       \required-field
+       \units kg/s
+-      \minimum> 0
++      \minimum 0
+       \note Enter the air mass flow coefficient at the conditions defined
+       \note in the Reference Crack Conditions object.
+       \note Defined at 1 Pa pressure difference across this crack.
+@@ -25744,7 +25744,7 @@ AirflowNetwork:MultiZone:Component:DetailedOpening,
+       \required-field
+       \type real
+       \units kg/s-m
+-      \minimum> 0
++      \minimum 0
+       \note Defined at 1 Pa per meter of crack length. Enter the coefficient used in the following
+       \note equation:
+       \note Mass Flow Rate = Air Mass Flow Coefficient * (dP)^Air Mass Flow Exponent.
+@@ -26043,7 +26043,7 @@ AirflowNetwork:MultiZone:Component:ZoneExhaustFan,
+       \required-field
+       \type real
+       \units kg/s
+-      \minimum> 0
++      \minimum 0
+       \note Enter the air mass flow coefficient at the conditions defined
+       \note in the Reference Crack Conditions object.
+       \note Defined at 1 Pa pressure difference. Enter the coefficient used in the following
+diff --git a/src/EnergyPlus/AirflowNetwork/src/Solver.cpp b/src/EnergyPlus/AirflowNetwork/src/Solver.cpp
+index fb0f600..01be3d5 100644
+--- a/src/EnergyPlus/AirflowNetwork/src/Solver.cpp
++++ b/src/EnergyPlus/AirflowNetwork/src/Solver.cpp
+@@ -52,6 +52,7 @@
+ #include <cmath>
+ #include <set>
+ #include <string>
++#include <vector>
+ 
+ // ObjexxFCL Headers
+ #include <ObjexxFCL/Array.functions.hh>
+@@ -14256,6 +14257,19 @@ namespace AirflowNetwork {
+         for (n = 1; n <= NNZE; ++n) {
+             AU(n) = 0.0;
+         }
++        // Vulcan patch 0006: groups of nodes joined by links with a nonzero flow derivative, and each link's net flow.
++        std::vector<int> datumGroup(NetworkNumOfNodes + 1);
++        for (n = 0; n <= NetworkNumOfNodes; ++n) {
++            datumGroup[n] = n;
++        }
++        auto findGroup = [&datumGroup](int k) {
++            while (datumGroup[k] != k) {
++                datumGroup[k] = datumGroup[datumGroup[k]];
++                k = datumGroup[k];
++            }
++            return k;
++        };
++        std::vector<Real64> datumLinkFlow(NetworkNumOfLinks + 1, 0.0);
+         // Loop(s) to calculate control, etc.
+         // Set up the Jacobian matrix.
+         for (i = 1; i <= NetworkNumOfLinks; ++i) {
+@@ -14277,6 +14291,10 @@ namespace AirflowNetwork {
+             j = AirflowNetworkLinkageData(i).CompNum;
+ 
+             NF = AirflowNetworkLinkageData(i).element->calculate(m_state, LFLAG, DP, i, multiplier, control, node_states[n], node_states[m], F, DF);
++            if (DF[0] != 0.0 || (NF == 2 && DF[1] != 0.0)) {
++                datumGroup[findGroup(n)] = findGroup(m);
++            }
++            datumLinkFlow[i] = F[0] + (NF == 2 ? F[1] : 0.0);
+             if (AirflowNetworkLinkageData(i).element->type() == ComponentType::CPD && DP != 0.0) {
+                 DP = DisSysCompCPDData(AirflowNetworkCompData(j).TypeNum).DP;
+             }
+@@ -14333,6 +14351,60 @@ namespace AirflowNetwork {
+             }
+         }
+ 
++        // Vulcan patch 0006: zero-leakage envelopes.
++        // A group of unknown-pressure nodes with no conducting link to a known-pressure (external) node has a
++        // singular Jacobian: its flows fix pressure differences but not the level. Every link leaving such a group
++        // has a zero flow derivative, so its flow does not depend on the group's pressures. When those flows sum to
++        // zero, the group's residuals sum to zero, and adding any positive value to one diagonal entry fixes that
++        // node's correction to zero while every flow stays exact. When they do not sum to zero (a fan or specified
++        // flow drives net air into a sealed group), no solution exists and the run stops. Groups that reach a
++        // known-pressure node are left unchanged, so models without sealed groups give unchanged results.
++        {
++            std::vector<char> groupReachesKnownPressure(NetworkNumOfNodes + 1, 0);
++            for (n = 1; n <= NetworkNumOfNodes; ++n) {
++                if (AirflowNetworkNodeData(n).NodeTypeNum == 1) {
++                    groupReachesKnownPressure[findGroup(n)] = 1;
++                }
++            }
++            std::vector<int> groupDatumNode(NetworkNumOfNodes + 1, 0);
++            bool anySealedGroup = false;
++            for (n = 1; n <= NetworkNumOfNodes; ++n) {
++                int const group = findGroup(n);
++                if (AirflowNetworkNodeData(n).NodeTypeNum == 0 && !groupReachesKnownPressure[group] && groupDatumNode[group] == 0) {
++                    groupDatumNode[group] = n;
++                    AD(n) += 1.0;
++                    anySealedGroup = true;
++                }
++            }
++            if (anySealedGroup) {
++                std::vector<Real64> groupNetInflow(NetworkNumOfNodes + 1, 0.0);
++                for (i = 1; i <= NetworkNumOfLinks; ++i) {
++                    if (AirflowNetworkLinkageData(i).element == nullptr) {
++                        continue;
++                    }
++                    int const groupFrom = findGroup(AirflowNetworkLinkageData(i).NodeNums[0]);
++                    int const groupTo = findGroup(AirflowNetworkLinkageData(i).NodeNums[1]);
++                    if (groupFrom != groupTo) {
++                        groupNetInflow[groupFrom] -= datumLinkFlow[i];
++                        groupNetInflow[groupTo] += datumLinkFlow[i];
++                    }
++                }
++                for (n = 1; n <= NetworkNumOfNodes; ++n) {
++                    int const datumNode = groupDatumNode[n];
++                    if (datumNode != 0 && std::abs(groupNetInflow[n]) > simulation_control.absolute_convergence_tolerance) {
++                        ShowSevereError(m_state, "AirflowNetwork: a group of zones has no airflow path to outdoors, and its fans and specified flows do not balance.");
++                        ShowContinueError(m_state,
++                                          EnergyPlus::format("The group includes node {}; its net fixed inflow is {:.6R} kg/s, and no pressure can balance it.",
++                                                             AirflowNetworkNodeData(datumNode).Name,
++                                                             groupNetInflow[n]));
++                        ShowContinueError(m_state, "Add an opening or leakage path to outdoors, or balance the fans and specified flows in the group.");
++                        ShowContinueErrorTimeStamp(m_state, "");
++                        ShowFatalError(m_state, "Preceding condition causes termination.");
++                    }
++                }
++            }
++        }
++
+ #ifdef SKYLINE_MATRIX_REMOVE_ZERO_COLUMNS
+ 
+         // After the matrix values have been set, we can look at them and see if any columns are filled with zeros.
