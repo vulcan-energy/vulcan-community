@@ -73,6 +73,17 @@ describe('targetValidationIssues', () => {
 });
 
 describe('displayBuildErrorRows', () => {
+  it('words an unstated input mid-sentence, keeps proper names, and asks yes/no rows as a choice', () => {
+    const message = (row: string) => displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_REQUIRED_INPUT', path: `/Metadata/${row}`, message: `${row} is not stated.` }],
+      (path) => resolveIssueTarget(path, model),
+    )[0]?.userMessage;
+    expect(message('NumberOfBedrooms')).toBe('Enter number of bedrooms.');
+    expect(message('PartGcompliance')).toBe('Enter Part G compliance.');
+    expect(message('IsExistingBuilding')).toBe('Choose yes or no for existing building.');
+    expect(message('HasElectricitySmartMeter')).toBe('Choose yes or no for electricity smart meter.');
+  });
+
   it('asks for a light on a zone that has none', () => {
     const [row] = displayBuildErrorRows(
       [{ source: 'schema', code: 'E026', keyword: 'type', path: '/Zone/Zone 1/Lighting', message: 'null is not of type "object"' }],

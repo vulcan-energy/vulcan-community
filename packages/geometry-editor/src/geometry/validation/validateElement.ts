@@ -1251,6 +1251,22 @@ function isOnHostWall(opening: Element['coordinates'] | undefined, wall: Element
     return across <= HOST_WALL_TOLERANCE_M && along >= -HOST_WALL_TOLERANCE_M && along <= length + HOST_WALL_TOLERANCE_M;
   });
 }
+/**
+ * Schema fields the converter always builds from other inputs, on every target and pathway, so no
+ * panel asks for them: window and PV `shading` (drawn shading, or an existing building's close-shading
+ * categories; none is an empty list), a window's `window_part_list` (its opening inputs or sections),
+ * a light's `bulbs` (its count, power and efficacy), the hot water outlet sections (one row per outlet)
+ * and the adjacent-space flag.
+ */
+const CONVERTER_BUILT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  BuildingElementTransparent: ['shading', 'window_part_list'],
+  OnSiteGeneration: ['shading'],
+  Lighting: ['bulbs'],
+  HotWaterDemand: ['Shower', 'Bath', 'Other', 'Distribution'],
+};
+const converterBuilds = (type: string, field: string): boolean =>
+  field === 'is_adjacent_space_within_dwelling' || !!CONVERTER_BUILT_FIELDS[type]?.includes(field);
+
 /** An existing-building model: the EPC conversion reads categories and defaults where a new build reads drawn detail. */
 const isExistingBuildingContext = (context: ValidationContext): boolean =>
   (context.complianceSettings as { IsExistingBuilding?: boolean } | undefined)?.IsExistingBuilding === true;
@@ -2289,7 +2305,9 @@ export const validateElementCore = (
 
     case 'OnSiteGeneration': {
       const onSiteElement = element as OnSiteGeneration;
-      if (!onSiteElement.peak_power || onSiteElement.peak_power < 0.001 || onSiteElement.peak_power > 100) {
+      // Unstated, an existing building's converter works out the peak power from the array.
+      const peakPowerLeftToTarget = !Number.isFinite(onSiteElement.peak_power) && leftToTarget('OnSiteGeneration', 'peak_power');
+      if (!peakPowerLeftToTarget && (!onSiteElement.peak_power || onSiteElement.peak_power < 0.001 || onSiteElement.peak_power > 100)) {
         issues.push(geo('Peak Power must be between 0.001 and 100 kWp', 'peak_power'));
       }
       if (onSiteElement.pitch === undefined || onSiteElement.pitch < 0 || onSiteElement.pitch > 90) {
@@ -2575,10 +2593,9 @@ export const validateElementCore = (
       }
 
       for (const field of allRequiredFields) {
-        // a8/a9: the converter always sets this value, and no form offers it.
-        if (field === 'is_adjacent_space_within_dwelling') continue;
-        // The target hides it or leaves it optional: the converter or another form supplies it.
-        if (hiddenFields.has(field)) continue;
+        // The converter builds it from other inputs, or the target hides it or leaves it optional:
+        // no panel asks for it, so it is never "Enter the …".
+        if (converterBuilds(element.type, field) || hiddenFields.has(field)) continue;
         // Check if field exists in element directly or in extra_json
         // Also check for null/undefined values (they count as missing)
         // NOTE: OnSiteGeneration has a naming collision:

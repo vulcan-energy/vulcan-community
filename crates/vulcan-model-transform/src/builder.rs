@@ -5124,8 +5124,8 @@ impl JSONBuilder {
                             code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                             path: pointer,
                             message: format!(
-                                "{name}: primary_pipework on preset-marked Systems row '{row}' is ignored; the drawn Water Pipework rows are used{}.",
-                                if drawn.is_empty() { " (none are drawn)" } else { "" }
+                                "'{row}' takes its primary pipework from the drawn Water Pipework, not from its preset{}.",
+                                if drawn.is_empty() { ", and none is drawn" } else { "" }
                             ),
                         });
                 }

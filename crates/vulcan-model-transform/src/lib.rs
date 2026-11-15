@@ -704,6 +704,9 @@ pub fn transform_geometry_csv(
     let finalized =
         finalization::finalize_model(&model, &schema).map_err(TransformError::Schema)?;
     schema_omissions.extend(finalized.omissions);
+    for notice in &mut schema_omissions {
+        notice.message = without_float_noise(&notice.message);
+    }
     let model = finalized.model;
     let mut errors = builder.take_non_fatal_errors();
     let validation_model = clone_for_hem_validation(&model);
@@ -756,6 +759,36 @@ pub fn transform_geometry_csv(
         derived_defaults: builder.take_derived_defaults(),
         weather_curves: builder.weather_curves(),
     })
+}
+
+/// A note's numbers as a person reads them: a sum of drawn areas prints as 226.51, not
+/// 226.51000000000005. Only a number with more than six decimals changes (to six, without
+/// trailing zeros); no note states one on purpose.
+fn without_float_noise(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(|c: char| c.is_ascii_digit()) {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let int = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        let frac = rest[int..]
+            .strip_prefix('.')
+            .map(|f| f.find(|c: char| !c.is_ascii_digit()).unwrap_or(f.len()))
+            .unwrap_or(0);
+        let token = &rest[..int + if frac > 0 { frac + 1 } else { 0 }];
+        match token.parse::<f64>() {
+            Ok(value) if frac > 6 => {
+                let fixed = format!("{value:.6}");
+                out.push_str(fixed.trim_end_matches('0').trim_end_matches('.'));
+            }
+            _ => out.push_str(token),
+        }
+        rest = &rest[token.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Source-verified wrapper readiness beyond a release's JSON schema. Diagnose
@@ -832,6 +865,18 @@ fn is_unused_full_input(model: &Value, profile: ModelProfile, path: &str) -> boo
 mod unused_full_input_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_note_prints_numbers_without_float_noise() {
+        assert_eq!(
+            without_float_noise(
+                "The envelope area 215.65000000000003 m², at 0.30000000000000004 and 2.0000001."
+            ),
+            "The envelope area 215.65 m², at 0.3 and 2."
+        );
+        let kept = "Version 2.0.0a4, 1.234567 m, 40.0°, 'Window 1 1', 10 m².";
+        assert_eq!(without_float_noise(kept), kept);
+    }
 
     #[test]
     fn only_an_unconverted_existing_building_hides_zone_and_ventilation_errors() {

@@ -43,6 +43,7 @@ import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-e
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import type { Element, SystemSubcategory } from '../../geometry/types';
 import { AdvancedFieldsEditor, applyEcodesignControlClassEnum } from '../AdvancedFieldsEditor';
+import { newBuildPickerOwnsProductId } from '../systemEditorUtils';
 import { systemFieldDefaults } from '../../lib/systemSchemaFlatten';
 import {
   DirectAdvancedFields,
@@ -3431,6 +3432,15 @@ describe('System Advanced Fields: per-property validation descends the subtype w
 });
 
 describe('EPC system pickers and defaults', () => {
+  it('hides the raw product id on a new build only where a picker has candidates', () => {
+    const withPicker = [{ row: 'Boiler', candidates: [{ id: 1 }] }];
+    const noRule = [{ candidates: null }];
+    expect(newBuildPickerOwnsProductId(false, withPicker, 'Boiler')).toBe(true);
+    expect(newBuildPickerOwnsProductId(false, noRule, 'Boiler')).toBe(false);
+    expect(newBuildPickerOwnsProductId(false, [{ row: 'Boiler', candidates: [] }], 'Boiler')).toBe(false);
+    expect(newBuildPickerOwnsProductId(true, withPicker, 'Boiler')).toBe(false);
+  });
+
   it('offers the target curves and the model supplies, and drops fields nothing reads', () => {
     const schema = { properties: { ecodesign_controller: { properties: { weather_compensation_curve_id: { type: 'integer' } } },
       EnergySupply: { anyOf: [{ type: 'string' }, { type: 'null' }] }, EnergySupply_heat_network: { type: 'object' } } };

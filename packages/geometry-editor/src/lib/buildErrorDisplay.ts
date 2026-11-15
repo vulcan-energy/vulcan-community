@@ -5,7 +5,7 @@ import type { ValidationIssue, ValidationResult } from '../geometry/validation/t
 import type { BuildErrorItem, TargetValidation } from '../types/buildErrors';
 import { issuePathSegments, resolveIssueTarget, type IssueTarget } from './issueTarget';
 import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
-import { globalSettingsFieldSection, METADATA_INPUT_LABELS, type GlobalSettingsFieldSection } from './globalSettingsValidation';
+import { globalSettingsFieldSection, METADATA_INPUT_LABELS, type GlobalSettingsFieldSection, TARGET_INPUT_ROW_SET } from './globalSettingsValidation';
 
 const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = {
   defaults: 'Global Settings > Defaults',
@@ -148,7 +148,8 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
     const label = /^[A-Z][a-z]/.test(unstatedInput) && !/^Part\b/.test(unstatedInput)
       ? unstatedInput[0].toLowerCase() + unstatedInput.slice(1)
       : unstatedInput;
-    userMessage = `Enter ${label}.`;
+    // A yes/no row reads as a choice, not an entry.
+    userMessage = TARGET_INPUT_ROW_SET.has(pathSegments[1]) ? `Choose yes or no for ${label}.` : `Enter ${label}.`;
   } else if (
     location === 'Appliances' &&
     (item.message.includes('is not allowed for {}') || item.message.includes('has less than'))
