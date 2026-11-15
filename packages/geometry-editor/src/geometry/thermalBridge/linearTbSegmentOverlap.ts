@@ -124,6 +124,50 @@ export function overlapLengthParallelSegments3D(
   return overlapStretchParallelSegments3D(a0, a1, b0, b1, lineSepTolM, minOverlapM)?.length ?? 0;
 }
 
+/**
+ * Index pairs `[i, j]` (i < j, in nested-loop order) of segments that may overlap: their bounding
+ * boxes, grown by the line tolerance, meet. An overlap needs every point of the shared stretch on
+ * both segments within that tolerance, so every pair {@link overlapStretchBetweenSegmentElements}
+ * finds is listed, and checking only these pairs gives the all-pairs result in the same order.
+ * A segment with a non-finite coordinate is paired with every other, as the all-pairs check sees it.
+ */
+export function segmentOverlapCandidatePairs(
+  elements: readonly Pick<Element, 'coordinates'>[],
+  lineSepTolM: number = TB_SEGMENT_OVERLAP_LINE_SEP_TOL_M,
+): Array<[number, number]> {
+  const n = elements.length;
+  const boxes: Array<{ i: number; x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }> = [];
+  const anywhere: number[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const ends = finiteSegmentEndpointsFromCoordinates(elements[i]!.coordinates);
+    if (!ends) continue;
+    const [a, b] = ends;
+    if (![a.x, a.y, a.z, b.x, b.y, b.z].every(Number.isFinite)) { anywhere.push(i); continue; }
+    boxes.push({
+      i,
+      x0: Math.min(a.x, b.x) - lineSepTolM, x1: Math.max(a.x, b.x) + lineSepTolM,
+      y0: Math.min(a.y, b.y) - lineSepTolM, y1: Math.max(a.y, b.y) + lineSepTolM,
+      z0: Math.min(a.z, b.z) - lineSepTolM, z1: Math.max(a.z, b.z) + lineSepTolM,
+    });
+  }
+  const keys: number[] = [];
+  const add = (i: number, j: number) => keys.push(i < j ? i * n + j : j * n + i);
+  // Sweep along x: each box meets only the boxes that start before it ends.
+  boxes.sort((p, q) => p.x0 - q.x0);
+  for (let k = 0; k < boxes.length; k += 1) {
+    const p = boxes[k]!;
+    for (let m = k + 1; m < boxes.length && boxes[m]!.x0 <= p.x1; m += 1) {
+      const q = boxes[m]!;
+      if (q.y0 <= p.y1 && p.y0 <= q.y1 && q.z0 <= p.z1 && p.z0 <= q.z1) add(p.i, q.i);
+    }
+  }
+  for (const [k, i] of anywhere.entries()) {
+    for (const box of boxes) add(i, box.i);
+    for (const j of anywhere.slice(k + 1)) add(i, j);
+  }
+  return keys.sort((p, q) => p - q).map((key) => [Math.floor(key / n), key % n]);
+}
+
 /** Same overlap rule for any two coordinate-based line elements (TB, ductwork, pipework). */
 export function overlapStretchBetweenSegmentElements(
   a: Pick<Element, 'coordinates'>,

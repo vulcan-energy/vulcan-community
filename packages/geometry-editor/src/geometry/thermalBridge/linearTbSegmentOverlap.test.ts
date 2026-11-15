@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import {
   overlapLengthParallelSegments3D,
   overlapLengthBetweenThermalBridgeSegments,
+  overlapStretchBetweenSegmentElements,
+  segmentOverlapCandidatePairs,
 } from './linearTbSegmentOverlap';
 import {
   TB_SEGMENT_OVERLAP_LINE_SEP_TOL_M,
@@ -175,5 +177,37 @@ describe('overlapLengthBetweenThermalBridgeSegments', () => {
     const a = tb('a', 0, 0, 0, 4, 0, 0, 'E5');
     const b = tb('b', 2, 0, 0, 5, 0, 0, 'P7');
     expect(overlapLengthBetweenThermalBridgeSegments(a, b)).toBeGreaterThan(0.05);
+  });
+});
+
+describe('segmentOverlapCandidatePairs', () => {
+  it('lists every overlapping pair of the all-pairs check, in its order', () => {
+    let seed = 11;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    // Runs on a few shared lines (so many pairs overlap), near-misses just off them, and strays.
+    const segments = Array.from({ length: 400 }, (_, k) => {
+      const line = k % 7;
+      const off = k % 5 === 0 ? (rand() - 0.5) * 2 * TB_SEGMENT_OVERLAP_LINE_SEP_TOL_M * 1.5 : 0;
+      const t0 = rand() * 20;
+      const t1 = t0 + (rand() - 0.3) * 6;
+      const along = (t: number) => (line < 4
+        ? { x: t, y: line * 3 + off, z: line % 2 }
+        : { x: line * 3 + off, y: t, z: rand() < 0.1 ? t / 10 : 1 });
+      if (k % 23 === 0) return { coordinates: [{ x: rand() * 20, y: rand() * 20, z: rand() * 3 }, { x: rand() * 20, y: rand() * 20, z: rand() * 3 }] };
+      if (k === 50) return { coordinates: [{ x: Number.NaN, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }] };
+      if (k === 60) return { coordinates: [{ x: 0, y: 0, z: 0 }] };
+      return { coordinates: [along(t0), along(t1)] };
+    });
+    const allPairs: Array<[number, number]> = [];
+    for (let i = 0; i < segments.length; i += 1) {
+      for (let j = i + 1; j < segments.length; j += 1) {
+        if (overlapStretchBetweenSegmentElements(segments[i]!, segments[j]!)) allPairs.push([i, j]);
+      }
+    }
+    const candidates = segmentOverlapCandidatePairs(segments);
+    const found = candidates.filter(([i, j]) => overlapStretchBetweenSegmentElements(segments[i]!, segments[j]!));
+    expect(allPairs.length).toBeGreaterThan(1000);
+    expect(found).toEqual(allPairs);
+    expect(candidates.length).toBeLessThan((segments.length * (segments.length - 1)) / 2 / 2);
   });
 });

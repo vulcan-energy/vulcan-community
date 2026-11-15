@@ -37,7 +37,7 @@ import {
   tbPlanAlignmentMessageForMatchedEdge,
 } from './tbLinkage';
 import { validateHostForProposerPattern } from './junctionHostPredicates';
-import { overlapStretchBetweenSegmentElements, type Vec3 } from './linearTbSegmentOverlap';
+import { overlapStretchBetweenSegmentElements, segmentOverlapCandidatePairs, type Vec3 } from './linearTbSegmentOverlap';
 import { SERVICE_LINE_ELEMENT_TYPES } from '../../lib/serviceLineDrawModes';
 import { ductEndpoints, ductRunUnitPoint } from '../../lib/mvhrDuctwork';
 import { pointsConnected } from '../../lib/snapUtils';
@@ -480,50 +480,48 @@ function appendColinearSegmentOverlapIssues(
   for (const elementType of SERVICE_LINE_ELEMENT_TYPES) {
     const g = COLINEAR_OVERLAP_GROUP_BY_TYPE[elementType];
     const els = list.filter((e) => e.type === elementType && !e.isPlaceholder) as Element[];
-    for (let i = 0; i < els.length; i++) {
-      for (let j = i + 1; j < els.length; j++) {
-        const a = els[i]!;
-        const b = els[j]!;
-        const stretch = overlapStretchBetweenSegmentElements(a, b);
-        if (!stretch || g.isExempt(a, b, ductUnitPoint)) continue;
-        const overlapLen = stretch.length;
-        const overlapStretch: [Vec3, Vec3] = [stretch.start, stretch.end];
+    for (const [i, j] of segmentOverlapCandidatePairs(els)) {
+      const a = els[i]!;
+      const b = els[j]!;
+      const stretch = overlapStretchBetweenSegmentElements(a, b);
+      if (!stretch || g.isExempt(a, b, ductUnitPoint)) continue;
+      const overlapLen = stretch.length;
+      const overlapStretch: [Vec3, Vec3] = [stretch.start, stretch.end];
 
-        const jta = elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(a as ThermalBridgeLinear)) : undefined;
-        const jtb = elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(b as ThermalBridgeLinear)) : undefined;
+      const jta = elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(a as ThermalBridgeLinear)) : undefined;
+      const jtb = elementType === 'ThermalBridgeLinear' ? junctionTypeFromExtra(extraRecord(b as ThermalBridgeLinear)) : undefined;
 
-        const msg = (other: Element): string => {
-          const jtOther =
-            elementType === 'ThermalBridgeLinear'
-              ? junctionTypeFromExtra(extraRecord(other as ThermalBridgeLinear))
-              : undefined;
-          const suffix = jtOther ? ` (${jtOther})` : '';
-          return `Overlaps another ${g.singular} (~${overlapLen.toFixed(2)} m along the common run) with "${other.name || other.id}"${suffix} — ${g.riskNote}.`;
-        };
+      const msg = (other: Element): string => {
+        const jtOther =
+          elementType === 'ThermalBridgeLinear'
+            ? junctionTypeFromExtra(extraRecord(other as ThermalBridgeLinear))
+            : undefined;
+        const suffix = jtOther ? ` (${jtOther})` : '';
+        return `Overlaps another ${g.singular} (~${overlapLen.toFixed(2)} m along the common run) with "${other.name || other.id}"${suffix} — ${g.riskNote}.`;
+      };
 
-        out.push(
-          linearThermalBridgeIssue({
-            elementId: a.id,
-            name: a.name || a.id,
-            junctionType: jta,
-            kind: 'overlap_duplicate_colinear_segment',
-            message: msg(b),
-            severity: 'error',
-            overlapStretch,
-          }),
-        );
-        out.push(
-          linearThermalBridgeIssue({
-            elementId: b.id,
-            name: b.name || b.id,
-            junctionType: jtb,
-            kind: 'overlap_duplicate_colinear_segment',
-            message: msg(a),
-            severity: 'error',
-            overlapStretch,
-          }),
-        );
-      }
+      out.push(
+        linearThermalBridgeIssue({
+          elementId: a.id,
+          name: a.name || a.id,
+          junctionType: jta,
+          kind: 'overlap_duplicate_colinear_segment',
+          message: msg(b),
+          severity: 'error',
+          overlapStretch,
+        }),
+      );
+      out.push(
+        linearThermalBridgeIssue({
+          elementId: b.id,
+          name: b.name || b.id,
+          junctionType: jtb,
+          kind: 'overlap_duplicate_colinear_segment',
+          message: msg(a),
+          severity: 'error',
+          overlapStretch,
+        }),
+      );
     }
   }
 }
