@@ -8,6 +8,8 @@ import {
   __resetDefaultsCacheForTests,
 } from '../defaultsCache';
 import * as defaultsCacheModule from '../defaultsCache';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type ExplicitDefaultsLookup = Readonly<{
   getDefaultValueForElementField(
@@ -217,4 +219,28 @@ describe('defaultsCache', () => {
       expect(right.getDefaultValueForElementField('u_value', 'BuildingElementOpaque')).toBe(0.27);
     });
   });
+
+  it.each(['defaults_template.json', 'defaults_template_epc.json'])(
+    'a field the index misses is absent from the whole tree (%s), so skipping the walk changes nothing',
+    (file) => {
+      const template = JSON.parse(readFileSync(join(import.meta.dirname, '../../../../../data/defaults', file), 'utf8'));
+      const fields = new Set<string>();
+      const walk = (node: unknown) => {
+        if (!node || typeof node !== 'object') return;
+        for (const [key, value] of Object.entries(node)) {
+          if (key !== 'type') fields.add(key);
+          walk(value);
+        }
+      };
+      walk(template);
+      __setDefaultsObjectForTests(template);
+      // An unknown element type resolves through the `${field}:*` entry only.
+      const missed = [...fields].filter((field) => getDefaultValueForElementField(field, 'NoSuchType') === undefined);
+      expect(missed).toEqual([]);
+      expect(getDefaultValueForElementField('no_such_field', 'BuildingElementOpaque', 'wall')).toBeUndefined();
+      defaultsCacheModule.invalidateDefaultsCache(); // keeps the defaults, empties the index: lookups walk the tree
+      expect(getDefaultValueForElementField('no_such_field', 'BuildingElementOpaque', 'wall')).toBeUndefined();
+      expect(getDefaultValueForElementField('type', 'BuildingElementOpaque')).toBe('BuildingElementOpaque');
+    },
+  );
 });

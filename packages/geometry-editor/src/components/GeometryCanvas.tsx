@@ -6690,13 +6690,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     tbPreview,
     inspectPreviewBridge,
   ]);
-  const [hiddenGeometryCanvas3DProps, setHiddenGeometryCanvas3DProps] = useState(liveGeometryCanvas3DProps);
+  // Hidden 3D keeps its last props and stops rendering frames until 3D is shown again.
+  const [hiddenGeometryCanvas3DProps, setHiddenGeometryCanvas3DProps] = useState(() => ({ ...liveGeometryCanvas3DProps, paused: true }));
   const handleViewModeChange = useCallback((nextViewMode: CanvasViewMode) => {
     if (nextViewMode === '3d') {
       setHasMountedGeometry3D(true);
     }
     if (nextViewMode === '2d') {
-      setHiddenGeometryCanvas3DProps(liveGeometryCanvas3DProps);
+      setHiddenGeometryCanvas3DProps({ ...liveGeometryCanvas3DProps, paused: true });
     }
     setViewMode(nextViewMode);
   }, [liveGeometryCanvas3DProps, setHiddenGeometryCanvas3DProps, setViewMode]);

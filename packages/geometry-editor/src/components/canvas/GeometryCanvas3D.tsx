@@ -666,6 +666,8 @@ export interface GeometryCanvas3DProps {
   /** Shared, non-persisted thermal bridge preview state and actions. */
   thermalBridgePreview?: AutoThermalBridgePreview;
   onInspectThermalBridge?: (id: string) => void;
+  /** True while the 2D view covers this canvas: no frames are rendered. */
+  paused?: boolean;
 }
 
 const DEFAULT_IS_ELEMENT_CATEGORY_GHOST: NonNullable<GeometryCanvas3DProps['isElementCategoryGhost']> = () => false;
@@ -2850,6 +2852,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
   snapCache,
   thermalBridgePreview,
   onInspectThermalBridge,
+  paused = false,
 }) {
   const themeId = useThemeStore((state) => state.themeId);
   const customTheme = useThemeStore((state) => state.customTheme);
@@ -3193,6 +3196,7 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
       <Canvas
         gl={createGeometryCanvasRenderer}
         shadows="percentage"
+        frameloop={paused ? 'never' : 'always'}
         onPointerMissed={() => { if (previewActive) thermalBridgePreview?.closeMenu(); else setSelection(null); }}
       >
         <color attach="background" args={[readRootCssVar('--canvas-3d-bg', '#0d1417')]} />

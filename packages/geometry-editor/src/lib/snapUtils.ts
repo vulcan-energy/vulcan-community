@@ -81,6 +81,8 @@ type SnapSpatialIndex = {
   cellSize: number;
   cornerBuckets: Map<string, SnapCornerTarget[]>;
   wallBuckets: Map<string, SnapWallSegmentTarget[]>;
+  /** Build order of each wall segment, for the query order below. */
+  wallOrder: Map<SnapWallSegmentTarget, number>;
 };
 
 const SNAP_SPATIAL_CELL_SIZE_M = 0.5;
@@ -324,19 +326,32 @@ function buildSnapSpatialIndex(
     );
   }
 
-  for (const segment of wallSegments) {
-    const minCellX = snapCell(Math.min(segment.A.x, segment.B.x), cellSize);
-    const maxCellX = snapCell(Math.max(segment.A.x, segment.B.x), cellSize);
-    const minCellY = snapCell(Math.min(segment.A.y, segment.B.y), cellSize);
-    const maxCellY = snapCell(Math.max(segment.A.y, segment.B.y), cellSize);
-    for (let ix = minCellX; ix <= maxCellX; ix++) {
-      for (let iy = minCellY; iy <= maxCellY; iy++) {
+  // Each segment goes in the cells it crosses, not its whole bounding box: a long diagonal
+  // wall's box holds (length / cell)^2 cells, which froze typing a large dimension.
+  const wallOrder = new Map<SnapWallSegmentTarget, number>();
+  wallSegments.forEach((segment, order) => {
+    wallOrder.set(segment, order);
+    const { A, B } = segment;
+    const minX = Math.min(A.x, B.x);
+    const maxX = Math.max(A.x, B.x);
+    const dx = B.x - A.x;
+    for (let ix = snapCell(minX, cellSize); ix <= snapCell(maxX, cellSize); ix++) {
+      let ya = A.y;
+      let yb = B.y;
+      if (dx !== 0) {
+        const slope = (B.y - A.y) / dx;
+        ya = A.y + (Math.max(minX, ix * cellSize) - A.x) * slope;
+        yb = A.y + (Math.min(maxX, (ix + 1) * cellSize) - A.x) * slope;
+      }
+      // The epsilon keeps a segment through a cell corner in both cells despite rounding.
+      const maxIy = snapCell(Math.max(ya, yb) + 1e-9, cellSize);
+      for (let iy = snapCell(Math.min(ya, yb) - 1e-9, cellSize); iy <= maxIy; iy++) {
         pushBucket(wallBuckets, snapCellKey(ix, iy), segment);
       }
     }
-  }
+  });
 
-  return { cellSize, cornerBuckets, wallBuckets };
+  return { cellSize, cornerBuckets, wallBuckets, wallOrder };
 }
 
 function querySnapBuckets<T>(
@@ -395,7 +410,19 @@ export function getNearbySnapWallSegments(
 ): readonly SnapWallSegmentTarget[] {
   const index = snapCache.spatialIndex;
   if (!index) return snapCache.wallSegments;
-  return querySnapBuckets(index.wallBuckets, index.cellSize, point, tolerance);
+  // Callers keep the first of equally close hits, so return the order a whole-bounding-box
+  // index gave: by the first query cell inside the segment's box, then build order.
+  const queryCellX = snapCell(point.x - tolerance, index.cellSize);
+  const queryCellY = snapCell(point.y - tolerance, index.cellSize);
+  const firstCell = ({ A, B }: SnapWallSegmentTarget) => [
+    Math.max(snapCell(Math.min(A.x, B.x), index.cellSize), queryCellX),
+    Math.max(snapCell(Math.min(A.y, B.y), index.cellSize), queryCellY),
+  ];
+  return querySnapBuckets(index.wallBuckets, index.cellSize, point, tolerance)
+    .map((segment) => ({ segment, cell: firstCell(segment) }))
+    .sort((a, b) => a.cell[0]! - b.cell[0]! || a.cell[1]! - b.cell[1]!
+      || index.wallOrder.get(a.segment)! - index.wallOrder.get(b.segment)!)
+    .map(({ segment }) => segment);
 }
 
 export type FindClosestSnapCornerOptions = {

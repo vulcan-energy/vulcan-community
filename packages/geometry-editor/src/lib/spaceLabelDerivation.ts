@@ -276,6 +276,20 @@ export type SpaceLabelAggregate = {
   geometryAnalysis?: SpaceLabelGeometryAnalysis;
 };
 
+// Store labels are immutable, so the same label objects give the same analysis. Dwelling
+// details are resolved several times per edit (CSV export, Part F, settings) while the
+// labels rarely change; the face analysis is the expensive part.
+let lastZoneAnalysis: { labels: SpaceLabel[]; ids: string[]; analysis: SpaceLabelGeometryAnalysis } | null = null;
+function analyzeZoneLabelsOnce(labels: SpaceLabel[]): SpaceLabelGeometryAnalysis {
+  const last = lastZoneAnalysis;
+  if (last && last.labels.length === labels.length && last.labels.every((label, index) => label === labels[index] && label.id === last.ids[index])) {
+    return last.analysis;
+  }
+  const analysis = analyzeSpaceLabelGeometry(labels);
+  lastZoneAnalysis = { labels, ids: labels.map((label) => label.id), analysis };
+  return analysis;
+}
+
 export function aggregateSpaceLabelsForZone(
   labels: SpaceLabel[],
   primaryZoneId: string,
@@ -288,7 +302,7 @@ export function aggregateSpaceLabelsForZone(
   let totalFloorAreaM2 = 0;
   let livingAreaM2 = 0;
 
-  const analysis = geometryAnalysis ?? analyzeSpaceLabelGeometry(labels.filter((label) => label.zoneId === primaryZoneId));
+  const analysis = geometryAnalysis ?? analyzeZoneLabelsOnce(labels.filter((label) => label.zoneId === primaryZoneId));
 
   for (const label of labels) {
     if (label.zoneId !== primaryZoneId) continue;

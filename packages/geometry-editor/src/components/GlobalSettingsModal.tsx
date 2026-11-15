@@ -1249,6 +1249,8 @@ export function GlobalSettingsModal({
   // Postcode, nation and build type: where a survey starts, so shown first on HEM:EPC and ahead of the
   // fabric on a construction-band target. A new-build EPC input has no postcode, so it is not shown there.
   const surveyFirst = epcTarget || constructionBands;
+  // Closed, the modal only reports its indicator (above); the form below is built when open.
+  if (!isOpen || typeof document === "undefined") return null;
   const surveyFields = (
     <>
       {epcTarget && !constructionBands ? null : <StandardInput
@@ -1395,7 +1397,6 @@ export function GlobalSettingsModal({
     </>
   );
 
-  if (!isOpen || typeof document === "undefined") return null;
 
   return ReactDOM.createPortal(
     <div
