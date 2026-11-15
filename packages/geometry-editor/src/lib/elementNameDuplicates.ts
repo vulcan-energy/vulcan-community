@@ -3,7 +3,7 @@
 
 import type { Element, Zone } from '../geometry/types';
 
-const GLOBAL_ELEMENT_TYPES_FOR_NAME_SCOPE = new Set<Element['type']>([
+export const GLOBAL_ELEMENT_TYPES_FOR_NAME_SCOPE = new Set<Element['type']>([
   'WaterPipework',
   'Appliance',
   'HotWaterDemand',

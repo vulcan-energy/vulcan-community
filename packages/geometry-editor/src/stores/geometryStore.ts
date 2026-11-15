@@ -232,6 +232,8 @@ import {
   createParentElementLookup,
 } from '../lib/elementNameRemap';
 import { collectDuplicateElementNameWarnings } from '../lib/elementNameDuplicates';
+import { elementFieldSource } from '../lib/fieldDefault';
+import type { FieldSourceOf } from '../lib/provenance';
 import {
   calculateContextShadingAngularRangeFromCoordinates,
   calculateContextShadingDistanceFromCoordinates,
@@ -1560,6 +1562,8 @@ export interface GeometryState extends
   defaultsLookup: DefaultsLookup;
   /** Stable per-document defaults resolver; never reads another editor's defaults. */
   getDefaultsLookup: () => DefaultsLookup;
+  /** What an element field reads as when nobody entered it (`elementFieldSource`); `null` before defaults load. */
+  fieldSourceOf: () => FieldSourceOf;
   // Multi-select functionality
   selectedElementIds: string[];
   setSelectedElementIds: (ids: string[]) => void;
@@ -3068,6 +3072,7 @@ const createGeometryState = (
     set((state) => ({
       sourceCsvVersion: 3,
       sourceProvenanceMarkersVersion: undefined,
+      provenance: {},
       csvUpgradeRequested: false,
       targetBundleId: undefined,
       zones: [],
@@ -3244,6 +3249,12 @@ const createGeometryState = (
   ...createMetadataSlice({ defaultDefaultsPath, workspaceResourcePort })(set, get, api),
   defaultsLookup: createDefaultsLookup(null),
   getDefaultsLookup: () => get().defaultsLookup,
+  fieldSourceOf: () => {
+    const { defaultsJson, defaultsLookup, complianceSettings } = get();
+    if (!defaultsJson) return null;
+    const { arealHeatCapacity } = targetRules(schemaPort, complianceSettings);
+    return (element, field) => elementFieldSource(element, field, defaultsJson, defaultsLookup, arealHeatCapacity);
+  },
   ...createComplianceSlice(set, get, api),
   ...createHeatingSizingSlice(options.heatingSizingProvider)(set, get, api),
   validateElement: (element, elementsById) => elementValidation.validate(get(), element, elementsById),

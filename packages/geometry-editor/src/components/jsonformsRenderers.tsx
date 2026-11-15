@@ -20,11 +20,8 @@ import {
 } from '../lib/fieldPresentation';
 import { JUNCTION_TYPE_DESCRIPTIONS } from '../lib/simplifiedFabricMap';
 import { WINDOW_SECURITY_RISK_HELPER } from '../lib/schemaDescriptionOverrides';
-import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
 import { useGeometryStore } from '../stores/geometryStore';
-import { parseWindShieldLocation } from '../lib/groundUValueCalculator';
 import type { DefaultsLookup, OpaqueFabricVariant } from '../lib/defaultsCache';
-import { classifyOpaqueFabricVariant } from '../lib/opaqueFabricVariant';
 import { windowSecurityRiskDefaultForElement } from '../lib/windowSecurityRisk';
 import { usesGroundThermalTransmWallsAutofill } from '../lib/groundFloorSubtype';
 import { errorMessageFromUnknown, isRecord, readRecord, type JsonRecord } from '../lib/jsonTypes';
@@ -44,7 +41,7 @@ import {
   WindowDetailMiniButton,
 } from './WindowDetailControls';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
-import { ROW_ONLY_ELEMENT_TYPES } from '../geometry/io/geometryCsvLayouts';
+import { getDefaultValue, resolveFieldSource, type FieldSourceInfo } from '../lib/fieldDefault';
 import { resolveEffectiveVentilationBaseHeight } from '../lib/effectiveDwellingDetails';
 
 type SuspendedThermalTransmWallSource = {
@@ -366,314 +363,6 @@ function renderFieldLabelWithIndicator(
   );
 }
 
-// Every control looks its default up on every render, and a miss walks the whole tree:
-// one answer per defaults document, lookup and query.
-const defaultValueCache = new WeakMap<object, WeakMap<object, Map<string, unknown>>>();
-
-// Helper to get default value for a specific path, preferring the current elementType subtree
-function getDefaultValue(
-  defaults: unknown,
-  defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
-  propertyName: string,
-  elementType?: string,
-  subtype?: string,
-  opaqueFabricVariant?: OpaqueFabricVariant,
-): unknown {
-  if (!defaults || typeof defaults !== 'object') return undefined;
-  let byLookup = defaultValueCache.get(defaults);
-  if (!byLookup) defaultValueCache.set(defaults, (byLookup = new WeakMap()));
-  let cache = byLookup.get(defaultsLookup);
-  if (!cache) byLookup.set(defaultsLookup, (cache = new Map()));
-  const key = JSON.stringify([propertyName, elementType ?? null, subtype ?? null, opaqueFabricVariant ?? null]);
-  if (!cache.has(key)) cache.set(key, findDefaultValue(defaults, defaultsLookup, propertyName, elementType, subtype, opaqueFabricVariant));
-  return cache.get(key);
-}
-
-function findDefaultValue(
-  defaults: unknown,
-  defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
-  propertyName: string,
-  elementType?: string,
-  subtype?: string,
-  opaqueFabricVariant?: OpaqueFabricVariant,
-): unknown {
-  // R4.6b-2: takes the property name outright. It used to take the control's dot-joined
-  // `path` and recover the name as `path.split('.').pop()` — the same guess every control
-  // was making separately, and the same one a '.'-bearing leaf key breaks. The caller has
-  // the real key now (see `AdvancedControlProps.propKey`).
-  // The converter never fills these rows from the defaults: showing a template value would mislead.
-  if (!defaults || !propertyName || (elementType && ROW_ONLY_ELEMENT_TYPES.has(elementType))) {
-    return undefined;
-  }
-  const defaultsRecord = readRecord(defaults);
-
-  // Special handling for MechanicalVentilation: filter by vent_type (subtype)
-  if (elementType === 'MechanicalVentilation' && subtype) {
-    try {
-      const mvMap = readRecord(readRecord(defaultsRecord.InfiltrationVentilation).MechanicalVentilation);
-      if (Object.keys(mvMap).length > 0) {
-        // Only check defaults from entries matching the vent_type
-        for (const entry of Object.values(mvMap)) {
-          const entryRecord = readRecord(entry);
-          if (entryRecord.vent_type === subtype) {
-            if (Object.prototype.hasOwnProperty.call(entry, propertyName)) {
-              return entryRecord[propertyName];
-            }
-          }
-        }
-      }
-      // No default found for this vent_type
-      return undefined;
-    } catch {
-      // Fall through to generic search on error
-    }
-  }
-
-  // FHS MVHR ductwork defaults are nested under:
-  // InfiltrationVentilation.MechanicalVentilation.*.ductwork[]
-  // (not a standalone MechanicalVentilationDuctwork object tree).
-  if (elementType === 'MechanicalVentilationDuctwork') {
-    try {
-      const mvMap = readRecord(readRecord(defaultsRecord.InfiltrationVentilation).MechanicalVentilation);
-      if (Object.keys(mvMap).length > 0) {
-        for (const entry of Object.values(mvMap)) {
-          const entryRecord = readRecord(entry);
-          if (entryRecord.vent_type !== 'MVHR') continue;
-          const ducts = entryRecord.ductwork;
-          if (!Array.isArray(ducts)) continue;
-          // If caller provides a duct subtype, prefer that duct; otherwise use first matching key.
-          const ductsByType = new Map<unknown, unknown>();
-          let byKey: unknown;
-          let hasByKey = false;
-          for (const duct of ducts) {
-            const ductRecord = readRecord(duct);
-            if (!ductsByType.has(ductRecord.duct_type)) {
-              ductsByType.set(ductRecord.duct_type, duct);
-            }
-            if (!hasByKey && Object.prototype.hasOwnProperty.call(ductRecord, propertyName)) {
-              byKey = duct;
-              hasByKey = true;
-            }
-          }
-          const preferred = typeof subtype === 'string' ? ductsByType.get(subtype) : undefined;
-          const selected = readRecord(preferred ?? byKey);
-          if (Object.prototype.hasOwnProperty.call(selected, propertyName)) {
-            return selected[propertyName];
-          }
-        }
-      }
-
-      // Backward compatibility for older defaults layouts.
-      const legacyMap = readRecord(defaultsRecord.MechanicalVentilationDuctwork);
-      if (Object.keys(legacyMap).length > 0) {
-        for (const entry of Object.values(legacyMap)) {
-          const entryRecord = readRecord(entry);
-          if (Object.prototype.hasOwnProperty.call(entryRecord, propertyName)) {
-            return entryRecord[propertyName];
-          }
-        }
-      }
-    } catch {
-      // Fall through to generic search on error
-    }
-  }
-
-  // FHS primary pipework defaults live under:
-  // HotWaterSource.<source>.primary_pipework[]
-  // (not under a standalone WaterPipework node).
-  if (elementType === 'WaterPipework') {
-    try {
-      const hotWaterSources = readRecord(defaultsRecord.HotWaterSource);
-      if (Object.keys(hotWaterSources).length > 0) {
-        for (const source of Object.values(hotWaterSources)) {
-          const primaryPipework = readRecord(source).primary_pipework;
-          if (!Array.isArray(primaryPipework)) continue;
-          const byKey = primaryPipework.find(
-            (pipe) => Object.prototype.hasOwnProperty.call(readRecord(pipe), propertyName),
-          );
-          const byKeyRecord = readRecord(byKey);
-          if (Object.prototype.hasOwnProperty.call(byKeyRecord, propertyName)) {
-            return byKeyRecord[propertyName];
-          }
-        }
-      }
-
-      // Backward compatibility for older defaults layouts.
-      const legacyMap = readRecord(defaultsRecord.WaterPipework);
-      if (Object.keys(legacyMap).length > 0) {
-        for (const entry of Object.values(legacyMap)) {
-          const entryRecord = readRecord(entry);
-          if (Object.prototype.hasOwnProperty.call(entryRecord, propertyName)) {
-            return entryRecord[propertyName];
-          }
-        }
-      }
-    } catch {
-      // Fall through to generic search on error
-    }
-  }
-
-  // Fast-path for OnSiteGeneration: defaults live under OnSiteGeneration["Default PV"]
-  // in defaults_template.json. Use this as the source of PV defaults so that
-  // inverter fields (DC/AC, is_inside, type, ventilation_strategy, EnergySupply)
-  // surface as placeholders in Advanced Fields.
-  if (elementType === 'OnSiteGeneration') {
-    try {
-      const pvDefaults = readRecord(readRecord(defaultsRecord.OnSiteGeneration)['Default PV']);
-      if (Object.prototype.hasOwnProperty.call(pvDefaults, propertyName)) {
-        return pvDefaults[propertyName];
-      }
-    } catch {
-      // Fall through to generic search on error
-    }
-  }
-
-  // Fast-path for ElectricBattery: defaults are stored under
-  // EnergySupply.<supply>.ElectricBattery (without a typed `type` node),
-  // so the typed DFS below will not find them.
-  if (elementType === 'ElectricBattery') {
-    try {
-      const energySupplyMap = readRecord(defaultsRecord.EnergySupply);
-      if (Object.keys(energySupplyMap).length > 0) {
-        const mainsElecBattery = readRecord(readRecord(energySupplyMap['mains elec']).ElectricBattery);
-        if (Object.prototype.hasOwnProperty.call(mainsElecBattery, propertyName)) {
-          return mainsElecBattery[propertyName];
-        }
-        for (const supply of Object.values(energySupplyMap)) {
-          const batteryDefaults = readRecord(readRecord(supply).ElectricBattery);
-          if (Object.prototype.hasOwnProperty.call(batteryDefaults, propertyName)) {
-            return batteryDefaults[propertyName];
-          }
-        }
-      }
-    } catch {
-      // Fall through to generic search on error
-    }
-  }
-
-  // FHS WetEmitter defaults live under:
-  // SpaceHeatSystem.<system>.emitters[] (with wet_emitter_type discriminator),
-  // not under a standalone WetEmitter node.
-  if (elementType === 'WetEmitter') {
-    try {
-      const systems = readRecord(defaultsRecord.SpaceHeatSystem);
-      if (Object.keys(systems).length > 0) {
-        const subtypeKey = typeof subtype === 'string' ? subtype : undefined;
-        for (const sys of Object.values(systems)) {
-          const systemRecord = readRecord(sys);
-          if (systemRecord.type !== 'WetDistribution') continue;
-          const emitters = systemRecord.emitters;
-          if (!Array.isArray(emitters)) continue;
-
-          // Prefer defaults from the matching emitter subtype.
-          if (subtypeKey) {
-            const typed = emitters.find(
-              (em) => readRecord(em).wet_emitter_type === subtypeKey,
-            );
-            const typedRecord = readRecord(typed);
-            if (Object.prototype.hasOwnProperty.call(typedRecord, propertyName)) {
-              return typedRecord[propertyName];
-            }
-          }
-
-          // Fallback to first emitter that defines this property.
-          const byProp = emitters.find(
-            (em) => Object.prototype.hasOwnProperty.call(readRecord(em), propertyName),
-          );
-          const byPropRecord = readRecord(byProp);
-          if (Object.prototype.hasOwnProperty.call(byPropRecord, propertyName)) {
-            return byPropRecord[propertyName];
-          }
-        }
-      }
-    } catch {
-      // Fall through to generic search on error
-    }
-  }
-
-  // BuildingElementOpaque: prefer variant-specific defaults (wall / roof / external door)
-  // aligned with CSV merge and {@link defaultsCache} indexing.
-  if (elementType === 'BuildingElementOpaque' && opaqueFabricVariant) {
-    const fromCache = defaultsLookup.getDefaultValueForElementField(
-      propertyName,
-      elementType,
-      opaqueFabricVariant,
-    );
-    if (fromCache !== undefined) return fromCache;
-  }
-
-  // Depth-first search: only return defaults from nodes whose `type` exactly
-  // matches the current elementType (with a special-case for OnSiteGeneration →
-  // PhotovoltaicSystem).  No cross-type fallback – e.g. a ground floor's
-  // u_value must never be shown as the default for a wall.
-  const visited = new WeakSet<object>();
-
-  function isRelevantNode(node: unknown): boolean {
-    const nodeRecord = readRecord(node);
-    const t = nodeRecord.type;
-    // For BuildingElement types, look for BuildingElement* nodes (for ordering priority)
-    if (elementType && elementType.startsWith('BuildingElement')) {
-      return typeof t === 'string' && t.startsWith('BuildingElement');
-    }
-    // Special-case for OnSiteGeneration: defaults live under PhotovoltaicSystem
-    if (elementType === 'OnSiteGeneration') {
-      return typeof t === 'string' && t === 'PhotovoltaicSystem';
-    }
-    // For other types (Appliance, etc.), look for exact type match
-    return typeof t === 'string' && t === elementType;
-  }
-
-  function dfs(node: unknown): unknown {
-    if (!node || typeof node !== 'object') return undefined;
-    if (visited.has(node)) return undefined;
-    visited.add(node);
-    const nodeRecord = readRecord(node);
-
-    // Only return a value from nodes whose type exactly matches elementType
-    const t = nodeRecord.type;
-    const matchesElementType =
-      (elementType && t === elementType) ||
-      // Special-case: OnSiteGeneration defaults live under PhotovoltaicSystem
-      (elementType === 'OnSiteGeneration' && t === 'PhotovoltaicSystem');
-    const matchesOpaqueVariant =
-      elementType !== 'BuildingElementOpaque' ||
-      !opaqueFabricVariant ||
-      classifyOpaqueFabricVariant(node) === opaqueFabricVariant;
-    if (
-      matchesElementType &&
-      matchesOpaqueVariant &&
-      Object.prototype.hasOwnProperty.call(node, propertyName)
-    ) {
-      return nodeRecord[propertyName];
-    }
-    // When no elementType is provided, accept any typed node that has the property
-    if (!elementType && isRelevantNode(node) && Object.prototype.hasOwnProperty.call(node, propertyName)) {
-      return nodeRecord[propertyName];
-    }
-
-    // Recurse into children, visiting relevant children first for speed
-    const entries = Array.isArray(node) ? node : Object.values(node);
-    const relevantFirst = entries.filter(isRelevantNode).concat(entries.filter((n) => !isRelevantNode(n)));
-    for (const child of relevantFirst) {
-      const found = dfs(child);
-      if (found !== undefined) return found;
-    }
-
-    return undefined;
-  }
-
-  const fromDefaultsTree = dfs(defaults);
-  if (fromDefaultsTree !== undefined) return fromDefaultsTree;
-  if (
-    elementType === 'BuildingElementGround' &&
-    subtype === 'Suspended_floor' &&
-    propertyName === 'height_upper_surface'
-  ) {
-    return SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M;
-  }
-  return undefined;
-}
-
 function getAdvancedDefaultValue(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
@@ -763,25 +452,6 @@ function shouldShowResetToSource(data: unknown, sourceValue: unknown, isJsonLike
   return !valuesEquivalent(data, sourceValue, isJsonLike);
 }
 
-function resolveFieldSource(
-  propKey: string | undefined,
-  defaultValue: unknown,
-  config: RendererConfig | undefined,
-): FieldSourceInfo {
-  const assemblySourceValues = config?.assemblySourceValues ?? {};
-  if (propKey && Object.prototype.hasOwnProperty.call(assemblySourceValues, propKey)) {
-    return { value: assemblySourceValues[propKey], kind: 'assembly' };
-  }
-  /** FHS suspended `shield_fact_location`: template often omits it; ISO 13370 path uses {@link parseWindShieldLocation}. */
-  const templateDefault =
-    propKey === 'shield_fact_location' ? parseWindShieldLocation(defaultValue) : defaultValue;
-  return { value: templateDefault, kind: 'default' };
-}
-
-type FieldSourceInfo = {
-  value: unknown;
-  kind: 'assembly' | 'default';
-};
 
 type FieldPresentationState = {
   fieldSource: FieldSourceInfo;
@@ -1088,7 +758,7 @@ function useAdvancedControlPreamble(
   const state = computeFieldPresentationState({
     data,
     isJsonLike,
-    fieldSource: resolveFieldSource(propKey, defaultValue, cfg),
+    fieldSource: resolveFieldSource(propKey, defaultValue, cfg.assemblySourceValues),
     config: cfg,
     path,
   });

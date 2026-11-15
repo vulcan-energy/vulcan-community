@@ -6,6 +6,7 @@ import { logGeometryHistory } from '../../../lib/geometryHistoryDebug';
 import type { GeometryState } from '../../geometryStore';
 import type { Floor } from '../../../geometry/types';
 import { stripModelVersionRow } from '../../../geometry/io/geometryCsvCanonical';
+import { recordProvenance, type ProvenanceSource, type ProvenanceTable } from '../../../lib/provenance';
 
 /**
  * Debounce between geometry-state changes and the next dirty check. Short
@@ -37,13 +38,19 @@ export type HistoryEntry = {
 };
 
 /**
- * Who a store write is for. `user` and `preset` are the user's gesture: they mark the model dirty
- * and become an undo step. `default` and `derived` are the editor's own fills and follow-ups: they
- * neither dirty the model nor add a step (see `writeAs`).
+ * Who a store write is for. `user` and `preset:<name>` are the user's gesture: they mark the model
+ * dirty, become an undo step and record their source for each field they change (`provenance`).
+ * `default` and `derived` are the editor's own fills and follow-ups: they neither dirty the model,
+ * add a step nor record (see `writeAs`).
  */
-export type WriteIntent = 'user' | 'default' | 'preset' | 'derived';
+export type WriteIntent = 'user' | 'default' | `preset:${string}` | 'derived';
 
 export interface HistorySlice {
+  /**
+   * The recorded source of element fields the user or a preset changed, kept only where the value
+   * cannot tell it. Ask it through `provenanceOf`; saved as the `Provenance` Metadata row.
+   */
+  provenance: ProvenanceTable;
   history: HistoryEntry[];
   historyIndex: number;
   maxHistorySize: number;
@@ -76,7 +83,7 @@ export interface HistorySlice {
    */
   writeAs: <T>(intent: WriteIntent, write: () => T) => T;
   /**
-   * The intent of the write in progress: `user` outside `writeAs` and document loads. A `preset`
+   * The intent of the write in progress: `user` outside `writeAs` and document loads. A preset
    * write is the user's gesture and reports `user`.
    */
   writeIntent: () => WriteIntent;
@@ -86,6 +93,12 @@ export interface HistorySlice {
    * (`writeIntent`) stay still.
    */
   asDocumentLoad: <T>(load: () => T) => T;
+  /**
+   * Runs a follower's writes inside the user edit that triggered them, as `derived`: they ride in
+   * that edit's step and record no source. No export, so it costs nothing per edit. Only for code
+   * that runs while the user's edit is being applied.
+   */
+  asEditFollowUp: <T>(write: () => T) => T;
 }
 
 export type GeometryStoreSlice = StateCreator<GeometryState, [], [], HistorySlice>;
@@ -107,6 +120,8 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   // Depth of the editor's own writes in progress; the change subscriber starts no capture during them.
   let systemWriteDepth = 0;
   let systemIntent: WriteIntent = 'user';
+  // The source user writes record; a preset write names its preset.
+  let recordSource: ProvenanceSource = 'user';
   const asSystem = <T>(intent: WriteIntent, run: () => T): T => {
     const outer = systemIntent;
     systemWriteDepth += 1;
@@ -215,7 +230,16 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   };
 
   const writeAs = <T>(intent: WriteIntent, write: () => T): T => {
-    if (intent === 'user' || intent === 'preset' || systemWriteDepth > 0) return write();
+    if (intent.startsWith('preset:') && systemWriteDepth === 0) {
+      const outer = recordSource;
+      recordSource = intent as ProvenanceSource;
+      try {
+        return write();
+      } finally {
+        recordSource = outer;
+      }
+    }
+    if (intent === 'user' || systemWriteDepth > 0) return write();
     const previous = get();
     // ponytail: one export before every call (a cache hit when the dirty check ran since the
     // last change); a no-op write pays it too. Track clean state by identity if it shows.
@@ -226,9 +250,11 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     if (after === null || after === before) return result;
     const state = get();
     const partial: Partial<HistorySlice> & { lastSavedCsv?: string } = {};
-    // A pending capture takes the change into the user's step; otherwise it joins the head step.
+    // A pending capture of a user edit takes the change into that step. Otherwise it joins the head
+    // step, also when the pending capture follows a change that left the document as it was (a
+    // selection): that capture then finds nothing new.
     const head = state.history[state.historyIndex];
-    if (captureTimer === null && head) {
+    if (head && (captureTimer === null || (before !== null && stripModelVersionRow(before) === head.csv))) {
       const history = state.history.slice();
       history[state.historyIndex] = { ...head, csv: stripModelVersionRow(after), floors: state.floors };
       partial.history = history;
@@ -240,9 +266,19 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     return result;
   };
 
-  // Every user change (re)starts the capture window.
+  // Every user change records its fields' source and (re)starts the capture window.
   api.subscribe((state, previous) => {
     if (systemWriteDepth > 0 || isHistoryOnlyChange(state, previous)) return;
+    if (state.elementsById !== previous.elementsById) {
+      const provenance = recordProvenance(
+        state.provenance,
+        previous.elementsById,
+        state.elementsById,
+        recordSource,
+        state.fieldSourceOf(),
+      );
+      if (provenance !== state.provenance) set({ provenance });
+    }
     if (captureTimer !== null) clearTimeout(captureTimer);
     captureTimer = setTimeout(() => {
       captureTimer = null;
@@ -251,6 +287,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   });
 
   return {
+    provenance: {},
     history: [],
     historyIndex: -1,
     maxHistorySize: 50,
@@ -275,5 +312,6 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     writeAs,
     writeIntent: () => systemIntent,
     asDocumentLoad: (load) => asSystem('derived', load),
+    asEditFollowUp: (write) => asSystem('derived', write),
   };
 };

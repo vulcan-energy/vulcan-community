@@ -48,7 +48,6 @@ import {
   parseWindShieldLocation,
   WIND_SHIELD_LOCATION_ENUM,
 } from '../lib/groundUValueCalculator';
-import { arealHeatCapacityBandFromJPerM2K, arealHeatCapacityWrite } from '../lib/assemblyCalculator';
 import { EdgeInsulationFields } from './EdgeInsulationFields';
 import { WindowTreatmentFields } from './WindowTreatmentFields';
 import { FancoilTestDataFields } from './FancoilTestDataFields';
@@ -58,7 +57,7 @@ import {
   computeSuspendedThermalTransmWallsAutofillResultForGroundElement,
   hasSuspendedFloorThermalTransmWallsAutofillSourcesForGroundElement,
 } from '../lib/suspendedFloorThermalTransmWallsAutofill';
-import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
+import { assemblySourceValuesFor } from '../lib/fieldDefault';
 import {
   applySuspendedThermalTransmWallsManualTracking,
   GROUND_U_VALUE_MANUAL_KEY,
@@ -1774,42 +1773,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     [shouldUseGroundThermalTransmWallsAutofill, elementsById, currentElementData, defaultsLookup],
   );
 
-  const assemblySourceValues = useMemo(() => {
-    const envelope = parseVulcanAssemblyV1FromExtraJson(currentData?.extra_json);
-    if (!envelope) return {};
-    const out: Record<string, unknown> = {};
-    if (typeof envelope.uValueWrittenToElement_W_m2K === 'number') {
-      out.u_value = envelope.uValueWrittenToElement_W_m2K;
-    }
-    if (typeof envelope.thermalResistanceConstruction_m2K_W === 'number') {
-      out[
-        elementType === 'BuildingElementGround'
-          ? 'thermal_resistance_floor_construction'
-          : 'thermal_resistance_construction'
-      ] = envelope.thermalResistanceConstruction_m2K_W;
-    }
-    if (typeof envelope.thermalResistanceGroundInsulation_m2K_W === 'number') {
-      out.thermal_resist_insul = envelope.thermalResistanceGroundInsulation_m2K_W;
-    }
-    if (typeof envelope.arealHeatCapacityWrittenToElement_J_m2K === 'number') {
-      const jWritten = envelope.arealHeatCapacityWrittenToElement_J_m2K;
-      // A target that takes a class stores its label; the envelope keeps the class's J/(m²·K).
-      const write = arealHeatCapacityWrite(arealHeatCapacity, elementType);
-      out.areal_heat_capacity = write === 'number' ? jWritten : arealHeatCapacityBandFromJPerM2K(jWritten, write);
-    }
-    if (typeof envelope.massDistributionClass === 'string') {
-      out.mass_distribution_class = envelope.massDistributionClass;
-    }
-    if (
-      elementType === 'BuildingElementGround' &&
-      subtype === 'Suspended_floor' &&
-      typeof envelope.suspendedHeightUpperSurfaceM === 'number' &&
-      Number.isFinite(envelope.suspendedHeightUpperSurfaceM)
-    ) {
-      out.height_upper_surface = roundToTwoDecimals(envelope.suspendedHeightUpperSurfaceM);
-    }
-    return out;
-  }, [arealHeatCapacity, currentData.extra_json, elementType, subtype]);
+  const assemblySourceValues = useMemo(
+    () => assemblySourceValuesFor(currentData?.extra_json, elementType, subtype, arealHeatCapacity),
+    [arealHeatCapacity, currentData.extra_json, elementType, subtype],
+  );
 
   const groundUComputedWPerM2K = useMemo(
     () =>

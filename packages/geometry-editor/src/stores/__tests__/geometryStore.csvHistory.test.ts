@@ -330,8 +330,17 @@ describe('CSV document history', () => {
       }
     });
 
+    it('a default fill just after a selection keeps the model clean and adds no step', () => {
+      const store = loadedStore();
+      store.getState().setSelection({ type: 'element', id: idOf(store, 'Living wall') });
+      store.getState().writeAs('default', () => coldWater(store, 'header tank'));
+      settle();
+      expect(store.getState().getDocumentCsv()).toBe(store.getState().lastSavedCsv);
+      expect(store.getState().history).toHaveLength(1);
+    });
+
     it('a user or preset write marks the model dirty and is an undo step', () => {
-      for (const intent of ['user', 'preset'] as const) {
+      for (const intent of ['user', 'preset:Test'] as const) {
         const store = loadedStore();
         store.getState().writeAs(intent, () => coldWater(store, 'header tank'));
         settle();
