@@ -544,7 +544,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'litres',
   },
   'System:HotWaterSource:heat_exchanger_surface_area': { description: 'Surface area of the heat exchanger coil (unit: m²)', type: 'number', units: 'm²' },
-  'System:SpaceHeatSystem:thermal_mass': { description: 'Thermal mass of the emitters (unit: kWh/K)', type: 'number', units: 'kWh/K' },
+  'System:SpaceHeatSystem:thermal_mass': {
+    description: "Thermal mass of the circuit not in its emitters' own values, such as a buffer tank (unit: kWh/K). HEM adds it to each radiator's own thermal mass, so with radiators that give theirs (as products do), enter only the rest.",
+    type: 'number',
+    units: 'kWh/K',
+  },
   'System:HotWaterSource:daily_losses_declared': {
     description: "Standing heat loss (unit: kWh/day)",
     type: 'number',

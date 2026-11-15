@@ -46,11 +46,11 @@ const STOREY_BELOW: f64 = 2.2 + STOREY_GAP;
 const COMMON_WALL_HEIGHT: f64 = 1.8;
 /// ours: how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
-/// DESNZ-defined: heated pitched roof areal heat capacity when the element states none (J/m².K).
+/// DESNZ-defined: the areal heat capacity (J/m².K) of a heated pitched roof, a door and a window
+/// that state none. HEMIE reads a window's only in a party or sheltered wall.
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
-/// ours: HEMIE reads a window's areal heat capacity only for windows in party or sheltered
-/// walls; a window elsewhere carries this placeholder unless the glazing setting states one.
-const UNUSED_WINDOW_HEAT_CAPACITY: f64 = 0.0;
+const DOOR_HEAT_CAPACITY: f64 = 50_000.0;
+const WINDOW_HEAT_CAPACITY: f64 = 20_000.0;
 const SETTING: &str = "HEMIE_";
 /// Metadata rows older saved files carry that the converter no longer reads, with the fix.
 const RETIRED_SETTINGS: [(&str, &str); 3] = [
@@ -910,13 +910,7 @@ impl Ctx<'_> {
         }
         if let Some(capacity) = self.heat_capacity(construction_type, elements) {
             c.insert("areal_heat_capacity".into(), json!(capacity));
-            // Windows and doors have no default to replace (see `require`).
-            if !matches!(
-                construction_type,
-                "window" | "external_door" | "party_or_sheltered_door"
-            ) {
-                stated_mass.push(format!("areal heat capacity {} kJ/m²K", capacity / 1000.0));
-            }
+            stated_mass.push(format!("areal heat capacity {} kJ/m²K", capacity / 1000.0));
         }
         if !stated_mass.is_empty() {
             let names = quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>());
@@ -1060,8 +1054,8 @@ impl Ctx<'_> {
         value
     }
 
-    /// Fields HEMIE needs that have no DESNZ default; each one missing is listed in the
-    /// settings error.
+    /// Fields HEMIE needs: each one with no DESNZ default that is missing is listed in the
+    /// settings error; an areal heat capacity with one is filled.
     fn require(&mut self, construction_type: &str, c: &mut Map<String, Value>) {
         let has = |c: &Map<String, Value>, key: &str| c.get(key).is_some_and(|v| !v.is_null());
         let setting = format!("{SETTING}construction_{construction_type}");
@@ -1096,22 +1090,17 @@ impl Ctx<'_> {
                 {
                     need("glazing_gap");
                 }
-                if !has(c, "areal_heat_capacity") {
-                    need("areal_heat_capacity");
-                }
-            }
-            "heated_pitched_roof" if !has(c, "areal_heat_capacity") => {
-                c.insert(
-                    "areal_heat_capacity".into(),
-                    json!(HEATED_PITCHED_ROOF_HEAT_CAPACITY),
-                );
-            }
-            // The pinned HEM:EPC schema requires a door's areal heat capacity (later HEMIE
-            // releases default it; plan question E34), so the door setting states it.
-            "external_door" | "party_or_sheltered_door" if !has(c, "areal_heat_capacity") => {
-                need("areal_heat_capacity")
             }
             _ => {}
+        }
+        let default = match construction_type {
+            "window" => WINDOW_HEAT_CAPACITY,
+            "external_door" | "party_or_sheltered_door" => DOOR_HEAT_CAPACITY,
+            "heated_pitched_roof" => HEATED_PITCHED_ROOF_HEAT_CAPACITY,
+            _ => return,
+        };
+        if !has(c, "areal_heat_capacity") {
+            c.insert("areal_heat_capacity".into(), json!(default));
         }
     }
 }
@@ -1910,7 +1899,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             placed.insert(opening.name.to_string());
             on_edge.push(opening);
             if opening.ty == "BuildingElementTransparent" {
-                if let Some(mut w) = window(ctx, opening, kind == Kind::External) {
+                if let Some(mut w) = window(ctx, opening) {
                     w[SOURCE] = json!(opening.path());
                     win.push(w);
                 }
@@ -2136,6 +2125,24 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
+    // DESNZ-defined: the wind sheltering level of a suspended floor follows the shield class,
+    // stated or else from the terrain class.
+    let shield = full_ventilation["shield_class"].as_str().or(
+        match full_ventilation["terrain_class"].as_str() {
+            Some("OpenField" | "OpenWater") => Some("Open"),
+            Some("Suburban") => Some("Normal"),
+            Some("Urban") => Some("Shielded"),
+            _ => None,
+        },
+    );
+    if let Some(level) = match shield {
+        Some("Open") => Some("Exposed"),
+        Some("Normal") => Some("Average"),
+        Some("Shielded") => Some("Sheltered"),
+        _ => None,
+    } {
+        geometry.insert("wind_sheltering_level".into(), json!(level));
+    }
     // DESNZ-defined: the base height, or else HEMIE's estimate from the base storey. The
     // estimate is given as the height because the pinned Orchestrator drops a Geometry's
     // base_storey_of_dwelling before HEMIE reads it.
@@ -2305,16 +2312,7 @@ fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
         return if fields.is_empty() {
             format!("The {t} fabric default cannot be read. Set it again in {WHERE}.")
         } else {
-            // HEMIE reads a window's heat capacity only in a party or sheltered wall.
-            let list: Vec<String> = fields
-                .iter()
-                .map(|f| match (t.as_str(), f.as_str()) {
-                    ("window", "areal_heat_capacity") => {
-                        "areal heat capacity (for a window in a party or sheltered wall)".into()
-                    }
-                    _ => words(f),
-                })
-                .collect();
+            let list: Vec<String> = fields.iter().map(|f| words(f)).collect();
             format!("The {t} fabric default states no {}. Choose it in {WHERE}, or on each {t} element.", list.join(" or "))
         };
     }
@@ -2357,19 +2355,13 @@ fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
     }
 }
 
-fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
+fn window(ctx: &mut Ctx, e: &El) -> Option<Value> {
     let Some(sections) = e.get("window_sections") else {
         // DESNZ-defined: the opening type has no default, so the window must state it.
         ctx.errors.push(error("OPENING", e.path(), format!("Window '{}' does not state its opening type. Choose its opening type on the window.", e.name)));
         return None;
     };
-    // ours: see UNUSED_WINDOW_HEAT_CAPACITY.
-    let extra = if in_external_element {
-        vec![("areal_heat_capacity", json!(UNUSED_WINDOW_HEAT_CAPACITY))]
-    } else {
-        Vec::new()
-    };
-    let key = ctx.construction("window", &[e], &extra);
+    let key = ctx.construction("window", &[e], &[]);
     let mut w = ctx.with_age_band(
         &[e],
         json!({"width": e.num("width"), "height": e.num("height"), "window_sections": sections, "construction": key}),
@@ -2518,7 +2510,7 @@ fn roof_windows(
         .filter(|w| hosts.iter().any(|h| w.host() == Some(h.name)))
         .filter_map(|w| {
             placed.insert(w.name.to_string());
-            let mut value = window(ctx, w, true)?;
+            let mut value = window(ctx, w)?;
             systems::no_roof_window_vents(ctx, w.name, &mut value);
             Some(value)
         })
@@ -2833,7 +2825,7 @@ fn room_in_roof(
             .filter(|x| x.host() == Some(w.name))
             .filter_map(|x| {
                 placed.insert(x.name.to_string());
-                window(ctx, x, kind == Kind::External)
+                window(ctx, x)
             })
             .collect();
         if kind == Kind::External || !lights.is_empty() {
@@ -3046,7 +3038,7 @@ fn dormer<'e>(
         return None;
     };
     placed.insert(front.name.to_string());
-    let front_window = window(ctx, front, true)?;
+    let front_window = window(ctx, front)?;
     // DESNZ-defined: one side window serves both cheek walls, or none.
     let cheek = |role: &str| {
         members.iter().find(|m| {
@@ -3069,7 +3061,7 @@ fn dormer<'e>(
         ([x], [y]) => {
             placed.insert(x.name.to_string());
             placed.insert(y.name.to_string());
-            let (wx, wy) = (window(ctx, x, true)?, window(ctx, y, true)?);
+            let (wx, wy) = (window(ctx, x)?, window(ctx, y)?);
             if wx != wy {
                 ctx.errors.push(error("DORMER", x.path(), format!("Dormer side windows '{}' and '{}' differ. Both sides of a dormer share one window: make them the same.", x.name, y.name)));
                 return None;
@@ -4150,12 +4142,51 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
-    fn a_missing_window_heat_capacity_names_where_it_is_read() {
-        let fields = BTreeSet::from(["areal_heat_capacity".to_string()]);
-        assert_eq!(
-            missing_setting_message("HEMIE_construction_window", &fields),
-            "The window fabric default states no areal heat capacity (for a window in a party or sheltered wall). Choose it in Global Settings > Defaults > Fabric, or on each window element."
+    fn doors_and_windows_with_no_heat_capacity_take_the_defaults() {
+        let settings = SETTINGS.replace(
+            "HEMIE_construction_external_door,\"{\"\"areal_heat_capacity\"\":20000}\"",
+            "HEMIE_construction_window,\"{\"\"frame_material\"\":\"\"wood or PVC\"\",\"\"glazing_type\"\":\"\"single\"\"}\"",
         );
+        let window = "G,Z,BuildingElementTransparent,2,90,2,1,90,1,FALSE,FALSE,W01,\"8,2,0|8,4,0\",\"{\"\"window_sections\"\":[{\"\"window_type\"\":\"\"full opening\"\"}]}\"";
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        exposed.push(window.into());
+        let (model, errors, _) = run(&csv(&settings, &exposed, &ground(&BOX)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let capacity = |construction_type: &str| -> Vec<Value> {
+            model["Zone"]["constructions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .filter(|c| c["construction_type"] == construction_type)
+                .map(|c| c["areal_heat_capacity"].clone())
+                .collect()
+        };
+        assert_eq!(capacity("external_door"), [json!(50_000.0)]);
+        assert_eq!(capacity("window"), [json!(20_000.0)]);
+    }
+
+    #[test]
+    fn the_wind_sheltering_level_follows_the_shield_class_or_the_terrain() {
+        for (terrain, shield, level) in [
+            ("Suburban", None, "Average"),
+            ("Urban", None, "Sheltered"),
+            ("OpenWater", None, "Exposed"),
+            ("Urban", Some("Open"), "Exposed"),
+            ("OpenField", Some("Shielded"), "Sheltered"),
+        ] {
+            let mut model = full_input();
+            model["InfiltrationVentilation"]["terrain_class"] = json!(terrain);
+            if let Some(shield) = shield {
+                model["InfiltrationVentilation"]["shield_class"] = json!(shield);
+            }
+            let (model, errors, _) = run_on(&house(gable_roof()), model);
+            assert!(errors.is_empty(), "{errors:#?}");
+            assert_eq!(
+                model["Zone"]["wind_sheltering_level"], level,
+                "{terrain} {shield:?}"
+            );
+        }
     }
 
     #[test]
