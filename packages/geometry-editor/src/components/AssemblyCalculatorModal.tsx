@@ -79,7 +79,8 @@ import { FHS_MASS_CLASS_COMMENTARY } from '../lib/assemblyAppliedUi';
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { GroundFloorType } from '../lib/groundUValueCalculator';
 import type { GeometryWorkspaceResourcePort } from '../../../geometry-editor-host/src';
-import { useTargetRules } from '../hooks/useTargetRules';
+import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
+import { targetRules } from '../../../geometry-editor-host/src/schemaPort';
 import type {
   ExternalConstructionDetailProfile,
   ExternalDetailCataloguePort,
@@ -224,7 +225,8 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   groundFloorType = null,
 }) => {
   // The target takes areal heat capacity as a number or as a class on its own scale.
-  const arealHeatCapacityInput = useTargetRules().arealHeatCapacity;
+  // The rule follows the target alone, not the model settings, so the modal needs no store.
+  const arealHeatCapacityInput = targetRules(useGeometrySchemaPort(), {}).arealHeatCapacity;
   const arealWrite = arealHeatCapacityWrite(arealHeatCapacityInput, elementMode);
   const arealScale = arealHeatCapacityInput.classes;
   const snapsToFhsBand = arealWrite !== 'number';
