@@ -1394,6 +1394,17 @@ export const validateElementCore = (
         && !(elementsById && isConservatoryGlazing(el, elementsById))) {
         issues.push(geo('Opening type is not set. Choose how this window opens.', 'window_sections'));
       }
+      // HEMIE: each stated width fraction is above 0 and at most 1; stated fractions total 1 (the rest share what is left).
+      const fractions = windowSections(el).flatMap((section) => section.widthFraction ?? []);
+      const unstated = windowSections(el).length - fractions.length;
+      const total = fractions.reduce((sum, fraction) => sum + fraction, 0);
+      if (fractions.some((fraction) => !(fraction > 0 && fraction <= 1))) {
+        issues.push(geo('Each section width fraction must be more than 0 and at most 1.', 'window_sections'));
+      } else if (fractions.length && (unstated ? total >= 1 : Math.abs(total - 1) > 0.02)) {
+        issues.push(geo(unstated
+          ? 'Section width fractions must total less than 1, so the other sections share the rest.'
+          : 'Section width fractions must total 1.', 'window_sections'));
+      }
       issues.push(...validateWindowOpenings(
         el,
         windowPartsArePhysical(schemaPort, targetSchemaMode(schemaPort)),

@@ -469,3 +469,20 @@ it('blocks a context shading row with a blank angle or distance, which the conve
   expect(validateElementCore(context, baseContext(context)).issues.map((issue) => issue.fieldKey))
     .toEqual(expect.arrayContaining(['start_angle', 'distance']));
 });
+
+describe('window section width fractions', () => {
+  const issues = (fractions: (number | undefined)[]) => {
+    const el = { ...window(0), extra_json: { window_sections: fractions.map((width_fraction) => ({ window_type: 'closed', width_fraction })) } } as Element;
+    return validateElementCore(el, baseContext(el) as never).issues.filter((issue) => issue.fieldKey === 'window_sections');
+  };
+  it('accepts fractions that total 1, or a stated share with the rest unstated', () => {
+    expect(issues([0.5, 0.5])).toEqual([]);
+    expect(issues([0.4, undefined])).toEqual([]);
+    expect(issues([undefined, undefined])).toEqual([]);
+  });
+  it('rejects a fraction outside (0, 1] and totals other than 1', () => {
+    expect(issues([0, 1])).toHaveLength(1);
+    expect(issues([0.3, 0.3])).toHaveLength(1);
+    expect(issues([1, undefined])).toHaveLength(1);
+  });
+});

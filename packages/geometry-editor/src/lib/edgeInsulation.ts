@@ -57,11 +57,13 @@ export function formValuesToExtraJsonEdgeInsulation(v: EdgeInsulationFormValues,
     const dimStr = v[type].widthOrDepth.trim();
     if (!rStr && !dimStr) continue;
     // `Number('')` is 0 — treat empty fields as incomplete while the user is typing. An existing
-    // building (`partial`) may give one of the two: the conversion takes a default for the other.
+    // building (`partial`) may give one of the two: the conversion takes a default for a blank resistance or vertical depth.
     if (!partial && (!rStr || !dimStr)) return { ok: false, reason: 'incomplete' };
     const r = rStr ? Number(rStr) : undefined;
     const dim = dimStr ? Number(dimStr) : undefined;
     if ((r !== undefined && !Number.isFinite(r)) || (dim !== undefined && !Number.isFinite(dim))) return { ok: false, reason: 'incomplete' };
+    // A horizontal width has no default.
+    if (type === 'horizontal' && !dimStr) return { ok: false, reason: 'incomplete' };
     value.push({ type, ...(r !== undefined && { edge_thermal_resistance: r }), ...(dim !== undefined && { [type === 'horizontal' ? 'width' : 'depth']: dim }) });
   }
   return { ok: true, value: value.length ? value : null };

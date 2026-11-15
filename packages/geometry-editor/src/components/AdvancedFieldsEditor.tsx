@@ -343,14 +343,20 @@ export function pruneSpaceHeatSystemUnusedWeatherCompensationValues(
     }
     const system = systemUnknown as Record<string, unknown>;
     const ecodesignController = readExtraJsonRecord(system.ecodesign_controller);
-    if (!isKnownNonWeatherCompensatedEcodesignClass(ecodesignController.ecodesign_control_class)) {
+    const controllerClass = parseEcodesignControlClass(ecodesignController.ecodesign_control_class);
+    if (controllerClass === null) {
       nextSystems[systemName] = systemUnknown;
       continue;
     }
 
     const nextEcodesignController = { ...ecodesignController };
     let removedWeatherField = false;
-    for (const field of ECODESIGN_WEATHER_COMPENSATION_FIELDS) {
+    // HEM rejects load compensation under classes I to IV (it reads it for V to VIII only).
+    const unused: readonly string[] = [
+      ...(NON_WEATHER_COMPENSATED_ECODESIGN_CLASSES.has(controllerClass) ? ECODESIGN_WEATHER_COMPENSATION_FIELDS : []),
+      ...(controllerClass < 5 || controllerClass > 8 ? LOAD_COMPENSATION_FIELDS : []),
+    ];
+    for (const field of unused) {
       if (Object.prototype.hasOwnProperty.call(nextEcodesignController, field)) {
         delete nextEcodesignController[field];
         removedWeatherField = true;
@@ -465,7 +471,10 @@ export function applyEcodesignControlClassEnum(
           changed = true;
           continue;
         }
-        if (key === 'EnergySupply' && supplyNames.length && child && typeof child === 'object' && !Array.isArray(child)) {
+        // A heat-network product supply (HIU, DirectFeed) has an object branch: leave it as the schema has it.
+        const hasObjectBranch = Array.isArray(readExtraJsonRecord(child).anyOf)
+          && (readExtraJsonRecord(child).anyOf as unknown[]).some((branch) => readExtraJsonRecord(branch).type === 'object');
+        if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
           const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: supplyNames.map((name) => ({ const: name, title: name })) };
           delete picker.anyOf;
           nextProperties[key] = picker;

@@ -110,7 +110,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
       </div>
       {existing && (
         <p style={{ margin: ROW_MARGIN(compact), fontSize: 12, color: 'var(--text-secondary)' }}>
-          Details not known? Leave these blank: the default edge insulation applies. A blank resistance or size takes its default.
+          Details not known? Leave these blank: the default edge insulation applies. A blank resistance or vertical depth takes its default; the horizontal width has none.
         </p>
       )}
       {segment('horizontal')}

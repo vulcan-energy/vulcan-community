@@ -140,7 +140,8 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { roundToTwoDecimals } from '../geometry/constants';
 import type { Element, ElementType, Floor } from '../geometry/types';
-import type { GeometryStoreApi } from '../stores/geometryStore';
+import { useGeometryStore, type GeometryStoreApi } from '../stores/geometryStore';
+import { isExistingBuilding } from '../lib/windowOpenings';
 import {
   buildDormerBundleDraft,
   getDormerBundleInfo,
@@ -259,6 +260,9 @@ export function useDormerBundleEditor(args: {
   const [selectedDormerType, setSelectedDormerType] = useState<DormerType>('mono-pitch');
   const [dormerDepth, setDormerDepth] = useState<number>(1.5);
   const [dormerRoofIsUnheatedPitchedRoof, setDormerRoofIsUnheatedPitchedRoof] = useState<boolean>(false);
+  const [dormerSideWindows, setDormerSideWindows] = useState<boolean>(false);
+  const [dormerError, setDormerError] = useState<string | null>(null);
+  const existingBuilding = useGeometryStore(isExistingBuilding);
 
   const mergeDormerExtraJson = (
     existingExtraJson: Record<string, unknown> | undefined,
@@ -335,6 +339,7 @@ export function useDormerBundleEditor(args: {
       dormerRoofPitch: dormerDraftValuesRef.current.dormerRoofPitch,
       gableRoofPitch: dormerDraftValuesRef.current.gableRoofPitch,
       isUnheatedPitchedRoof: dormerRoofIsUnheatedPitchedRoof,
+      sideWindows: dormerSideWindows,
       windowWidth: dormerDraftValuesRef.current.windowWidth,
       windowHeight: dormerDraftValuesRef.current.windowHeight,
       windowSillHeight: dormerDraftValuesRef.current.windowSillHeight,
@@ -381,6 +386,7 @@ export function useDormerBundleEditor(args: {
         windowHeight: nextParameters.windowHeight,
         windowSillHeight: nextParameters.windowSillHeight,
         frameAreaFraction: nextParameters.frameAreaFraction,
+        sideWindows: nextParameters.sideWindows,
       },
       names,
       bundleName,
@@ -496,6 +502,7 @@ export function useDormerBundleEditor(args: {
       dormerRoofPitch: metadata.dormerRoofPitch,
       gableRoofPitch: metadata.gableRoofPitch,
       isUnheatedPitchedRoof: metadata.isUnheatedPitchedRoof,
+      sideWindows: metadata.sideWindows,
       windowWidth: metadata.windowWidth,
       windowHeight: metadata.windowHeight,
       windowSillHeight: metadata.windowSillHeight,
@@ -566,7 +573,12 @@ export function useDormerBundleEditor(args: {
     if (!selection.id || !selectedIsDormerAnchor) return;
     try {
       regenerateDormerAnchor(selection.id, overrides);
-    } catch { /* swallow: best-effort */ }
+      setDormerError(null);
+    } catch (error) {
+      // Side windows that do not fit are named; the dormer stays as it was.
+      if (overrides.parameters?.sideWindows) setDormerSideWindows(false);
+      if (dormerSideWindows || overrides.parameters?.sideWindows) setDormerError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const commitDormerNumericParameter =
@@ -664,6 +676,7 @@ export function useDormerBundleEditor(args: {
     dormerRoofPitchInput.setValue(dormerMetadata.dormerRoofPitch);
     gableRoofPitchInput.setValue(dormerMetadata.gableRoofPitch);
     setDormerRoofIsUnheatedPitchedRoof(!!dormerMetadata.isUnheatedPitchedRoof);
+    setDormerSideWindows(!!dormerMetadata.sideWindows);
     dormerWindowWidthInput.setValue(roundToTwoDecimals(dormerMetadata.windowWidth));
     dormerWindowHeightInput.setValue(roundToTwoDecimals(dormerMetadata.windowHeight));
     dormerWindowSillHeightInput.setValue(roundToTwoDecimals(dormerMetadata.windowSillHeight));
@@ -832,6 +845,27 @@ export function useDormerBundleEditor(args: {
           size="md"
         />
       </div>
+      {existingBuilding && (
+        <>
+          <div className="element-input">
+            <label className="checkbox-container" htmlFor="dormer-side-windows">
+              <input
+                type="checkbox"
+                className="styled-checkbox"
+                checked={dormerSideWindows}
+                onChange={(e) => {
+                  setDormerSideWindows(e.target.checked);
+                  commitDormerAnchorChanges({ parameters: { sideWindows: e.target.checked } });
+                }}
+                id="dormer-side-windows"
+              />
+              <span className="checkbox-custom"></span>
+              Same window in both side walls
+            </label>
+          </div>
+          {dormerError && <p className="hem-target-help" role="alert">{dormerError}</p>}
+        </>
+      )}
       {!constructionBands && (
         <>
           {renderFieldLabel('Window Frame Area Fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}

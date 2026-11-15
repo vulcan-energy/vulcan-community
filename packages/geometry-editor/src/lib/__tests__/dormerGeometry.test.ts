@@ -198,6 +198,31 @@ describe('dormerGeometry', () => {
     expectOrientationMatchesLeadEdgeOutwardNormal(draft!.roof, 33);
   });
 
+  it('adds the same window in both cheek walls when side windows are on', () => {
+    const draft = buildDormerBundleDraft({
+      host: makeHostRoof(),
+      dormerType: 'mono-pitch',
+      windowCenterPlanPoint: { x: 2, y: 1 },
+      placementDefaults: { sideWindows: true, dormerDepth: 2.5, windowWidth: 0.6 },
+    });
+    const sides = draft!.members.filter((member) => member.role.endsWith('-side-window'));
+    expect(sides.map((member) => member.parent)).toEqual([draft!.names.leftCheekWall, draft!.names.rightCheekWall]);
+    const [left, right] = sides.map((member) => member.updates as Record<string, unknown>);
+    for (const key of ['width', 'height', 'area', 'base_height', 'mid_height', 'pitch']) expect(left[key]).toEqual(right[key]);
+    expect(left.width).toBe(0.6);
+    expect(draft!.members.filter((member) => member.role === 'window')).toHaveLength(1);
+    expect(buildDormerBundleDraft({ host: makeHostRoof(), dormerType: 'mono-pitch', windowCenterPlanPoint: { x: 2, y: 1 } })!.members.some((member) => member.role.endsWith('-side-window'))).toBe(false);
+  });
+
+  it('names the side wall when the side windows do not fit', () => {
+    expect(() => buildDormerBundleDraft({
+      host: makeHostRoof(),
+      dormerType: 'mono-pitch',
+      windowCenterPlanPoint: { x: 2, y: 1 },
+      placementDefaults: { sideWindows: true, dormerWidth: 3, windowWidth: 2.5 },
+    })).toThrow(/side window does not fit/);
+  });
+
   it('returns the expected placement defaults', () => {
     expect(getDormerPlacementDefaults()).toEqual({
       dormerWidth: 2.0,

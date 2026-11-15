@@ -33,6 +33,8 @@ export type DormerBundleRole =
   | 'front-wall-anchor'
   | 'left-cheek-wall'
   | 'right-cheek-wall'
+  | 'left-side-window'
+  | 'right-side-window'
   | 'roof'
   | 'left-roof'
   | 'right-roof'
@@ -50,6 +52,8 @@ export interface DormerPlacementDefaults {
   windowSillHeight: number;
   frameAreaFraction: number;
   isUnheatedPitchedRoof: boolean;
+  /** Existing buildings: the same window in both cheek walls (the dormer's side window). */
+  sideWindows?: boolean;
 }
 
 export interface DormerPlanPoint {
@@ -613,6 +617,7 @@ function parseDormerParameters(raw: unknown): Partial<DormerBundleParameters> {
       typeof params.isUnheatedPitchedRoof === 'boolean'
         ? params.isUnheatedPitchedRoof
         : undefined,
+    sideWindows: params.sideWindows === true ? true : undefined,
   };
 }
 
@@ -675,6 +680,8 @@ export function getDormerBundleInfo(element: Element | null | undefined): Dormer
     role !== 'front-wall-anchor' &&
     role !== 'left-cheek-wall' &&
     role !== 'right-cheek-wall' &&
+    role !== 'left-side-window' &&
+    role !== 'right-side-window' &&
     role !== 'roof' &&
     role !== 'left-roof' &&
     role !== 'right-roof' &&
@@ -865,6 +872,7 @@ export function getDormerBundleMetadata(element: Element | null | undefined): Do
     windowSillHeight: params.windowSillHeight,
     frameAreaFraction: params.frameAreaFraction,
     isUnheatedPitchedRoof: params.isUnheatedPitchedRoof ?? false,
+    sideWindows: params.sideWindows === true,
   };
 }
 
@@ -1416,6 +1424,7 @@ export function buildDormerBundleDraft(params: {
       windowSillHeight: resolved.windowSillHeight,
       frameAreaFraction: resolved.frameAreaFraction,
       isUnheatedPitchedRoof: requested.isUnheatedPitchedRoof,
+      ...(requested.sideWindows && { sideWindows: true }),
     },
     thermal_overrides: thermalOverrides,
   };
@@ -1806,12 +1815,48 @@ export function buildDormerBundleDraft(params: {
     }, thermalOverrides.window),
   };
 
+  // The same window in each cheek wall: placed from the front corner, where the wall is tallest
+  // (it has the front window's sill and head, so it fits the wall's height there).
+  const sideWindow = (role: 'left-side-window' | 'right-side-window', cheekName: string, front: DormerLinePoint, end: DormerLinePoint, span: number): DormerBundleMemberDraft => {
+    const from = WINDOW_SIDE_CLEARANCE_M;
+    const to = from + resolved.windowWidth;
+    if (to + WINDOW_SIDE_CLEARANCE_M > span) {
+      throw new Error(`The side window does not fit the dormer's side wall '${cheekName}'. Make the window smaller or the dormer deeper.`);
+    }
+    const at = (x: number) => {
+      const t = x / span;
+      return { x: front.x + (end.x - front.x) * t, y: front.y + (end.y - front.y) * t, z: front.z + (end.z - front.z) * t };
+    };
+    const geometry = canonicalizeDormerSegment([at(from), at(to)], dormerInteriorPoint, globalOrientationOffset);
+    return {
+      role,
+      name: `${cheekName} Window`,
+      type: 'BuildingElementTransparent',
+      parent: cheekName,
+      updates: {
+        ...window,
+        coordinates: geometry.coordinates,
+        orientation360: geometry.orientation360,
+        extra_json: mergeDormerStructuralAndThermalExtraJson({
+          dormer_bundle: { ...sharedBundleMeta, role, anchor_name: names.frontWall },
+        }, thermalOverrides.window),
+      },
+    };
+  };
+  const sideWindows: DormerBundleMemberDraft[] = requested.sideWindows
+    ? [
+        sideWindow('left-side-window', names.leftCheekWall, resolved.frontLeft, leftCheekEnd, leftCheekSpan),
+        sideWindow('right-side-window', names.rightCheekWall, resolved.frontRight, rightCheekEnd, rightCheekSpan),
+      ]
+    : [];
+
   const members: DormerBundleMemberDraft[] = [
     { role: 'front-wall-anchor', name: names.frontWall, type: 'BuildingElementOpaque', parent: host.name, updates: frontWall },
     { role: 'left-cheek-wall', name: names.leftCheekWall, type: 'BuildingElementOpaque', parent: names.frontWall, updates: leftCheekWall },
     { role: 'right-cheek-wall', name: names.rightCheekWall, type: 'BuildingElementOpaque', parent: names.frontWall, updates: rightCheekWall },
     ...roofs.map((roof) => ({ role: roof.role, name: roof.name, type: 'BuildingElementOpaque' as const, parent: null, updates: roof.element })),
     { role: 'window', name: names.window, type: 'BuildingElementTransparent', parent: names.frontWall, updates: window },
+    ...sideWindows,
   ];
 
   return {

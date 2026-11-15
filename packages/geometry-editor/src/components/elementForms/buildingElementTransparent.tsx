@@ -818,7 +818,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                           type="number"
                           label="Width fraction"
                           placeholder="Equal share"
-                          min="0"
+                          min="0.01"
                           max="1"
                           step="0.05"
                           value={section.widthFraction?.toString() ?? ''}
