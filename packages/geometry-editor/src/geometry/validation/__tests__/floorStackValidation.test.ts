@@ -47,6 +47,12 @@ function validationContext(elements: Element[], modelFloors: Floor[] = floors) {
 }
 
 describe('canonical floor-stack validation', () => {
+  it('leaves out a bay wall, whose height follows its bundle', () => {
+    const bay = { ...wall('bay-wall', 'floor-1', 1, 2, 4), extra_json: { hemie_bundle: { kind: 'bay', bundle_id: 'b', role: 'front', host_wall: 'x' } } };
+    const elements = [wall('lower-wall', 'floor-0', 0, 2), bay];
+    expect(validateElementCore(bay, validationContext(elements)).warnings.map((w) => w.fieldKey)).not.toContain('floor_stack');
+  });
+
   it('warns on the affected walls when adjacent storeys separate', () => {
     const elements = [
       wall('lower-wall', 'floor-0', 0, 2),

@@ -109,7 +109,7 @@ impl ProductDatabase {
             })?;
             let label = [&row["brandName"], &row["modelName"], &row["modelQualifier"]]
                 .into_iter()
-                .filter(|v| !v.is_empty() && v.as_str() != "NULL")
+                .filter(|v| !v.is_empty() && !v.eq_ignore_ascii_case("null"))
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(" ");
@@ -352,7 +352,7 @@ fn pick(tables: &'static [&'static str], ask: impl Into<String>) -> Option<Rule>
 fn no_default(tables: &'static [&'static str], what: &str) -> Option<Rule> {
     pick(
         tables,
-        format!("there is no default {what} product; pick it on the row"),
+        format!("there is no default {what} product; pick it on the system"),
     )
 }
 
@@ -397,7 +397,7 @@ pub(crate) fn rule(
         ("HeatSourceWet/*", "BackBoiler") => Some(Rule::Pick {
             tables: &["RoomHeater"],
             filter: Some((CHILD_TABLE, "BackBoiler".into())),
-            ask: "there is no default back boiler product; pick its room heater with back boiler on the row".into(),
+            ask: "there is no default back boiler product; pick its room heater with back boiler on the system".into(),
             setting: None,
         }),
         ("HeatSourceWet/*", "DirectElectricBoiler") => no_default(&["ElectricBoiler"], "electric boiler"),
@@ -615,7 +615,7 @@ pub(crate) fn resolve_products(
             };
             let pattern = slot_rule.path.join("/");
             let Some(rule) = rule(&pattern, &kind, name, object, &snapshot) else {
-                errors.push(error("E_PRODUCT_REQUIRED", path.clone(), format!("{who} needs a HEM Database product, and Vulcan has no product rule for it. Pick its product on the row.")));
+                errors.push(error("E_PRODUCT_REQUIRED", path.clone(), format!("{who} needs a HEM Database product, and Vulcan has no product rule for it. Pick its product on the system.")));
                 slots.push(ProductSlot {
                     path,
                     system_type,
@@ -737,7 +737,7 @@ pub(crate) fn resolve_products(
                             .filter(|_| *table == "ElectricBattery")
                             .map(|c| format!(" It replaces the authored capacity {c} kWh with the product's {} kWh.", product.fields.get("capacity").map_or("", String::as_str)))
                             .unwrap_or_default();
-                        notices.push(notice(&path, format!("{who} uses HEM Database product {} ({}): {why}.{replaced} Pick a product on the row to change it.", product.id, product.label)));
+                        notices.push(notice(&path, format!("{who} uses HEM Database product {} ({}) by default: it is the only one of its type.{replaced} Pick another product on the system to change it.", product.id, product.label)));
                         (
                             Some(product.id),
                             ProductSource::Default,
@@ -746,7 +746,7 @@ pub(crate) fn resolve_products(
                         )
                     }
                     (Rule::Auto { table, .. }, found) => {
-                        errors.push(error("E_PRODUCT_REQUIRED", path.clone(), format!("{who} needs a HEM Database product. The pinned data has {} {table} products for it, so there is no default; pick one on the row.", found.len())));
+                        errors.push(error("E_PRODUCT_REQUIRED", path.clone(), format!("{who} needs a HEM Database product. The pinned data has {} {table} products for it, so there is no default; pick one on the system.", found.len())));
                         (None, ProductSource::Product, None, "no default".into())
                     }
                     (Rule::Pick { ask, .. }, found) => {
@@ -1480,9 +1480,8 @@ pub(crate) mod tests {
         assert!(said(
             "replaces the authored capacity 5 kWh with the product's 3.84 kWh"
         ));
-        assert!(said(
-            "the only InstantaneousWwhrSystem product with systemType B"
-        ));
+        assert!(said("uses HEM Database product 83001"));
+        assert!(said("by default: it is the only one of its type."));
         // Defaults are written to the converted model only.
         assert_eq!(model["HeatSourceWet"]["hiu"]["product_id"], 410000);
     }

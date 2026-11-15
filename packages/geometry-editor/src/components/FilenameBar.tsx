@@ -150,6 +150,7 @@ function PartyWallSaveReview({ issues, anchorRef, onClose, onApply }: {
   </SaveReviewPopover>;
 }
 
+const EMPTY_BUILD_ERROR_ITEMS: readonly BuildErrorItem[] = [];
 const EMPTY_FILENAME_ACTION_CONTRIBUTIONS =
   defineFilenameActionContributions<FilenameBarActionContext, React.ReactNode>({
     filenameActions: [],
@@ -214,7 +215,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   defaultsInvalid,
   globalSettingsIndicator,
   buildError,
-  buildErrorItems = [],
+  buildErrorItems: reportedBuildErrorItems = EMPTY_BUILD_ERROR_ITEMS,
   filenameActionContributions = EMPTY_FILENAME_ACTION_CONTRIBUTIONS,
 }) => {
   const documentSnapshot = useSyncExternalStore(
@@ -231,6 +232,14 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     (state) => state.complianceSettings.scenariosBaseModelEnabled === false,
   );
   const elementsById = useGeometryStore((s) => s.elementsById);
+  // The live target check's errors show from the moment a model opens, until a Save reports its own.
+  const targetValidationItems = useGeometryStore((s) => s.targetValidation?.items);
+  const buildErrorItems = useMemo(() => {
+    if (reportedBuildErrorItems.some((item) => item.severity !== 'warning')) return reportedBuildErrorItems;
+    const live = (targetValidationItems ?? []).filter((item) => item.severity !== 'warning');
+    return live.length ? [...live, ...reportedBuildErrorItems] : reportedBuildErrorItems;
+  }, [reportedBuildErrorItems, targetValidationItems]);
+  const hasBuildIssues = !!buildError || buildErrorItems.length > 0;
   const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
   const migrationIssues = useMemo(() => csvMigrationIssues(Object.values(elementsById), sourceCsvVersion), [elementsById, sourceCsvVersion]);
   const reviewDocumentKey = documentSnapshot.activeDocument?.id ?? filename;
@@ -240,11 +249,11 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     migrationIssues.length === 0 &&
     lastSaveValidationFailed
     && buildErrorItems.length === 0
-    && !buildError
+    && !hasBuildIssues
     && !showSaveErrorIndicator
     && currentSaveStatus !== 'saving';
   const hasSaveErrorDropdownContent =
-    showSaveErrorIndicator || !!buildError || showLastSaveValidationFailure;
+    showSaveErrorIndicator || hasBuildIssues || showLastSaveValidationFailure;
   const [isSaveErrorModalOpen, setIsSaveErrorModalOpen] = useState(false);
   const [saveErrorCopied, setSaveErrorCopied] = useState(false);
   const [prevHasSaveErrorDropdownContent, setPrevHasSaveErrorDropdownContent] = useState(hasSaveErrorDropdownContent);
@@ -549,10 +558,10 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     >
       <div className="files-dropdown-header">
         <div className="files-dropdown-title">
-          {showLastSaveValidationFailure ? 'Validation' : saveErrorTitle}
+          {showLastSaveValidationFailure ? 'Validation' : onlyNotices ? 'Notice' : saveErrorTitle}
           {displayedBuildErrorCount > 0 && (
             <span className="save-error-header-count">
-              {displayedBuildErrorCount} error{displayedBuildErrorCount !== 1 ? 's' : ''}
+              {displayedBuildErrorCount} {onlyNotices ? 'notice' : 'error'}{displayedBuildErrorCount !== 1 ? 's' : ''}
             </span>
           )}
         </div>
@@ -781,7 +790,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         </div>
         {/* One chip: live build errors, else a saved file that failed validation
             (a saved flag, not a current error: it may pass now; Saved stands beside it). */}
-        {(buildError && currentSaveStatus !== 'saving') || showLastSaveValidationFailure ? (
+        {(hasBuildIssues && currentSaveStatus !== 'saving') || showLastSaveValidationFailure ? (
           <button
             ref={buildErrorChipRef}
             type="button"

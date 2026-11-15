@@ -95,13 +95,25 @@ describe('FilenameBar validation readiness', () => {
           saveStatus="idle"
           saveError={null}
           buildError="Loading changed the file"
-          buildErrorItems={[{ source: 'schema', severity: 'warning', path: '/', message: 'Loading replaced 1 value in the file.' }]}
+          buildErrorItems={[{ source: 'schema', severity: 'warning', path: '/', message: 'Opening the model updated 1 value.' }]}
         />
       </GeometryStoreProvider>,
     );
 
     expect(screen.getByRole('button', { name: 'Notice (1)' })).toHaveClass('status-chip--warning');
     expect(screen.queryByRole('button', { name: /Build Error/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the live check\'s errors on open, before any save, beside a load notice', () => {
+    const store = createGeometryStore();
+    store.getState().setTargetValidation({ hemVersion: '0.13.2', items: [{ source: 'schema', path: '/OnSiteGeneration/PV/mounting_type', message: 'PV: mounting type is required.' }] });
+    render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null}
+          buildErrorItems={[{ source: 'build', severity: 'warning', message: 'Opening the model updated 1 value.' }]} />
+      </GeometryStoreProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'Build Error (2)' })).toHaveClass('status-chip--error');
   });
 
   it.each([true, undefined])('renders no readiness chip for a %s verdict', (verdict) => {

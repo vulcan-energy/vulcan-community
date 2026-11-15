@@ -79,20 +79,20 @@ fn to_form(
     let mut valid = true;
     for e in validator.iter_errors(&projected) {
         valid = false;
+        let name = path.rsplit('/').next().unwrap_or(path);
         for (at, message, required) in leaves(&e) {
-            let fix = if required {
-                " There is no default; state it on its row."
-            } else {
-                ""
-            };
-            errors.push(error(
-                "SYSTEM",
-                format!("{path}{at}"),
-                format!(
-                    "'{}' in its existing-building form: {message}.{fix}",
-                    path.rsplit('/').next().unwrap_or(path)
+            // A missing field names the field as the editor shows it and points at it.
+            let (at, message) = match required {
+                Some(field) => (
+                    format!("{at}/{field}"),
+                    format!(
+                        "{name}: {} is required. There is no default.",
+                        field.replace('_', " ")
+                    ),
                 ),
-            ));
+                None => (at, format!("{name}: {message}.")),
+            };
+            errors.push(error("SYSTEM", format!("{path}{at}"), message));
         }
     }
     valid.then_some(projected)
@@ -101,7 +101,8 @@ fn to_form(
 /// The errors inside an `anyOf`, leaving out the branches the value is not even the type of
 /// (an optional object's `null` branch), so the message names the missing field.
 /// Each leaf is (instance path, message, whether a required field is missing).
-fn leaves(e: &jsonschema::ValidationError) -> Vec<(String, String, bool)> {
+/// Each failing leaf: its instance path, message, and the missing property when it is one.
+fn leaves(e: &jsonschema::ValidationError) -> Vec<(String, String, Option<String>)> {
     use jsonschema::error::ValidationErrorKind::{AnyOf, Required, Type};
     if let AnyOf { context } = e.kind() {
         let found: Vec<_> = context
@@ -115,11 +116,11 @@ fn leaves(e: &jsonschema::ValidationError) -> Vec<(String, String, bool)> {
             return found;
         }
     }
-    vec![(
-        e.instance_path().to_string(),
-        e.to_string(),
-        matches!(e.kind(), Required { .. }),
-    )]
+    let missing = match e.kind() {
+        Required { property } => property.as_str().map(str::to_string),
+        _ => None,
+    };
+    vec![(e.instance_path().to_string(), e.to_string(), missing)]
 }
 
 /// The HEMIE definition for a system `type` in `section`, if the schema has one.
@@ -330,7 +331,7 @@ fn direct_electric_boiler(
 ) -> bool {
     let has = |key: &str| boiler.get(key).is_some_and(|v| !v.is_null());
     if !has("rated_power") && !has("size_category") {
-        errors.push(error("SYSTEM", format!("{path}/size_category"), format!("Direct electric boiler '{name}': state its size category, or its rated power, on its Systems row. There is no default.")));
+        errors.push(error("SYSTEM", format!("{path}/size_category"), format!("Direct electric boiler '{name}': choose its size category, or state its rated power. There is no default.")));
         return false;
     }
     if !has("electricity_circ_pump") && !has("manufacture_year") {
@@ -625,11 +626,14 @@ mod tests {
             found,
             [
                 "/HeatSourceWet/e/size_category",
-                "/OnSiteGeneration/pv/panels/0"
+                "/OnSiteGeneration/pv/panels/0/mounting_type"
             ],
             "{errors:#?}"
         );
-        assert!(errors[1].message.contains("mounting_type"));
+        assert_eq!(
+            errors[1].message,
+            "pv: mounting type is required. There is no default."
+        );
     }
 
     #[test]
@@ -667,14 +671,15 @@ mod tests {
         assert!(
             errors
                 .iter()
-                .any(|e| e.path == "/HotWaterSource/hw" && e.message.contains("\"location\"")),
+                .any(|e| e.path == "/HotWaterSource/hw/location"
+                    && e.message == "hw: location is required. There is no default."),
             "{errors:#?}"
         );
         assert!(
             errors
                 .iter()
-                .any(|e| e.path == "/HeatSourceWet/hybrid/boiler"
-                    && e.message.contains("\"boiler_location\"")),
+                .any(|e| e.path == "/HeatSourceWet/hybrid/boiler/boiler_location"
+                    && e.message.contains("boiler location is required")),
             "{errors:#?}"
         );
     }

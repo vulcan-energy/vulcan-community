@@ -2286,10 +2286,8 @@ fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
     let names = |doors: &[&El]| quoted(&doors.iter().map(|d| d.name).collect::<Vec<_>>());
     match (marked.as_slice(), doors) {
         ([front], _) => Some(front),
-        ([], [only]) => {
-            ctx.notices.push(notice(&only.path(), format!("'{}' is the model's only door, so it is the front door: its building part is the reference part, and its wall is the first wall of that part's ground storey.", only.name)));
-            Some(only)
-        }
+        // The editor shows the only door as the front door.
+        ([], [only]) => Some(only),
         ([], []) => {
             ctx.errors.push(error("FRONT_DOOR", "/Zone".into(), "The model has no door. The reference building part is the one with the front door; draw the front door.".into()));
             None
@@ -2389,11 +2387,9 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
                 .construction(construction_type)
                 .contains_key("edge_insulation") => {}
             // DESNZ-defined: edge insulation known to be present with no details takes the
-            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool).
-            None => {
-                extra.push(("edge_insulation", json!({"vertical": {}})));
-                ctx.notices.push(notice(&g.path(), format!("Ground floor '{}' is a slab with edge insulation but gives no details, so it uses the default: vertical edge insulation 0.26 m deep, 25 mm mineral wool. Give its edge insulation to change it.", g.name)));
-            }
+            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool). The editor
+            // shows these as the fields' placeholders.
+            None => extra.push(("edge_insulation", json!({"vertical": {}}))),
         }
     }
     let key = ctx.construction(construction_type, &[g], &extra);
@@ -3438,8 +3434,8 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 .replace("|0,6,0\"", &format!("|0,6,0\",{extra}"))
         };
         let exposed = [box_walls(&BOX, &[0, 1]), gable_roof()].concat();
-        // Present with no details: the standard configuration, reported.
-        let (model, errors, notices) = run(&csv(SETTINGS, &exposed, &edge("")));
+        // Present with no details: the standard configuration (the editor shows it as placeholders).
+        let (model, errors, _) = run(&csv(SETTINGS, &exposed, &edge("")));
         assert!(errors.is_empty(), "{errors:#?}");
         let key = model["Zone"]["building_parts"]["Main"]["floor"]["construction"]
             .as_str()
@@ -3448,7 +3444,6 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             model["Zone"]["constructions"][key]["edge_insulation"],
             json!({"vertical": {}})
         );
-        assert!(notices.iter().any(|n| n.message.contains("0.26 m deep")));
         let stated = r#""{""edge_insulation"":[{""type"":""vertical"",""depth"":0.5,""edge_thermal_resistance"":1.2},{""type"":""horizontal"",""width"":1,""edge_thermal_resistance"":1}]}""#;
         let (model, errors, _) = run(&csv(SETTINGS, &exposed, &edge(stated)));
         assert!(errors.is_empty(), "{errors:#?}");
