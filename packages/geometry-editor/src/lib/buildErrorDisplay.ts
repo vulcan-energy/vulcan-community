@@ -144,7 +144,11 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
   if (explicitUserMessage) {
     userMessage = explicitUserMessage;
   } else if (unstatedInput) {
-    userMessage = `Enter ${unstatedInput}.`;
+    // Lower-case the label mid-sentence, keeping proper names (Part G, SAP).
+    const label = /^[A-Z][a-z]/.test(unstatedInput) && !/^Part\b/.test(unstatedInput)
+      ? unstatedInput[0].toLowerCase() + unstatedInput.slice(1)
+      : unstatedInput;
+    userMessage = `Enter ${label}.`;
   } else if (
     location === 'Appliances' &&
     (item.message.includes('is not allowed for {}') || item.message.includes('has less than'))
