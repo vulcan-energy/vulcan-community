@@ -31,6 +31,8 @@ import {
   JUNCTION_TYPE_ENUM,
 } from '../lib/simplifiedFabricMap';
 import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
+import type { TargetValidation } from '../types/buildErrors';
+import { systemFieldDefaults } from '../lib/systemSchemaFlatten';
 import { useTargetRules } from '../hooks/useTargetRules';
 import { useShallow } from 'zustand/react/shallow';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../lib/junctionPsiDefaultsCsv';
@@ -373,8 +375,67 @@ export function pruneSpaceHeatSystemUnusedWeatherCompensationValues(
   };
 }
 
+type WeatherCurves = NonNullable<TargetValidation['systemDefaults']>['weatherCurves'];
+
+const SOURCE_WORDS: Readonly<Record<string, string>> = { Boiler: 'boiler', HeatPump: 'heat pump' };
+const EMITTER_WORDS: Readonly<Record<string, string>> = { radiator: 'radiators', ufh: 'underfloor heating' };
+
+/** The curve picker's options, and on an existing building which curve a blank field takes. */
+function weatherCurveField(curves: WeatherCurves, existing: boolean): Record<string, unknown> {
+  const defaults = curves.flatMap((curve) => curve.default_for.map((use) =>
+    `${SOURCE_WORDS[use.heat_source_type] ?? use.heat_source_type} with ${EMITTER_WORDS[use.wet_emitter_type] ?? use.wet_emitter_type}: curve ${curve.id}`));
+  return {
+    type: 'integer',
+    title: 'Weather compensation curve',
+    description: `The curve sets the minimum flow temperature and the curve coefficients.${existing && defaults.length
+      ? ` Blank takes the default curve: ${defaults.join('; ')}.` : ''}`,
+    oneOf: curves.map((curve) => ({ const: curve.id, title: `Curve ${curve.id} (gradient ${curve.gradient})` })),
+  };
+}
+
+
+const PV_DIVERTER_FIELD = {
+  type: 'boolean',
+  title: 'PV diverter',
+  description: 'Surplus PV electricity heats the water through this immersion heater. One immersion heater per electricity supply.',
+};
+
+const LOAD_COMPENSATION_FIELDS = ['load_comp_a', 'load_comp_b', 'load_comp_c'];
+/** Load compensation is read only for ecodesign classes V to VIII: true when every stated class is another. */
+function loadCompensationUnread(extraJson: unknown): boolean {
+  const classes = Object.values(readExtraJsonRecord(readExtraJsonRecord(extraJson).SpaceHeatSystem))
+    .map((system) => readExtraJsonRecord(readExtraJsonRecord(system).ecodesign_controller).ecodesign_control_class);
+  return classes.length > 0 && classes.every((value) => typeof value === 'number' && (value < 5 || value > 8));
+}
+
+/**
+ * Heat pump fields HEM reads only for some source types: the heat network's supply and
+ * temperature for a heat network source, the integrated ventilation for an exhaust air source.
+ */
+function unusedHeatPumpFields(extraJson: unknown): ReadonlySet<string> {
+  const sources = Object.values(readExtraJsonRecord(readExtraJsonRecord(extraJson).HeatSourceWet)).map(readExtraJsonRecord);
+  const types = sources.map((source) => String(source.source_type ?? ''));
+  const drop = new Set<string>();
+  if (!types.some((type) => type === 'HeatNetwork')) drop.add('EnergySupply_heat_network').add('temp_distribution_heat_network');
+  if (!types.some((type) => type.startsWith('ExhaustAir'))) drop.add('integrated_ventilation_system');
+  return drop;
+}
+
 // eslint-disable-next-line react-refresh/only-export-components -- schema helper shared with tests.
-export function applyEcodesignControlClassEnum(schema: Record<string, unknown>): Record<string, unknown> {
+export function applyEcodesignControlClassEnum(
+  schema: Record<string, unknown>,
+  { weatherCurves, existing = false, supplyNames = [], dropKeys, pvDiverter = false }: {
+    /** The target's weather compensation curves: the curve field picks one. */
+    weatherCurves?: WeatherCurves;
+    existing?: boolean;
+    /** The model's energy supplies: a system's EnergySupply picks one of them. */
+    supplyNames?: readonly string[];
+    /** Fields nothing reads for this model, left out of the form. */
+    dropKeys?: ReadonlySet<string>;
+    /** An immersion heater may state that its electricity supply's PV diverter feeds it (EPC). */
+    pvDiverter?: boolean;
+  } = {},
+): Record<string, unknown> {
   function visit(node: unknown): unknown {
     if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
     const record = node as Record<string, unknown>;
@@ -385,6 +446,10 @@ export function applyEcodesignControlClassEnum(schema: Record<string, unknown>):
     if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
       const nextProperties: Record<string, unknown> = {};
       for (const [key, child] of Object.entries(properties as Record<string, unknown>)) {
+        if (dropKeys?.has(key)) {
+          changed = true;
+          continue;
+        }
         if (key === 'ecodesign_control_class' && child && typeof child === 'object' && !Array.isArray(child)) {
           const childRecord = child as Record<string, unknown>;
           const childWithoutEnum = { ...childRecord };
@@ -400,9 +465,25 @@ export function applyEcodesignControlClassEnum(schema: Record<string, unknown>):
           changed = true;
           continue;
         }
+        if (key === 'EnergySupply' && supplyNames.length && child && typeof child === 'object' && !Array.isArray(child)) {
+          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: supplyNames.map((name) => ({ const: name, title: name })) };
+          delete picker.anyOf;
+          nextProperties[key] = picker;
+          changed = true;
+          continue;
+        }
+        if (key === 'weather_compensation_curve_id' && weatherCurves?.length && child && typeof child === 'object' && !Array.isArray(child)) {
+          nextProperties[key] = { ...(child as Record<string, unknown>), ...weatherCurveField(weatherCurves, existing) };
+          changed = true;
+          continue;
+        }
         const visited = visit(child);
         nextProperties[key] = visited;
         if (visited !== child) changed = true;
+      }
+      if (pvDiverter && readExtraJsonRecord(nextProperties.type).const === 'ImmersionHeater' && !('pv_diverter' in nextProperties)) {
+        nextProperties.pv_diverter = PV_DIVERTER_FIELD;
+        changed = true;
       }
       if (changed) next.properties = nextProperties;
     }
@@ -835,7 +916,11 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     [schemaMode, schemaPort],
   );
   const { hiddenFields, hemDatabaseProducts } = useTargetRules();
+  // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
+  const defaultsJson = useGeometryStore((state) => state.defaultsJson);
+  const energySupplyNames = useMemo(() => (hemDatabaseProducts ? Object.keys(readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply)) : []), [hemDatabaseProducts, defaultsJson]);
   const existingBuilding = useGeometryStore(isExistingBuilding);
+  const systemDefaults = useGeometryStore((state) => state.targetValidation?.systemDefaults);
   // Fields Advanced does not show: those the standard form owns, and those the target hides.
   const getBaseFields = useCallback(
     (type: string): readonly string[] => [
@@ -1373,11 +1458,24 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           ? (systemSubtypePlantMapSlice as Record<string, unknown>)
           : null,
       ) as typeof result;
-      result = applyEcodesignControlClassEnum(result as Record<string, unknown>) as typeof result;
+      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, {
+        weatherCurves: systemDefaults?.weatherCurves,
+        existing: existingBuilding,
+        supplyNames: energySupplyNames,
+        dropKeys: new Set(loadCompensationUnread(advancedFieldsData) ? LOAD_COMPENSATION_FIELDS : []),
+      }) as typeof result;
       result = pruneSpaceHeatSystemWeatherCompensationSchema(
         result as Record<string, unknown>,
         advancedFieldsData,
       ) as typeof result;
+    }
+
+    if (elementType === 'System' && subtype !== 'SpaceHeatSystem' && result && hemDatabaseProducts) {
+      result = applyEcodesignControlClassEnum(result as Record<string, unknown>, {
+        supplyNames: energySupplyNames,
+        dropKeys: unusedHeatPumpFields(advancedFieldsData),
+        pvDiverter: subtype === 'HotWaterSource',
+      }) as typeof result;
     }
 
     if (elementType === 'System' && subtype === 'HotWaterSource' && result) {
@@ -1436,6 +1534,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     projectHeatSourceWetLabels,
     projectHeatSourceWetNames,
     existingBuilding,
+    systemDefaults,
+    energySupplyNames,
+    hemDatabaseProducts,
   ]);
 
   const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
@@ -1714,6 +1815,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         $defs: subschema?.$defs || getActiveRootSchema()?.$defs,
         systemSampleMode: systemSampleBaselineAvailable,
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
+        derivedDefaults: elementType === 'System' ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding) : undefined,
       }),
     [
       flat,
@@ -1739,6 +1841,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       subschema,
       systemSampleBaselineAvailable,
       systemSampleBaselineExtraJson,
+      systemDefaults,
+      advancedFieldsData,
+      existingBuilding,
       getActiveRootSchema,
     ],
   );

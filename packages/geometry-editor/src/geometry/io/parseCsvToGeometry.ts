@@ -591,6 +591,11 @@ export const parseCsvToGeometry = (
       if (!isNaN(value)) complianceSettings.AirPermeability_test_result = value;
       continue;
     }
+    if (line.startsWith('AirPermeability_env_area,')) {
+      const value = metadataNumber(line);
+      if (!isNaN(value)) complianceSettings.AirPermeability_env_area = value;
+      continue;
+    }
     if (line.startsWith('AirPermeability_ventilation_zone_height,')) {
       const value = metadataNumber(line);
       if (!isNaN(value)) complianceSettings.AirPermeability_ventilation_zone_height = value;

@@ -594,6 +594,48 @@ export function conservatoryGlazingOpeningType(window: Element): string | null {
   return typeof first?.window_type === 'string' ? first.window_type : null;
 }
 
+/** How many opening parts each opening type has (a closed section has none), as HEMIE counts them. */
+const OPENING_PART_COUNT: Readonly<Record<string, number>> = {
+  closed: 0, 'top dual air flow path': 2, 'central dual air flow path': 2, 'multi air flow path': 3,
+};
+
+export type WindowSectionInput = Readonly<{ windowType: string; widthFraction?: number; openingAngle?: string }>;
+
+/** A window's sections, left to right: opening type, width fraction and opening angle (standard when not stated). */
+export function windowSections(window: Element): WindowSectionInput[] {
+  const sections = window.extra_json?.window_sections;
+  if (!Array.isArray(sections)) return [];
+  return sections.map((raw) => {
+    const section = (raw ?? {}) as { window_type?: unknown; width_fraction?: unknown; window_part_list?: unknown };
+    const parts = Array.isArray(section.window_part_list) ? section.window_part_list as { opening_angle_category?: unknown }[] : [];
+    const angle = parts[0]?.opening_angle_category;
+    return {
+      windowType: typeof section.window_type === 'string' ? section.window_type : '',
+      ...(typeof section.width_fraction === 'number' && { widthFraction: section.width_fraction }),
+      ...(typeof angle === 'string' && { openingAngle: angle }),
+    };
+  });
+}
+
+/** The window's extra_json with these sections; an opening angle other than standard is stated on each of the section's parts. */
+export function withWindowSections(window: Element, sections: readonly WindowSectionInput[]): Record<string, unknown> {
+  const rest = { ...window.extra_json };
+  delete rest.window_sections;
+  if (!sections.length) return rest;
+  return {
+    ...rest,
+    window_sections: sections.map((section) => {
+      const parts = OPENING_PART_COUNT[section.windowType] ?? 1;
+      return {
+        window_type: section.windowType,
+        ...(section.widthFraction !== undefined && { width_fraction: section.widthFraction }),
+        ...(section.openingAngle && section.openingAngle !== 'standard' && parts > 0
+          && { window_part_list: Array.from({ length: parts }, () => ({ opening_angle_category: section.openingAngle })) }),
+      };
+    }),
+  };
+}
+
 /** The window's extra_json with one section of this opening type, or none (the default). */
 export function withConservatoryGlazingOpeningType(window: Element, windowType: string | null): Record<string, unknown> {
   const rest = { ...window.extra_json };

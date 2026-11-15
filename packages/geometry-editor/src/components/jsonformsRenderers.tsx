@@ -78,6 +78,8 @@ type RendererConfig = {
   suspendedThermalTransmWallsAutofillHasSources?: boolean;
   suspendedThermalTransmWallsAutofillSources?: SuspendedThermalTransmWallSource[];
   systemSampleBaselineExtraJson?: unknown;
+  /** The target's default for a blank field of this element, by field key (EPC conversion). */
+  derivedDefaults?: Readonly<Record<string, unknown>>;
   systemSampleMode?: boolean;
   systemSamplePathSegments?: string[];
   useFHSSchemaForValidation?: boolean;
@@ -662,6 +664,7 @@ function getAdvancedDefaultValue(
       floorStoreyInputs(config?.floors),
     );
   }
+  if (config?.derivedDefaults && config.derivedDefaults[propKey] !== undefined) return config.derivedDefaults[propKey];
   // R4.6b-2: `path` is gone from this signature. It carried exactly one thing into
   // `getDefaultValue` — the leaf key — which this function was already being handed
   // separately as `propKey`, spelled two different ways off the same string.
@@ -1721,9 +1724,12 @@ function renderAdvancedFieldLabelRow(
       <div style={{ flex: 1, minWidth: 0 }}>
         {renderFieldLabelWithIndicator(indicatorMessages, hasEvidence, useFHSSchema, presentation)}
       </div>
-      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-        <StatusPill type={statusPillType} labelOverride={statusPillLabelOverride} />
-      </div>
+      {/* Only a value that differs from its source earns a pill; Default, Preset and Schema add nothing to read. */}
+      {(statusPillType === 'custom' || statusPillType === 'calculated') && (
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+          <StatusPill type={statusPillType} labelOverride={statusPillLabelOverride} />
+        </div>
+      )}
     </div>
   );
 }

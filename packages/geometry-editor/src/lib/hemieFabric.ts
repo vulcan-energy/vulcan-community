@@ -94,7 +94,7 @@ export function hemieHeatCapacityBands(constructionType: string | undefined): re
 export function hemieRequiredPlaceholder(constructionType: string, field: string): string | undefined {
   if (field !== 'areal_heat_capacity') return undefined;
   if (constructionType.endsWith('_door')) return 'Required, no default';
-  return constructionType === 'window' ? 'Required in a party or sheltered wall' : undefined;
+  return constructionType === 'window' ? 'Only for a window in a party or sheltered wall' : undefined;
 }
 
 /** The door element flag that marks the front door; one door only. */
@@ -140,7 +140,7 @@ export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[
 export const HEMIE_ELEMENT_KEYS = [
   'age_band', HEMIE_FRONT_DOOR, 'wall_construction_type', 'glazing_type', 'frame_material', 'glazing_gap',
   'insulation_location', 'construction_weight', 'retrofit_insulation', 'insulation_thickness', 'adjacent_space_type',
-  'basement_depth_descriptor', 'basement_air_volume',
+  'basement_depth_descriptor', 'basement_air_volume', 'thatched',
 ] as const;
 
 /** The existing-building fields an element holds in its extra_json. */

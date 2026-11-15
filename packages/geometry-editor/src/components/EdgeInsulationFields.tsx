@@ -14,6 +14,8 @@ import {
   type EdgeInsulationFormValues,
 } from '../lib/edgeInsulation';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { useGeometryStore } from '../stores/geometryStore';
+import { isExistingBuilding } from '../lib/windowOpenings';
 
 export interface EdgeInsulationFieldsProps {
   value: unknown;
@@ -33,6 +35,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
 }) => {
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = targetSchemaMode(schemaPort);
+  const existing = useGeometryStore(isExistingBuilding);
   const valueKey = useMemo(() => JSON.stringify(value ?? null), [value]);
   const [form, setForm] = useKeyedState<EdgeInsulationFormValues>(
     valueKey,
@@ -42,12 +45,12 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
   const apply = useCallback(
     (next: EdgeInsulationFormValues) => {
       setForm(next);
-      const ser = formValuesToExtraJsonEdgeInsulation(next);
+      const ser = formValuesToExtraJsonEdgeInsulation(next, existing);
       if (ser.ok) {
         onChange(ser.value);
       }
     },
-    [onChange, setForm],
+    [onChange, setForm, existing],
   );
 
   const compact = Boolean(flat);
@@ -105,6 +108,11 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', margin: ROW_MARGIN(compact) }}>
         {renderFieldLabelWithTooltip('Edge Insulation', elementType)}
       </div>
+      {existing && (
+        <p style={{ margin: ROW_MARGIN(compact), fontSize: 12, color: 'var(--text-secondary)' }}>
+          Details not known? Leave these blank: the default edge insulation applies. A blank resistance or size takes its default.
+        </p>
+      )}
       {segment('horizontal')}
       {segment('vertical')}
     </div>

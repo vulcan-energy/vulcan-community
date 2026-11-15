@@ -10,6 +10,7 @@
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 import { isRecord, readRecord } from './jsonTypes';
 import { isForbiddenSchemaNode, unwrapNullableSchema } from './schemaShape';
+import type { TargetSystemDefaults } from '../types/buildErrors';
 
 /** Marks the keys a flatten removed as forbidden, so edits can tell forbidden from not applicable. */
 const FORBIDDEN_KEYS = 'x-vulcan-forbidden-keys';
@@ -471,4 +472,34 @@ export function flattenSystemSubtypePlantSchemas(
       },
     },
   };
+}
+
+/**
+ * Field defaults for an element's systems: the target's derived values (by the system's model
+ * path, e.g. `/SpaceHeatSystem/Heating circuit`), and on an existing building the DESNZ-defined
+ * defaults the conversion states for a direct feed's maximum power (15 kW), a mixer shower's
+ * flow rate without a product (9 L/min) and a direct electric boiler's manufacture year (unknown).
+ */
+export function systemFieldDefaults(
+  derived: TargetSystemDefaults['derived'] | undefined,
+  extraJson: unknown,
+  existing: boolean,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const extra = readRecord(extraJson);
+  for (const item of derived ?? []) {
+    const segments = item.path.split('/').slice(1).map((s) => s.replace(/~1/g, '/').replace(/~0/g, '~'));
+    let node: unknown = extra;
+    for (const segment of segments) node = readRecord(node)[segment];
+    if (node && typeof node === 'object') out[item.field] = item.value;
+  }
+  if (existing) {
+    const sources = Object.values(readRecord(extra.HeatSourceWet)).map(readRecord);
+    if (sources.some((source) => source.type === 'DirectFeed')) out.power_max ??= 15;
+    // A direct electric boiler with neither its manufacture year nor its pump power: year unknown.
+    if (sources.some((source) => source.type === 'DirectElectricBoiler' && source.electricity_circ_pump === undefined)) out.manufacture_year ??= 'unknown';
+    const showers = Object.values(readRecord(readRecord(extra.HotWaterDemand).Shower)).map(readRecord);
+    if (showers.some((shower) => shower.type === 'MixerShower' && shower.product_id === undefined)) out.flowrate ??= 9;
+  }
+  return out;
 }

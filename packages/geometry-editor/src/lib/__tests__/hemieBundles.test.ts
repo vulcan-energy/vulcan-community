@@ -14,6 +14,8 @@ import {
   getHemieBundle,
   hemieBundleHostProblem,
   planBundleUpdate,
+  windowSections,
+  withWindowSections,
 } from '../hemieBundles';
 import { getMaxLineWallHeightOnFloor } from '../zoneDerivation';
 import { createGeometryStore } from '../../stores/geometryStore';
@@ -225,5 +227,26 @@ describe('bundle walls after a CSV round trip', () => {
     const side = elements.find((element) => element.name === 'Conservatory 1 left side')!;
     expect(side.height).toBeGreaterThan(2.8);
     expect(getMaxLineWallHeightOnFloor(0, elements)).toBe(2.8);
+  });
+});
+
+describe('window sections', () => {
+  it('states an opening angle on each part of a section, and reads it back', () => {
+    const window = { extra_json: {} } as unknown as Element;
+    const extra = withWindowSections(window, [
+      { windowType: 'closed', widthFraction: 0.4 },
+      { windowType: 'top dual air flow path', openingAngle: 'restricted' },
+      { windowType: 'full opening', openingAngle: 'standard' },
+    ]);
+    expect(extra.window_sections).toEqual([
+      { window_type: 'closed', width_fraction: 0.4 },
+      { window_type: 'top dual air flow path', window_part_list: [{ opening_angle_category: 'restricted' }, { opening_angle_category: 'restricted' }] },
+      { window_type: 'full opening' },
+    ]);
+    expect(windowSections({ extra_json: extra } as unknown as Element)).toEqual([
+      { windowType: 'closed', widthFraction: 0.4 },
+      { windowType: 'top dual air flow path', openingAngle: 'restricted' },
+      { windowType: 'full opening' },
+    ]);
   });
 });

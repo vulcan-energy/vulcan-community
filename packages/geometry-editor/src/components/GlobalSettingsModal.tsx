@@ -70,6 +70,11 @@ import { Tooltip } from "./Tooltip";
 import { ValidationIndicator, ValidationPill } from "./ValidationIndicator";
 import { useKeyedState } from "../hooks/useKeyedState";
 import { useTargetRules } from "../hooks/useTargetRules";
+import { getElementEffectiveArea } from "../lib/elementArea";
+
+/** Element types the converter counts in the envelope area (a party adjacent element counts too). */
+const ENVELOPE_TYPES: ReadonlySet<string> = new Set(["BuildingElementOpaque", "BuildingElementTransparent", "BuildingElementGround",
+  "BuildingElementPartyWall", "BuildingElementAdjacentUnconditionedSpace_Simple"]);
 
 export type GlobalSettingsDefaultsCompatibility = DefaultsCompatibility;
 
@@ -611,7 +616,18 @@ export function GlobalSettingsModal({
     (state) => state.setCreationDefaultAssemblyIds
   );
   // Under construction bands the host's fabric defaults replace the default assemblies.
-  const { constructionBands } = targetRules(schemaPort, complianceSettings);
+  const { constructionBands, hemDatabaseProducts } = targetRules(schemaPort, complianceSettings);
+  // The drawn envelope area, as the converter sums it when the model states none.
+  const drawnEnvelopeArea = useMemo(() => {
+    let sum = 0;
+    for (const element of Object.values(elementsById)) {
+      const party = (element.extra_json as Record<string, unknown> | undefined)?._vulcan_ui_party_element === true;
+      if (ENVELOPE_TYPES.has(element.type) || (element.type === 'BuildingElementAdjacentConditionedSpace' && party)) {
+        sum += getElementEffectiveArea(element, elementsById, floors, globalOrientationOffset);
+      }
+    }
+    return Math.round(sum * 10) / 10;
+  }, [elementsById, floors, globalOrientationOffset]);
   const borderArea = postcodeBorderArea(propertyPostcode);
   const openSpaceLabeller = useGeometryStore(
     (state) => state.openSpaceLabeller
@@ -1863,20 +1879,6 @@ export function GlobalSettingsModal({
 
                         <div
                           style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                            lineHeight: 1.45,
-                          }}
-                        >
-                          Dwelling form is exported to <code>General</code>.
-                          Auto suggestions count distinct floor levels with
-                          ground-contact floors or pitch-180 walkable floor
-                          polygons; pitch-0 roof/ceiling surfaces and line walls
-                          are excluded.
-                        </div>
-
-                        <div
-                          style={{
                             display: "flex",
                             alignItems: "center",
                             gap: "var(--spacing-xs)",
@@ -2725,7 +2727,7 @@ export function GlobalSettingsModal({
                       }}
                     >
                       The air test of the dwelling. The envelope area comes from
-                      the element areas.
+                      the element areas{hemDatabaseProducts ? " unless the report states it" : ""}.
                     </div>
 
                     <StandardDropdown
@@ -2813,6 +2815,24 @@ export function GlobalSettingsModal({
                       variant="ghost"
                       size="md"
                     />
+                    {hemDatabaseProducts && (
+                      <StandardInput
+                        type="number"
+                        unit="m²"
+                        label={<span data-field-key="AirPermeability_env_area">Envelope area</span>}
+                        helperText="From the air test report. Blank uses the drawn area."
+                        placeholder={`Drawn: ${drawnEnvelopeArea}`}
+                        value={complianceSettings.AirPermeability_env_area?.toString() ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value === "" ? undefined : parseFloat(e.target.value);
+                          setComplianceSettings({ AirPermeability_env_area: val === undefined || isNaN(val) ? undefined : val });
+                        }}
+                        min="0"
+                        step="0.1"
+                        variant="ghost"
+                        size="md"
+                      />
+                    )}
                   </div>
                 )}
               </div>

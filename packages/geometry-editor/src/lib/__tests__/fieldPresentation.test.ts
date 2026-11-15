@@ -335,7 +335,7 @@ describe('resolveFieldLabelContent (R4.6b-3 label content rule)', () => {
     // Step 2, rejection arm 2: the title has run the key's own words together.
     ['ColdWaterSource', 'Coldwatersource', 'Cold Water Source'],
     // Same letters, same word boundaries — KEPT, and then spelled (amendment (a)).
-    ['SFP_in_use_factor', 'Sfp In Use Factor', 'SFP In Use Factor'],
+    ['SFP_in_use_factor', 'Sfp In Use Factor', 'SFP In-Use Factor'],
     // Same letters, and casing the key cannot express: kept, not degraded to "Hlc".
     ['first_order_hlc', 'First Order HLC', 'First Order HLC'],
     // One title word covering two key words, but "kJ" earns it.

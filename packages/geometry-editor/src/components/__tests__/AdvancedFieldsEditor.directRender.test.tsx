@@ -42,7 +42,8 @@ import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-
 import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import type { Element, SystemSubcategory } from '../../geometry/types';
-import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
+import { AdvancedFieldsEditor, applyEcodesignControlClassEnum } from '../AdvancedFieldsEditor';
+import { systemFieldDefaults } from '../../lib/systemSchemaFlatten';
 import {
   DirectAdvancedFields,
   DirectSpecFields,
@@ -1093,7 +1094,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'Control | Control | textbox | - | - | - | tip',
     'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'SFP | SFP | textbox | 0 | - | - | tip',
-    'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
+    'SFP_in_use_factor | SFP In-Use Factor | textbox | 1 | - | - | tip',
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
     'ductwork | Ductwork | textbox | - | - | [{"cross_section_shape":"circular","duct_type":"intake","insulation_thermal_conductivity":1,"insulation_thickness_mm":0,"length":1,"reflective":false,"duct_perimeter_mm":1,"external_diameter_mm":1,"internal_diameter_mm":1}] | tip',
     'mvhr_eff | MVHR Efficiency | textbox | 0 | 1 | - | tip',
@@ -1151,7 +1152,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'power_standby | hp · Power Standby | textbox | 0 | - | - | tip',
     'sink_type | hp · Sink Type | select | - | - | - | tip',
     'source_type | hp · Source Type | select | - | - | - | tip',
-    'temp_distribution_heat_network | hp · Temp Distribution Heat Network | textbox | 0 | - | - | tip',
+    'temp_distribution_heat_network | hp · Heat Network Distribution Temperature | textbox | 0 | - | - | tip',
     'temp_lower_operating_limit | hp · Temp Lower Operating Limit | textbox | -273.15 | - | - | tip',
     'temp_return_feed_max | hp · Temp Return Feed Max | textbox | 0 | - | - | tip',
     'time_constant_onoff_operation | hp · Time Constant On/Off Operation | textbox | 0 | - | - | tip',
@@ -1334,14 +1335,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'design_zone_heating_covered_by_mech_vent | Design Zone Heating Covered By Mech Vent | textbox | - | - | - | tip',
     'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
-    'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
+    'SFP_in_use_factor | SFP In-Use Factor | textbox | 1 | - | - | tip',
   ],
   'fhs/MechanicalVentilation [Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door fancoil floor radiator roof ufh wall]': [
     'design_zone_cooling_covered_by_mech_vent | Design Zone Cooling Covered By Mech Vent | textbox | - | - | - | tip',
     'design_zone_heating_covered_by_mech_vent | Design Zone Heating Covered By Mech Vent | textbox | - | - | - | tip',
     'EnergySupply | Energy Supply | textbox | - | - | - | tip',
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
-    'SFP_in_use_factor | SFP In Use Factor | textbox | 1 | - | - | tip',
+    'SFP_in_use_factor | SFP In-Use Factor | textbox | 1 | - | - | tip',
     'mid_height_air_flow_path | Mid Height Air Flow Path | textbox | 1 | 60 | - | tip',
     'orientation360 | Orientation 360 | textbox | 0 | 360 | - | tip',
     'pitch | Pitch | textbox | 0 | 180 | - | tip',
@@ -1434,7 +1435,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'fhs/System:SpaceHeatSystem': [
     'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
-    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | no-tip',
+    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
     'design_flow_temp | Design Flow Temp | textbox | 20 | 120 | - | tip',
     'ecodesign_control_class | Ecodesign Controller · Ecodesign Control Class | select | - | - | - | tip',
     'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | 10 | 50 | - | tip',
@@ -1762,7 +1763,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       row('design_zone_cooling_covered_by_mech_vent', 'Design Zone Cooling Covered By Mech Vent', TEXT(null)),
       row('design_zone_heating_covered_by_mech_vent', 'Design Zone Heating Covered By Mech Vent', TEXT(null)),
       row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
-      row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+      row('SFP_in_use_factor', 'SFP In-Use Factor', TEXT('1')),
     ];
 
     const onChange = vi.fn();
@@ -1862,7 +1863,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('design_zone_heating_covered_by_mech_vent', 'Design Zone Heating Covered By Mech Vent', TEXT(null)),
         row('EnergySupply', 'Energy Supply', TEXT(null)),
         row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
-        row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+        row('SFP_in_use_factor', 'SFP In-Use Factor', TEXT('1')),
         row('position_exhaust', 'Position Exhaust', TEXT(null)),
       ],
     );
@@ -1886,7 +1887,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('design_zone_heating_covered_by_mech_vent', 'Design Zone Heating Covered By Mech Vent', TEXT(null)),
         row('EnergySupply', 'Energy Supply', TEXT(null)),
         row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
-        row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+        row('SFP_in_use_factor', 'SFP In-Use Factor', TEXT('1')),
       ],
     );
     expect(container.querySelector('[data-field-key="orientation360"]')).toBeNull();
@@ -1933,7 +1934,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       [
         row('Control', 'Control', TEXT(null)),
         row('SFP', 'SFP', TEXT('0', '0')),
-        row('SFP_in_use_factor', 'SFP In Use Factor', TEXT('1')),
+        row('SFP_in_use_factor', 'SFP In-Use Factor', TEXT('1')),
         row('design_outdoor_air_flow_rate', 'Design Outdoor Air Flow Rate', TEXT('0', '0')),
         // `ductwork` is a nullable wrapper too -- around an ARRAY. It stays TEXT(null):
         // unwrapping changes the resolved node but not the destination control (rule
@@ -3353,5 +3354,28 @@ describe('System Advanced Fields: per-property validation descends the subtype w
     expect(
       validatePropertyValueForMode(false, 'BuildingElementOpaque', undefined, 'u_value', '0.3'),
     ).toEqual({ valid: true });
+  });
+});
+
+describe('EPC system pickers and defaults', () => {
+  it('offers the target curves and the model supplies, and drops fields nothing reads', () => {
+    const schema = { properties: { ecodesign_controller: { properties: { weather_compensation_curve_id: { type: 'integer' } } },
+      EnergySupply: { anyOf: [{ type: 'string' }, { type: 'null' }] }, EnergySupply_heat_network: { type: 'object' } } };
+    const curves = [{ id: 5, gradient: 1.2, default_for: [{ heat_source_type: 'HeatPump', wet_emitter_type: 'radiator' }] }];
+    const out = applyEcodesignControlClassEnum(schema, { weatherCurves: curves, existing: true, supplyNames: ['mains elec', 'LPG bulk'],
+      dropKeys: new Set(['EnergySupply_heat_network']) }) as { properties: Record<string, Record<string, unknown>> };
+    const curve = (out.properties.ecodesign_controller.properties as Record<string, Record<string, unknown>>).weather_compensation_curve_id;
+    expect(curve.oneOf).toEqual([{ const: 5, title: 'Curve 5 (gradient 1.2)' }]);
+    expect(curve.description).toContain('heat pump with radiators: curve 5');
+    expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'mains elec' }, { const: 'LPG bulk', title: 'LPG bulk' }]);
+    expect(out.properties.EnergySupply_heat_network).toBeUndefined();
+  });
+
+  it('gives a blank field the derived value of its system, and the existing-building defaults', () => {
+    const extra = { SpaceHeatSystem: { 'Heating circuit': { type: 'WetDistribution' } }, HeatSourceWet: { feed: { type: 'DirectFeed' } } };
+    const derived = [{ path: '/SpaceHeatSystem/Heating circuit', field: 'design_flow_temp', value: 55 },
+      { path: '/SpaceHeatSystem/Other', field: 'temp_diff_emit_dsgn', value: 10 }];
+    expect(systemFieldDefaults(derived, extra, true)).toEqual({ design_flow_temp: 55, power_max: 15 });
+    expect(systemFieldDefaults(derived, extra, false)).toEqual({ design_flow_temp: 55 });
   });
 });

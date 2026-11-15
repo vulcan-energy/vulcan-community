@@ -76,6 +76,13 @@ export interface OnSiteGenerationFormState {
   ventilationStrategies: string[];
 }
 
+/** The existing-building PV mounting types (schema `PhotovoltaicMountingType`). */
+const PV_MOUNTING_TYPES = [
+  { value: 'rail-mounted', label: 'Rail-mounted' },
+  { value: 'integrated', label: 'Integrated into the roof' },
+  { value: 'ground-mounted', label: 'Ground-mounted' },
+];
+
 const VENTILATION_STRATEGY_LABELS: Record<string, string> = {
   unventilated: 'Unventilated',
   moderately_ventilated: 'Moderately ventilated',
@@ -360,9 +367,18 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
       onSiteHostDerivation,
       selectedPvDimensionNotes,
       hemDatabaseProducts,
+      existingBuilding,
     } = ctx;
+
     const pvElement = selection?.id ? getElementById(selection.id) : undefined;
     const ventilationStrategy = readRecord(pvElement?.extra_json).ventilation_strategy;
+    // An existing building's PV takes its simpler form: mounting type and panel count, with the
+    // peak power and inverter defaulted unless stated; the mounting type gives the ventilation.
+    const existingPv = hemDatabaseProducts && existingBuilding;
+    const pvExtra = readRecord(pvElement?.extra_json);
+    const patchPvExtra = (key: string, value: unknown) => {
+      if (pvElement) updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), [key]: value } } as Partial<Element>);
+    };
 
     /** Rebuild plan footprint from the bottom edge using current width/height fields */
     const resetOnSiteDimensions = () => {
@@ -488,10 +504,43 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
 
     return (
       <>
+        {existingPv && pvElement ? (
+          <>
+            <div className="element-label">Mounting type</div>
+            <div className="element-input">
+              <StandardDropdown
+                value={typeof pvExtra.mounting_type === 'string' ? pvExtra.mounting_type : ''}
+                onChange={(value) => patchPvExtra('mounting_type', value || undefined)}
+                options={PV_MOUNTING_TYPES}
+                placeholder="Required"
+                variant="ghost"
+                size="md"
+              />
+            </div>
+            <div className="element-label">Panel count</div>
+            <div className="element-input">
+              <StandardInput
+                type="number"
+                min="1"
+                step="1"
+                value={typeof pvExtra.panel_count === 'number' ? String(pvExtra.panel_count) : ''}
+                placeholder={`Drawn: ${onSiteWidthInput.value ?? '?'} × ${onSiteHeightInput.value ?? '?'} m`}
+                onChange={(e) => {
+                  const count = Number.parseInt(e.target.value, 10);
+                  patchPvExtra('panel_count', Number.isFinite(count) && count > 0 ? count : undefined);
+                }}
+                variant="ghost"
+                size="md"
+                className="flex-1"
+              />
+            </div>
+          </>
+        ) : null}
         {renderFieldLabelWithComparisonIndicator('Peak Power (kWp):', elementType, globalComparisonFieldIndicators.peak_power)}
         <div className="element-input" ref={registerBaseFieldRef('peak_power')}>
           <StandardInput
             {...decimalInputProps(peakPowerInput)}
+            placeholder={existingPv ? 'Default' : undefined}
             unit={fieldUnit('peak_power')}
             step="0.001"
             min="0.001"
@@ -671,9 +720,9 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
           </div>
         ) : null}
         {/* A products target's PV root has no such field, and the panel needs one: it is stated here. */}
-        {hemDatabaseProducts && state.ventilationStrategies.length > 0 && pvElement ? (
+        {hemDatabaseProducts && !existingPv && state.ventilationStrategies.length > 0 && pvElement ? (
           <>
-            <div className="element-label">Panel ventilation:</div>
+            <div className="element-label">Panel ventilation</div>
             <div className="element-input">
               <StandardDropdown
                 value={typeof ventilationStrategy === 'string' ? ventilationStrategy : ''}

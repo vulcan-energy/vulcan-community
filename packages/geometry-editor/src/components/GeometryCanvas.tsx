@@ -75,6 +75,7 @@ import {
   DETAILS_PANEL_MIN_H,
   DETAILS_PANEL_DEFAULT_W,
   DETAILS_PANEL_DEFAULT_H,
+  ELEMENTS_PANEL_DEFAULT_W,
 } from '../hooks/usePanelLayout';
 import { useOverlay } from '../hooks/useOverlay';
 import './GeometryCanvas.css';
@@ -3450,9 +3451,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     completeGuideOverlayCalibrationInteraction(false);
   }, [completeGuideOverlayCalibrationInteraction, overlayCalibrateMode]);
 
+  // Beside the compass; a host that opens the elements panel on the left gets it beside that panel instead.
   const contributedPanelDefaultPosition = useMemo(
-    () => ({ x: CONTRIBUTED_PANEL_DEFAULT_X, y: compassMinY }),
-    [compassMinY],
+    () => ({ x: initialElementsPanelPlacement === 'left' ? ELEMENTS_PANEL_DEFAULT_W + 8 : CONTRIBUTED_PANEL_DEFAULT_X, y: compassMinY }),
+    [compassMinY, initialElementsPanelPlacement],
   );
 
   const canvasPanelAvailabilityContext = useMemo<GeometryCanvasPanelContext>(

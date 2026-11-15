@@ -543,7 +543,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
           <>
             {state.partyWallFabricFields.map((field) => (
               <div key={field.key} style={{ display: 'contents' }}>
-                <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{field.label}:</div>
+                <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{field.label}</div>
                 <div className="element-input" ref={registerBaseFieldRef(field.key)}>
                   <StandardInput
                     {...decimalInputProps(field.key === 'u_value' ? state.partyWallHalfUInput : field.key === 'u_value_whole_wall' ? state.partyWallWholeUInput : state.partyWallConstructionRInput)}

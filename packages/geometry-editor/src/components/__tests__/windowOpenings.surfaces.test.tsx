@@ -102,9 +102,9 @@ describe('window_part_list on physical-opening targets', () => {
     expect(screen.queryByText('Presets')).toBeNull();
   });
 
-  it('points to the main form for one opening and can add a second', () => {
+  it('says nothing more for one opening and can add a second', () => {
     const store = mount(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }] }), physicalItems);
-    expect(screen.getByText(/One opening\. Edit it in the main form\./)).toBeInTheDocument();
+    expect(screen.queryByText(/One opening/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add opening' }));
     expect(stored(store).extra_json).toMatchObject({
       window_part_list: [{ free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8 }, {}],

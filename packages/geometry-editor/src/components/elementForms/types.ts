@@ -299,6 +299,8 @@ export interface ElementFormRenderCtx {
   systemHasProductSlot: boolean;
   /** The target's systems take HEM Database products: the FHS sample presets do not show. */
   hemDatabaseProducts: boolean;
+  /** An existing-building model (EPC). */
+  existingBuilding: boolean;
   /** Orchestrator-owned System<->WetEmitter cross-creation bridge (slice-5
    * brief decision (f).1, CONSERVATIVE option): renders WetEmitter's
    * space-heat-system dropdown, including the "Create new SpaceHeatSystem..."

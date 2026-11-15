@@ -11,7 +11,7 @@ import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
 import { contextShadingDistanceDetails } from '../../lib/contextShadingGeometry';
 import { elementSchemaTakesField, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
-import { conservatoryGlazingOpeningType, isConservatoryGlazing } from '../../lib/hemieBundles';
+import { isConservatoryGlazing, windowSections } from '../../lib/hemieBundles';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
 import {
   targetRules,
@@ -138,6 +138,7 @@ import {
 import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/mvhrRoles';
 import { getHemieBundle, hemieBundleHostProblem } from '../../lib/hemieBundles';
 import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../../lib/hemieFabric';
+import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 
 // ---------------- Module-level pure helpers ----------------
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
@@ -1389,7 +1390,8 @@ export const validateElementCore = (
       }
       // HEMIE gives an opening type no default (DESNZ-defined); a conservatory window is closed unless stated.
       if (targetRules(schemaPort, context.complianceSettings ?? {}).constructionBands
-        && !conservatoryGlazingOpeningType(el) && !(elementsById && isConservatoryGlazing(el, elementsById))) {
+        && (!windowSections(el).length || windowSections(el).some((section) => !section.windowType))
+        && !(elementsById && isConservatoryGlazing(el, elementsById))) {
         issues.push(geo('Opening type is not set. Choose how this window opens.', 'window_sections'));
       }
       issues.push(...validateWindowOpenings(
@@ -2283,6 +2285,8 @@ export const validateElementCore = (
         !sysElement.isPlaceholder &&
         !hasPresetName &&
         !hasPcdbPayload &&
+        // A products target (EPC) has no library presets: its systems take products.
+        !targetRules(schemaPort, context.complianceSettings ?? {}).hemDatabaseProducts &&
         !(isSpaceHeatSystem && !hasSpaceHeatSystemPayload)
       ) {
         warnings.push(
@@ -2468,7 +2472,7 @@ export const validateElementCore = (
               mode: schemaMode,
               propertyKey: field,
               elementType: element.type,
-              label: field.split('_').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1)).join(' '),
+              label: resolveFieldLabelContent(field, undefined, element.type),
             }, schemaPort);
             const unit = fieldUnitForAdornment(presentation);
             const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
