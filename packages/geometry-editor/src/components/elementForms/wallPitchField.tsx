@@ -138,7 +138,7 @@ export function renderWallPitchField(
         selectedShape === 'polygon' ? 'Surface:' : 'Pitch (degrees):',
         elementType,
         'pitch',
-        inherited ? <ParentSourceNote parentName={parentElement} ctx={ctx} /> : undefined,
+        inherited ? <ParentSourceNote parentName={parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined,
       )}
       <div
         className="element-input"

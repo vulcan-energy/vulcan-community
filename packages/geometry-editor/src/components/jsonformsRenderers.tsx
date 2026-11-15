@@ -718,9 +718,8 @@ function groundAdvancedUValueMatchesComputed(
   const u = groundUComputedWPerM2K;
   if (typeof u !== 'number' || !Number.isFinite(u) || u <= 0) return false;
   const cur = readFiniteControlNumber(data);
-  const uRounded = Number(u.toFixed(4));
-  const curRounded = cur != null ? Number(cur.toFixed(4)) : null;
-  return curRounded != null && Math.abs(curRounded - uRounded) <= 1e-5;
+  // Compared at the precision "Use calculation: X" shows (formatSourceValue), so 0.13 matches 0.1296.
+  return cur != null && formatSourceValue(cur) === formatSourceValue(u);
 }
 
 function isMeaningfulExplicitValue(data: unknown, isJsonLike: boolean): boolean {
@@ -924,7 +923,7 @@ function resolveAdvancedFieldSource(args: {
       ? { source: sourceButton('Use default', undefined), followsSource: false }
       : { source: sourceButton('Clear', undefined, undefined, true), followsSource: false };
   }
-  const blankFollowsSource = fieldSource.kind === 'default' && !isSamplePreset;
+  const blankFollowsSource = fieldSource.kind === 'default';
   const matches = hasExplicit ? valuesEquivalent(data, sourceValue, isJsonLike) : blankFollowsSource;
   if (matches) {
     return {

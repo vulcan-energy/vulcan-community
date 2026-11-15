@@ -7,8 +7,8 @@
 const DEFAULTS_TAB_FIELD = 'DefaultAssembly';
 
 /** Opens Global Settings on the Defaults tab (the host listens for this event). */
-export function openDefaultsTab(): void {
-  window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field: DEFAULTS_TAB_FIELD } }));
+export function openDefaultsTab(field: string = DEFAULTS_TAB_FIELD): void {
+  window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
 }
 
 /** Rounds for display only: at most three decimals, no trailing zeros. */

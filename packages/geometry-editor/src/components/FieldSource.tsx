@@ -43,8 +43,8 @@ export function SourceNote({
 }
 
 /** The "default" note, linking to where the property's defaults are set. */
-export function DefaultNote() {
-  return <SourceNote link="default" onGo={openDefaultsTab} title="Open the model defaults" />;
+export function DefaultNote({ field }: { field?: string }) {
+  return <SourceNote link="default" onGo={() => openDefaultsTab(field)} title="Open the model defaults" />;
 }
 
 /** Label on the left, its source on the right (wraps under the label when narrow). */
@@ -102,7 +102,7 @@ export function DerivedSource({
 }) {
   if (derived === null || derived === undefined || !Number.isFinite(derived)) return null;
   if (!(overridden ?? isOverridden(derived, current, tolerance))) return <>{info}</>;
-  const shown = `${formatSourceValue(derived)}${unit ? ` ${unit}` : ''}`;
+  const shown = `${formatSourceValue(derived)}${unit ? `${unit === '°' ? '' : ' '}${unit}` : ''}`;
   return (
     <ResetFieldButton
       align="note"
@@ -117,15 +117,17 @@ export function DerivedSource({
 /** "from Wall (S)": the value comes from the host element (`parent_element` holds its name); the link selects it. */
 export function ParentSourceNote({
   parentName,
+  zoneId,
   ctx,
 }: {
   parentName: string;
+  zoneId?: string;
   ctx: {
-    elementsById: Readonly<Record<string, { id: string; name?: string }>>;
+    elementsById: Readonly<Record<string, { id: string; name?: string; zoneId?: string }>>;
     setSelection: (selection: { type: 'element'; id: string }) => void;
   };
 }) {
-  const parent = Object.values(ctx.elementsById).find((element) => element.name === parentName);
+  const parent = Object.values(ctx.elementsById).find((element) => element.name === parentName && element.zoneId === zoneId);
   return (
     <SourceNote
       link={parentName}

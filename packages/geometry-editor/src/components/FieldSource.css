@@ -7,7 +7,7 @@
 .element-editor-note {
   font-size: var(--font-size-xxs, 11px);
   line-height: 1.35;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -58,8 +58,10 @@
 
 /* "↺ Clear" on a stated value with no default: there on hover or keyboard focus, so an
    imported model that states every field does not show one on every row. */
-[data-field-key]:not(:hover):not(:focus-within) .field-source-reset--quiet {
-  opacity: 0;
+@media (hover: hover) {
+  [data-field-key]:not(:hover):not(:focus-within) .field-source-reset--quiet {
+    opacity: 0;
+  }
 }
 
 /* Label left, source right; wraps under the label when the panel is narrow. */

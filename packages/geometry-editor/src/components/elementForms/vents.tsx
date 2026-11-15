@@ -41,6 +41,7 @@ import type { Element } from '../../geometry/types';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
+import { ParentSourceNote, Readout } from '../FieldSource';
 import { StandardDropdown } from '../StandardDropdown';
 // Not formPrimitives' useDecimalInput: see ElementCreator.tsx's identical note on its own
 // pitchDraftInput — that wrapper doesn't forward `syncExternal`, needed here too.
@@ -292,8 +293,11 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
           />
               <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('areaCm2', areaCm2Input.value)} issue={getFieldValidationIssue('areaCm2', areaCm2Input.value) || undefined} />
         </div>
-        {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
+        {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360', parentElement ? <ParentSourceNote parentName={parentElement} zoneId={selectedElementForShape?.zoneId} ctx={ctx} /> : undefined)}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
+          {parentElement ? (
+            <Readout value={getCurrentOrientation(getCurrentElementData() as Element)} unit={fieldUnit('orientation360')} label="Orientation" />
+          ) : (
           <StandardInput
             type="text"
             inputMode="numeric"
@@ -307,17 +311,12 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
             step="1"
             min="0"
             max="360"
-            readOnly={!!parentElement}
             variant="ghost"
             size="md"
           />
-          {parentElement && (
-            <div className="field-source-note">
-              from {parentElement}
-            </div>
           )}
         </div>
-        {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch')}
+        {renderFieldLabel(selectedShape === 'polygon' ? 'Surface facing:' : 'Pitch (degrees):', elementType, 'pitch', parentElement ? <ParentSourceNote parentName={parentElement} zoneId={selectedElementForShape?.zoneId} ctx={ctx} /> : undefined)}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('pitch')}>
           {selectedShape === 'polygon' ? (
             <StandardDropdown
@@ -338,6 +337,9 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
               disabled={!!parentElement}
             />
           ) : (
+            parentElement ? (
+              <Readout value={pitchDraftInput.inputValue} unit={fieldUnit('pitch')} label="Pitch" />
+            ) : (
             <StandardInput
               type="text"
               inputMode="decimal"
@@ -347,10 +349,10 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
               onBlur={pitchDraftInput.handleBlur}
               min="0"
               max="180"
-              readOnly={!!parentElement}
               variant="ghost"
               style={{ fontFamily: 'Clash Grotesk, sans-serif', fontWeight: 400 }}
             />
+            )
           )}
           {selectedShape !== 'polygon' && (
             <div className="field-source-note">
@@ -361,11 +363,6 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
                   : pitch === 180
                     ? 'Facing down (horizontal)'
                     : 'Angled surface'}
-            </div>
-          )}
-          {parentElement && (
-            <div className="field-source-note">
-              from {parentElement}
             </div>
           )}
         </div>

@@ -898,7 +898,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           'Orientation (degrees):',
           elementType,
           'orientation360',
-          state.parentElement ? <ParentSourceNote parentName={state.parentElement} ctx={ctx} /> : undefined,
+          state.parentElement ? <ParentSourceNote parentName={state.parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined,
         )}
         <div className="element-input" ref={registerBaseFieldRef('orientation360')}>
           {state.parentElement ? (

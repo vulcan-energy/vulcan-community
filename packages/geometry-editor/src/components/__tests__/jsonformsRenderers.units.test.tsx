@@ -894,6 +894,25 @@ describe('where a value comes from (one source treatment)', () => {
     expect(screen.getByRole('button', { name: /^U-value: use calculation, 0.21/ })).toBeInTheDocument();
   });
 
+  it('System Sample: a blank field the preset omits shows the default note, with no "Use default" write', () => {
+    const handleChange = vi.fn();
+    renderControl(NumberControl, {
+      data: null, path: 'temp_flow', handleChange,
+      config: { systemSampleMode: true, systemSampleBaselineExtraJson: {}, derivedDefaults: { temp_flow: 45 } },
+    });
+    expect(screen.getByRole('button', { name: 'default' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /use default/i })).not.toBeInTheDocument();
+    expect(handleChange).not.toHaveBeenCalled();
+  });
+
+  it('ground U-value matches the calculation at the precision the button shows', () => {
+    const { container } = renderControl(NumberControl, {
+      data: 0.13, path: 'u_value', label: 'U-value',
+      config: { elementType: 'BuildingElementGround', groundUComputedWPerM2K: 0.1296 },
+    });
+    expect(sourceOf(container)).toHaveTextContent('from the floor calculation');
+  });
+
   it('a value from the applied assembly says so', () => {
     const { container } = renderControl(NumberControl, { data: 0.18, path: 'u_value', config: { assemblySourceValues: { u_value: 0.18 } } });
     expect(sourceOf(container)).toHaveTextContent('from the assembly');

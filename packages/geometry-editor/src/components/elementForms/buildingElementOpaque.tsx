@@ -465,7 +465,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           'Orientation (degrees):',
           elementType,
           'orientation360',
-          state.parentElement ? <ParentSourceNote parentName={state.parentElement} ctx={ctx} /> : undefined,
+          state.parentElement ? <ParentSourceNote parentName={state.parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined,
         )}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
           {state.parentElement ? (
@@ -522,7 +522,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             current={state.baseHeightInput.value}
             tolerance={0.01}
             info={<SourceNote>{baseHeightResetTarget?.note}</SourceNote>}
-            useLabel={baseHeightResetTarget?.note === 'from the floors below' ? 'Use the floors below' : 'Use the floor'}
+            useLabel={`Use ${baseHeightResetTarget?.note?.replace(/^from /, '') ?? 'the floor'}`}
             unit="m"
             fieldLabel="Base height"
             onUse={(value) => {

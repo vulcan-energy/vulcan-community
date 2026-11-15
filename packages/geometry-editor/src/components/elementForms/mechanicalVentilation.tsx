@@ -71,6 +71,7 @@ import {
 } from './formPrimitives';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { isExistingBuilding } from '../../lib/windowOpenings';
+import { ParentSourceNote, Readout } from '../FieldSource';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
 
 export interface MechanicalVentilationFormState {
@@ -354,8 +355,11 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 issue={getFieldValidationIssue('mid_height_air_flow_path', mechanicalVentilationMidHeightInput.value) || undefined}
               />
             </div>
-            {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
+            {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360', parentElement ? <ParentSourceNote parentName={parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined)}
             <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
+              {parentElement ? (
+                <Readout value={Number.isFinite(orientation360) ? orientation360 : ''} unit={fieldUnit('orientation360')} label="Orientation" />
+              ) : (
               <StandardInput
                 type="text"
                 inputMode="numeric"
@@ -369,18 +373,16 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 step="1"
                 min="0"
                 max="360"
-                readOnly={!!parentElement}
                 variant="ghost"
                 size="md"
               />
-              {parentElement && (
-                <div className="field-source-note">
-                  from {parentElement}
-                </div>
               )}
             </div>
-            {renderFieldLabel('Pitch (degrees):', elementType, 'pitch')}
+            {renderFieldLabel('Pitch (degrees):', elementType, 'pitch', parentElement ? <ParentSourceNote parentName={parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined)}
             <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('pitch')}>
+              {parentElement ? (
+                <Readout value={Number.isFinite(pitch) ? formatConditionalDecimals(pitch) : ''} unit={fieldUnit('pitch')} label="Pitch" />
+              ) : (
               <StandardInput
                 type="text"
                 inputMode="numeric"
@@ -394,14 +396,9 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 step="1"
                 min="0"
                 max="180"
-                readOnly={!!parentElement}
                 variant="ghost"
                 size="md"
               />
-              {parentElement && (
-                <div className="field-source-note">
-                  from {parentElement}
-                </div>
               )}
             </div>
               </>

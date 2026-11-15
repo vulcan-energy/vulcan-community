@@ -574,7 +574,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                       current={currentValue}
                       tolerance={epsilon}
                       info={<SourceNote>from {hostName ?? 'the roof'}</SourceNote>}
-                      useLabel={`Use ${hostName ?? 'the roof'}`}
+                      useLabel={`Use ${hostName ? hostName.replace(/^[A-Z](?![A-Z])/, (c) => c.toLowerCase()) : 'the roof'}`}
                       unit={unitSuffix.trim() || undefined}
                       fieldLabel={fieldKey === 'base_height' ? 'Base height' : fieldKey === 'pitch' ? 'Pitch' : 'Orientation'}
                       onUse={onReset}
