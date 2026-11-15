@@ -210,6 +210,12 @@ export type GeometryInspectorElementFieldsContext = Readonly<{
   multiple?: boolean;
   /** With several elements selected, the extra_json keys whose values differ between them. */
   mixed?: readonly string[];
+  /**
+   * The element's "Thermal values from" method (geometry-editor `lib/thermalMethod.ts`): with
+   * 'band' the age band and construction show; otherwise only the fields HEM still reads.
+   * Absent: no method applies, so all show.
+   */
+  thermalMethod?: 'band' | 'calculation' | 'u_value';
 }>;
 
 export type GeometryInspectorElementFieldsContribution = Readonly<{

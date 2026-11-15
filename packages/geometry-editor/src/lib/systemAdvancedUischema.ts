@@ -205,7 +205,8 @@ function buildControlsForSchema(schema: unknown, scopePrefix: string, ctx: Plant
       // parts; that is display formatting, not escaping, and the plant key stays raw.)
       const childScope = `${scopePrefix}/properties/${encodePointerToken(key)}`;
       if (shouldRecurseIntoNestedObject(childSchema)) {
-        const nextPathLabels = key === 'HeatSource'
+        // The heating circuit's one controller: its fields read plainly without a prefix.
+        const nextPathLabels = key === 'HeatSource' || key === 'ecodesign_controller'
           ? ctx.pathLabels
           : [...ctx.pathLabels, s['x-vulcan-heater-map'] ? heaterLabel(key, props as Record<string, unknown>) : startCaseKey(key)];
         const childElements = buildControlsForSchema(childSchema, childScope, {

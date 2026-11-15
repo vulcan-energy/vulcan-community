@@ -504,11 +504,20 @@ export function systemFieldDefaults(
     for (const segment of segments) node = readRecord(node)[segment];
     if (node && typeof node === 'object') out[item.field] = item.value;
   }
+  // HEM recirculates no return water unless a fraction is stated (`unwrap_or(0.0)` in the engine's emitters).
+  if (Object.values(readRecord(extra.SpaceHeatSystem)).some((system) => readRecord(system).type === 'WetDistribution')) out.bypass_fraction_recirculated ??= 0;
   if (existing) {
     const sources = Object.values(readRecord(extra.HeatSourceWet)).map(readRecord);
     if (sources.some((source) => source.type === 'DirectFeed')) out.power_max ??= 15;
     // A direct electric boiler with neither its manufacture year nor its pump power: year unknown.
     if (sources.some((source) => source.type === 'DirectElectricBoiler' && source.electricity_circ_pump === undefined)) out.manufacture_year ??= 'unknown';
+    // `tank_descriptors` (hemie_systems.rs): a tank with no size takes the volume category
+    // "Inaccessible", and with no standing loss, efficiency class or pump power the install year "unknown".
+    for (const tank of Object.values(readRecord(extra.HotWaterSource)).map(readRecord).filter((plant) => plant.type === 'StorageTank')) {
+      const has = (key: string) => tank[key] !== undefined && tank[key] !== null && tank[key] !== '';
+      if (!['volume', 'external_diameter', 'external_height', 'tank_volume_category'].some(has)) out.tank_volume_category ??= 'Inaccessible';
+      if (!['daily_losses', 'energy_efficiency_class', 'installation_year', 'pump_power_at_flow_rate'].some(has)) out.installation_year ??= 'unknown';
+    }
     const showers = Object.values(readRecord(readRecord(extra.HotWaterDemand).Shower)).map(readRecord);
     if (showers.some((shower) => shower.type === 'MixerShower' && shower.product_id === undefined)) out.flowrate ??= 9;
   }

@@ -182,6 +182,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   },
   // Wet distribution flow rates are litres per minute: HEM divides design, minimum and maximum flow by 60 (emitters).
   'design_flow_rate': {
+    label: 'Design flow rate',
     description: 'Design flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60: 0.06 L/s is 3.6 L/min.',
     type: 'number',
     units: 'L/min',
@@ -189,12 +190,14 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     correctsSchema: true,
   },
   'min_flow_rate': {
+    label: 'Minimum flow rate',
     description: 'Minimum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',
     type: 'number',
     units: 'L/min',
     correctsSchema: true,
   },
   'max_flow_rate': {
+    label: 'Maximum flow rate',
     description: 'Maximum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',
     type: 'number',
     units: 'L/min',
@@ -387,30 +390,35 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     unitSemantic: 'unitless',
   },
   'design_flow_temp': {
+    label: 'Design flow temperature',
     description:
       'Wet distribution design flow temperature (deg C). For weather-compensating Ecodesign classes II, III, VI, and VII, the engine uses this as the upper/max flow-temperature end of the compensation curve; otherwise it is the fixed flow temperature.',
     type: 'number',
     units: 'deg C',
   },
   'ecodesign_control_class': {
+    label: 'Ecodesign control class',
     description:
       'Ecodesign controller class for the wet distribution. Classes II, III, VI and VII use weather compensation; for these HEM uses design_flow_temp, min_flow_temp, min_outdoor_temp and max_outdoor_temp as the flow-temperature curve. Choose the class matching the installed controller and heat-source control arrangement.',
     type: 'integer',
     unitSemantic: 'unitless',
   },
   'min_flow_temp': {
+    label: 'Lowest flow temperature',
     description:
       'Weather-compensation minimum flow temperature (deg C). For Ecodesign classes II, III, VI, and VII, this is the lower flow-temperature end used when outdoor temperature is at or above max_outdoor_temp. It is not a room setpoint or radiator surface temperature.',
     type: 'number',
     units: 'deg C',
   },
   'min_outdoor_temp': {
+    label: 'Outdoor temperature for the highest flow',
     description:
       'Outdoor-temperature lower endpoint for the weather-compensation curve (deg C). At or below this outdoor temperature, the wet distribution flow temperature is capped at design_flow_temp.',
     type: 'number',
     units: 'deg C',
   },
   'max_outdoor_temp': {
+    label: 'Outdoor temperature for the lowest flow',
     description:
       'Outdoor-temperature upper endpoint for the weather-compensation curve (deg C). At or above this outdoor temperature, the wet distribution flow temperature is capped at min_flow_temp.',
     type: 'number',
@@ -538,6 +546,24 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   'primary_flow_rate': { label: 'Primary flow rate' },
   'daily_losses': { label: 'Standing heat loss' },
   'bypass_fraction_recirculated': { label: 'Return water recirculated' },
+  // Heating circuit: plain sentence-case words, no abbreviations.
+  'thermal_mass': { label: 'Thermal mass' },
+  'variable_flow': { label: 'Variable flow' },
+  'product_id': { label: 'Product ID' },
+  // Hot water cylinder size and heat loss, as their "Size from" and "Heat loss from" methods name them.
+  'tank_volume_category': { label: 'Volume category' },
+  'external_diameter': { label: 'External diameter' },
+  'external_height': { label: 'External height' },
+  'energy_efficiency_class': { label: 'Energy label' },
+  'installation_year': { label: 'Install year' },
+  'dispatch_mode': { label: 'Dispatch mode' },
+  'weather_compensation_curve_id': { label: 'Weather compensation curve ID' },
+  'weather_comp_a': { label: 'Weather compensation A' },
+  'weather_comp_b': { label: 'Weather compensation B' },
+  'weather_comp_c': { label: 'Weather compensation C' },
+  'load_comp_a': { label: 'Load compensation A' },
+  'load_comp_b': { label: 'Load compensation B' },
+  'load_comp_c': { label: 'Load compensation C' },
   'System:HotWaterSource:tank_volume_declared': {
     description: "Tank volume stored in the database (unit: litres)",
     type: 'number',
