@@ -1031,6 +1031,14 @@ function resolveFhsElementSubschemaFromRoot(schema: SchemaNode | null, elementTy
         }
       }
 
+      // `oneOf` alternatives (thermal resistance or U-value): when the type forbids all but one
+      // (a9 party wall: `u_value: false`), that one is required.
+      if (Array.isArray(baseSchema.oneOf)) {
+        const open = baseSchema.oneOf.filter((branch: { required?: string[] }) =>
+          (branch.required ?? []).every((field) => (mergedProps as Record<string, unknown>)[field] !== false));
+        if (open.length === 1) mergedRequired.push(...(open[0].required ?? []));
+      }
+
       // De-dupe required
       mergedRequired = Array.from(new Set(mergedRequired));
 
