@@ -1066,8 +1066,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   );
 
   const registerBaseFieldRef = (fieldKey: string) => (node: HTMLDivElement | null) => {
-    if (node) baseFieldNodes.set(fieldKey, node);
-    else baseFieldNodes.delete(fieldKey);
+    if (node) {
+      baseFieldNodes.set(fieldKey, node);
+      node.dataset.fieldKey = fieldKey;
+    } else baseFieldNodes.delete(fieldKey);
   };
 
   const registerBaseFieldRefs = (fieldKeys: string | string[]) => (node: HTMLDivElement | null) => {
@@ -1077,6 +1079,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (node) {
         baseFieldNodes.set(key, node);
         baseFieldNodes.set(camelKey, node);
+        node.dataset.fieldKey = keys[0];
       } else {
         baseFieldNodes.delete(key);
         baseFieldNodes.delete(camelKey);

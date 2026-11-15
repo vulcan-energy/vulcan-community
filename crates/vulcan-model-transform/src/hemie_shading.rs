@@ -407,9 +407,16 @@ pub(super) fn distant(
     } else {
         ""
     };
+    let nothing_anywhere = quadrants
+        .iter()
+        .all(|q| q.source == "none" && q.roof_source == "none");
     notices.push(notice(
         SHADING_POINTER,
-        format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; ")),
+        if nothing_anywhere {
+            "Distant shading: nothing is drawn or chosen on any side, so every side is very light and the roof is not shaded, the default. Draw what shades a side, or choose its band.".to_string()
+        } else {
+            format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; "))
+        },
     ));
     Some((
         json!({"model_type": "hemie", "DwellingShadingSegments": segments}),
@@ -513,6 +520,20 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
             format!("Window '{}' close shading: {}.", e.name, shown.join("; ")),
         ));
     }
+}
+
+/// The window states no close-shading category and has no drawn Window Shading: it has none.
+pub(super) fn states_no_close_shading(ctx: &Ctx, e: &El, w: &Value) -> bool {
+    ["overhang", "side_fin_left", "side_fin_right", "obstacle"]
+        .iter()
+        .all(|field| w.get(*field).is_none())
+        && !ctx
+            .settings
+            .csv
+            .get("Window Shading")
+            .into_iter()
+            .flatten()
+            .any(|r| text(r, &["linked_window"]) == Some(e.name))
 }
 
 #[cfg(test)]
@@ -782,20 +803,13 @@ mod tests {
     #[test]
     fn nothing_drawn_and_nothing_stated_assumes_very_light() {
         let out = derive(&[], 180.0);
-        // One notice names every side; no side repeats it.
+        // One short notice for the whole dwelling; no side repeats it.
         assert!(
-            out.notice("Where nothing is drawn, very light is assumed"),
+            out.notice("nothing is drawn or chosen on any side, so every side is very light"),
             "{:?}",
             out.notices
         );
-        for name in NAMES {
-            assert!(out.notice(&format!("{name} (")), "{:?}", out.notices);
-            assert!(
-                !out.notice(&format!("{name}: Very light")),
-                "{:?}",
-                out.notices
-            );
-        }
+        assert_eq!(out.notices.len(), 1, "{:?}", out.notices);
     }
 
     #[test]

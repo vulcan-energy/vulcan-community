@@ -272,7 +272,7 @@ fn a_hidden_preset_copy_with_distribution_rows_only_is_ignored_with_a_notice() {
         assert_eq!(lengths(&output), None, "{label}");
         let notice = notice(&output).unwrap_or_else(|| panic!("{label}: no notice"));
         assert!(
-            notice.message.contains("(none are drawn)"),
+            notice.message.contains("and none is drawn"),
             "{label}: {}",
             notice.message
         );

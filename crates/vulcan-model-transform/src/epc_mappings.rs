@@ -864,12 +864,10 @@ pub(crate) fn apply_desnz_defaults(
         }
     }
     let mut unshaded = Vec::new();
-    for zone_value in model["Zone"]
-        .as_object_mut()
-        .into_iter()
-        .flatten()
-        .map(|(_, v)| v)
-    {
+    // An existing building takes close-shading categories on the window instead, and names the
+    // windows that state none (`hemie_shading::close`).
+    let existing = model.get("IsExistingBuilding") == Some(&Value::Bool(true));
+    for (_, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
         for (name, element) in zone_value["BuildingElement"]
             .as_object_mut()
             .into_iter()
@@ -884,7 +882,7 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
     }
-    if !unshaded.is_empty() {
+    if !unshaded.is_empty() && !existing {
         notices.push(notice(
             "/Zone",
             format!(

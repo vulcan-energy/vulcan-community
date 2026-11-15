@@ -1548,7 +1548,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         supplyNames: energySupplyNames,
         electricSupplyNames,
         coldWaterNames,
-        dropKeys: unusedHeatPumpFields(advancedFieldsData, cooled),
+        // A new build picks each product with its chip: the raw product id beside it is a second surface.
+        dropKeys: new Set([...unusedHeatPumpFields(advancedFieldsData, cooled), ...(existingBuilding ? [] : ['product_id'])]),
         pvDiverter: subtype === 'HotWaterSource',
       }) as typeof result;
     }

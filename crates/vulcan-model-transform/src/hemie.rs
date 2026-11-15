@@ -490,6 +490,15 @@ impl<'a> El<'a> {
     }
 }
 
+/// The elements' names, as a note lists them.
+fn names(elements: &[&El]) -> String {
+    elements
+        .iter()
+        .map(|e| e.name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn quoted(names: &[&str]) -> String {
     names
         .iter()
@@ -640,6 +649,8 @@ struct Constructions {
     stated_glazing: BTreeSet<String>,
     /// Elements that state their own heat capacity, mass distribution class or solar absorption.
     stated_mass: BTreeSet<String>,
+    /// Elements whose stated U-value, thermal mass or solar absorption lodgement needs evidence for.
+    needs_evidence: BTreeSet<String>,
     /// Party walls that state no cavity type: HEMIE takes it from the age band (DESNZ-defined).
     party_walls_by_age_band: BTreeSet<String>,
     /// Elements whose stated heat capacity is set aside: their type sets it.
@@ -677,6 +688,8 @@ struct Ctx<'a> {
     errors: Vec<ValidationError>,
     notices: Vec<SchemaOmission>,
     model: &'a Value,
+    /// Windows that state no close-shading category and have no drawn shading.
+    unshaded_windows: Vec<String>,
 }
 
 impl Ctx<'_> {
@@ -829,7 +842,7 @@ impl Ctx<'_> {
             c.insert("u_value".into(), json!(u));
             self.constructions
                 .documented
-                .insert(format!("{} (U {u})", first.name));
+                .insert(format!("{} (U {u})", names(elements)));
         } else if let Some(r) = first.num("thermal_resistance_construction") {
             // Derived from the model: U from the element's construction resistance and HEM's
             // surface resistances (BS EN ISO 13789 coefficients: radiative 5.13, convective 2.5
@@ -844,7 +857,7 @@ impl Ctx<'_> {
             c.insert("u_value".into(), json!(u));
             self.constructions
                 .documented
-                .insert(format!("{} (U {u:.3} from R {r})", first.name));
+                .insert(format!("{} (U {u:.3} from R {r})", names(elements)));
         }
         if construction_type == "window" {
             // DESNZ-defined: HEMIE takes the g-value and frame area fraction from the glazing
@@ -914,6 +927,11 @@ impl Ctx<'_> {
             self.constructions
                 .stated_mass
                 .insert(format!("{names} ({})", stated_mass.join(", ")));
+        }
+        if c.contains_key("u_value") || !stated_mass.is_empty() {
+            self.constructions
+                .needs_evidence
+                .extend(elements.iter().map(|e| e.name.to_string()));
         }
         for (key, value) in extra {
             c.entry(*key).or_insert_with(|| value.clone());
@@ -1349,6 +1367,7 @@ fn convert_existing_building(
         errors: Vec::new(),
         notices: Vec::new(),
         model: &snapshot,
+        unshaded_windows: Vec::new(),
     };
     systems::check_vents(&mut ctx);
     let converted = convert(&mut ctx, csv);
@@ -1402,7 +1421,7 @@ fn convert_existing_building(
         .into_iter()
         .collect();
     if !documented.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so the existing-building EPC takes it as a documented U-value from the element: {}. Lodgement needs evidence for each.", documented.join(", "))));
+        notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so the existing-building EPC takes it as a documented U-value from the element: {}.", documented.join(", "))));
     }
     let stated_glazing: Vec<String> = std::mem::take(&mut ctx.constructions.stated_glazing)
         .into_iter()
@@ -1414,7 +1433,21 @@ fn convert_existing_building(
         .into_iter()
         .collect();
     if !stated_mass.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These elements state their own thermal mass or solar absorption, which the existing-building EPC uses in place of its defaults: {}. Lodgement needs evidence for each.", stated_mass.join("; "))));
+        notices.push(notice("/Zone/constructions", format!("These elements state their own thermal mass or solar absorption, which the existing-building EPC uses in place of its defaults: {}.", stated_mass.join("; "))));
+    }
+    let needs_evidence = std::mem::take(&mut ctx.constructions.needs_evidence);
+    if !needs_evidence.is_empty() {
+        notices.push(notice(
+            "/Zone/constructions",
+            format!(
+                "Lodgement needs evidence for the values these elements state: {}.",
+                needs_evidence.into_iter().collect::<Vec<_>>().join(", ")
+            ),
+        ));
+    }
+    let unshaded = std::mem::take(&mut ctx.unshaded_windows);
+    if !unshaded.is_empty() {
+        notices.push(notice("/Zone", format!("These windows state no close shading, so they have none: {}. To add it, choose the overhang, side fins or balcony front on the window.", unshaded.join(", "))));
     }
     let set_aside = std::mem::take(&mut ctx.constructions.heat_capacity_set_aside);
     if !set_aside.is_empty() {
@@ -2367,6 +2400,9 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
         w["is_security_risk"] = json!(risk);
     }
     shading::close(ctx, e, &mut w);
+    if shading::states_no_close_shading(ctx, e, &w) {
+        ctx.unshaded_windows.push(e.name.to_string());
+    }
     Some(w)
 }
 
