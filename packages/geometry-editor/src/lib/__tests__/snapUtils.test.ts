@@ -13,6 +13,8 @@ import {
   constrainPointOrthogonally,
   findClosestSnapCorner,
   findConnectedDragNeighbours,
+  getNearbySnapWallSegments,
+  type SnapWallSegmentTarget,
   planConnectedDrag,
   resolveOpeningSegmentParentFromCache,
   resolveDrawSnapPoint,
@@ -1162,5 +1164,49 @@ describe('placedDrawPoint', () => {
   it('rounds a free click to the 0.01 m grid and never moves a snapped one', () => {
     expect(placedDrawPoint({ point: { x: 1.23456, y: -0.004 }, geometrySnap: false })).toEqual({ x: 1.23, y: -0 });
     expect(placedDrawPoint({ point: { x: 1.23456, y: 2.0001 }, geometrySnap: true })).toEqual({ x: 1.23456, y: 2.0001 });
+  });
+});
+
+describe('getNearbySnapWallSegments', () => {
+  it('returns the segments a whole-bounding-box index returned near the point, in the same order', () => {
+    let seed = 7;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const coord = () => Math.round((rand() * 40 - 20) * 4) / 4 + (rand() < 0.3 ? rand() * 0.01 : 0);
+    const segments: SnapWallSegmentTarget[] = Array.from({ length: 200 }, (_, order) => ({
+      elementId: `e${order}`, elementName: `e${order}`, order,
+      A: { x: coord(), y: coord() },
+      B: rand() < 0.4 ? { x: coord(), y: coord() } : { x: coord(), y: coord() },
+    }));
+    const cache = buildGeometrySnapCacheFromTargets([], segments);
+    const cell = (v: number) => Math.floor(v / 0.5);
+    const distSq = (p: { x: number; y: number }, { A, B }: SnapWallSegmentTarget) => {
+      const vx = B.x - A.x; const vy = B.y - A.y; const v2 = vx * vx + vy * vy;
+      const t = v2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - A.x) * vx + (p.y - A.y) * vy) / v2));
+      return (p.x - A.x - t * vx) ** 2 + (p.y - A.y - t * vy) ** 2;
+    };
+    for (let i = 0; i < 2000; i += 1) {
+      const point = { x: coord(), y: coord() };
+      const tolerance = [0.05, 0.3, 1.2][i % 3]!;
+      // The previous index: every segment in every cell of its bounding box.
+      const qx = [cell(point.x - tolerance), cell(point.x + tolerance)];
+      const qy = [cell(point.y - tolerance), cell(point.y + tolerance)];
+      const expected: SnapWallSegmentTarget[] = [];
+      for (let ix = qx[0]!; ix <= qx[1]!; ix += 1) for (let iy = qy[0]!; iy <= qy[1]!; iy += 1) {
+        for (const s of segments) {
+          if (expected.includes(s)) continue;
+          if (ix >= cell(Math.min(s.A.x, s.B.x)) && ix <= cell(Math.max(s.A.x, s.B.x))
+            && iy >= cell(Math.min(s.A.y, s.B.y)) && iy <= cell(Math.max(s.A.y, s.B.y))) expected.push(s);
+        }
+      }
+      const near = (list: readonly SnapWallSegmentTarget[]) => list.filter((s) => distSq(point, s) <= tolerance * tolerance + 1e-12);
+      expect(near(getNearbySnapWallSegments(cache, point, tolerance))).toEqual(near(expected));
+    }
+  });
+
+  it('indexes a long diagonal wall by the cells it crosses', () => {
+    const wall: SnapWallSegmentTarget = { elementId: 'w', elementName: 'w', order: 0, A: { x: 0, y: 0 }, B: { x: 3000, y: 3000 } };
+    const cache = buildGeometrySnapCacheFromTargets([], [wall]);
+    expect(cache.spatialIndex!.wallBuckets.size).toBeLessThan(20_000);
+    expect(getNearbySnapWallSegments(cache, { x: 1500.1, y: 1499.9 }, 0.2)).toEqual([wall]);
   });
 });
