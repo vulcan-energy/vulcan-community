@@ -614,6 +614,25 @@ export function acceptsSuspendedShieldLocation(schemaPort: GeometrySchemaPort): 
   return properties?.shield_fact_location != null && properties.shield_fact_location !== false;
 }
 
+/**
+ * The shielding location a suspended floor lacks, once the target's schema says it takes one.
+ * Loading fills it only when the schema is already there; this fills it when the schema arrives.
+ */
+export function missingSuspendedShieldLocations(
+  elementsById: Record<string, Element>,
+  acceptsShieldLocation: boolean,
+): Record<string, Element> {
+  if (!acceptsShieldLocation) return {};
+  const patched: Record<string, Element> = {};
+  for (const ground of Object.values(elementsById)) {
+    if (ground.type !== 'BuildingElementGround' || ground.floor_type !== 'Suspended_floor') continue;
+    const extra = readExtraJsonRecord(ground.extra_json);
+    if (extra.shield_fact_location !== undefined) continue;
+    patched[ground.id] = { ...ground, extra_json: { ...extra, shield_fact_location: parseWindShieldLocation(undefined) } };
+  }
+  return patched;
+}
+
 export interface GroundFabricFollower {
   /**
    * Runs a document load or replace (open, undo, redo, a shared-model update). Ground fabric does
@@ -649,9 +668,10 @@ export function followGroundFabricOnEdit<
     try {
       const { updateElement } = state;
       const before = previous.elementsById;
-      syncSuspendedGroundFabricFromWalls(state.elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
+      // Defaults first: the wall U and the U-value of a new suspended floor read them.
+      fillSuspendedFloorDefaults(state.elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
+      syncSuspendedGroundFabricFromWalls(store.getState().elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
       syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources);
-      fillSuspendedFloorDefaults(store.getState().elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
     } finally {
       syncing = false;
     }

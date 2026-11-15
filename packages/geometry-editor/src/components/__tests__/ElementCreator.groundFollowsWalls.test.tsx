@@ -9,6 +9,8 @@ import { emptyGeometryInspectorContributions } from '../../../../geometry-editor
 import { canonicalGeometrySchemaPort } from '../../lib/geometrySchemaPort';
 import { ElementCreator } from '../ElementCreator';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
+import { computeGroundUValueFromElementModel } from '../../lib/groundUValueCalculator';
+import type { GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 
 type Store = ReturnType<typeof createGeometryStore>;
 
@@ -181,4 +183,68 @@ it('an older file with a blank suspended floor opens clean, and the export carri
   expect(exported).toBe(store.getState().lastSavedCsv);
   expect(exported).toContain('""height_upper_surface"":0.15');
   expect(exported).toContain('""area_per_perimeter_vent""');
+});
+
+describe('suspended floors', () => {
+  const extraOf = (store: Store) =>
+    store.getState().elementsById[idOf(store, 'Floor')]!.extra_json as Record<string, unknown>;
+  const suspendedU = (store: Store) => {
+    const floor = store.getState().elementsById[idOf(store, 'Floor')] as { total_area?: number; area: number; perimeter: number };
+    const u = computeGroundUValueFromElementModel(floor, extraOf(store), 'Suspended_floor', {
+      totalArea: floor.total_area ?? floor.area,
+      perimeter: floor.perimeter,
+    });
+    return Number(u!.toFixed(4));
+  };
+
+  it('slab to suspended takes the suspended U-value, and it keeps following the walls', () => {
+    const store = openedModel();
+    const id = idOf(store, 'Floor');
+    store.getState().updateElement(id, {
+      thickness_walls: 0.3,
+      extra_json: { thermal_resistance_floor_construction: 0.2, thermal_transm_walls: 1.5 },
+    } as never);
+    const slabU = extraOf(store).u_value;
+    store.getState().updateElement(id, { floor_type: 'Suspended_floor' } as never);
+    expect(extraOf(store).u_value).toBe(suspendedU(store));
+    expect(extraOf(store).u_value).not.toBe(slabU);
+
+    store.getState().updateElement(idOf(store, 'Wall (S)'), { coordinates: line(2, 0, 4, 0) });
+    expect(perimeterOf(store)).toBe(14.9);
+    expect(extraOf(store).u_value).toBe(suspendedU(store));
+  });
+
+  /** The suspended floor as an older file or peer has it: defaults blank. */
+  function blankSuspendedCsv(): string {
+    const builder = openedModel();
+    builder.getState().updateElement(idOf(builder, 'Floor'), { floor_type: 'Suspended_floor' } as never);
+    return builder.getState().generateCSV({ allowUnresolvedMigration: true })
+      .replace(/""height_upper_surface"":[^,}]*,?/, '')
+      .replace(/""area_per_perimeter_vent"":[^,}]*,?/, '')
+      .replace(/,?""shield_fact_location"":""[A-Za-z]*""/, '');
+  }
+
+  it('a restore from a CSV without the defaults fills them', () => {
+    const store = openedModel();
+    store.getState().replaceDocumentFromCsv(blankSuspendedCsv(), { currentFloorId: null, floors: store.getState().floors });
+    expect(extraOf(store).height_upper_surface).toBe(0.15);
+    expect(extraOf(store).area_per_perimeter_vent).toBeGreaterThan(0);
+  });
+
+  it('fills the shielding location when the target schema arrives after the load', () => {
+    let notify = () => {};
+    const port = {
+      ...canonicalGeometrySchemaPort,
+      availability: 'unavailable' as GeometrySchemaPort['availability'],
+      // The target's suspended floor takes a shielding location.
+      getElementSubschema: () => ({ properties: { shield_fact_location: { type: 'string' } } }),
+      subscribe: (listener: () => void) => { notify = listener; return () => {}; },
+    };
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: port });
+    store.getState().loadFromCSV(blankSuspendedCsv());
+    expect(extraOf(store).shield_fact_location).toBeUndefined();
+    port.availability = 'available';
+    notify();
+    expect(extraOf(store).shield_fact_location).toBe('Average');
+  });
 });
