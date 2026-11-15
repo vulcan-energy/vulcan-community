@@ -2862,7 +2862,7 @@
       "license": "CC-BY-4.0",
       "rights_status": "approved",
       "classification": "public_community_sample_model",
-      "evidence": "Byte-identical to resources/sample_project/input/base_models/example_semi_detached.csv, the model this editor already ships as its sample project."
+      "evidence": "Derived from resources/sample_project/input/base_models/example_semi_detached.csv, the model this editor ships as its sample project; the Metadata target rows differ."
     },
     {
       "path": "packages/geometry-editor/src/geometry/__fixtures__/semiDetachedWithDormer.ts",
