@@ -5,7 +5,7 @@ import type { ValidationIssue, ValidationResult } from '../geometry/validation/t
 import type { BuildErrorItem, TargetValidation } from '../types/buildErrors';
 import { issuePathSegments, resolveIssueTarget, type IssueTarget } from './issueTarget';
 import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
-import { globalSettingsFieldSection, type GlobalSettingsFieldSection } from './globalSettingsValidation';
+import { globalSettingsFieldSection, METADATA_INPUT_LABELS, type GlobalSettingsFieldSection } from './globalSettingsValidation';
 
 const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = {
   defaults: 'Global Settings > Defaults',
@@ -136,9 +136,15 @@ const formatBuildErrorForDisplay = (item: BuildErrorItem): DisplayBuildError => 
   const unexpectedFields = unexpectedFieldsFromMessage(item.message);
   const explicitUserMessage = item.userMessage?.trim();
 
+  const unstatedInput = item.code === 'E_EPC_REQUIRED_INPUT' && pathSegments[0] === 'Metadata' && pathSegments[1]
+    ? METADATA_INPUT_LABELS[pathSegments[1]]
+    : undefined;
+
   let userMessage: string;
   if (explicitUserMessage) {
     userMessage = explicitUserMessage;
+  } else if (unstatedInput) {
+    userMessage = `Enter ${unstatedInput} in Global Settings.`;
   } else if (
     location === 'Appliances' &&
     (item.message.includes('is not allowed for {}') || item.message.includes('has less than'))

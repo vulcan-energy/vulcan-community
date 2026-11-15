@@ -5568,11 +5568,12 @@ impl JSONBuilder {
                 missing.push(*name);
             }
         }
-        if !missing.is_empty() {
+        // One error per input, on its own row, so the editor names the field and opens it.
+        for name in missing {
             self.push_non_fatal(
                 "E_EPC_REQUIRED_INPUT",
-                "/Metadata",
-                &format!("HEM:EPC requires these inputs and the Metadata section has no row for them: {}. Add each row with its value.", missing.join(", ")),
+                &format!("/Metadata/{name}"),
+                &format!("{name} is not stated. Enter it in Global Settings."),
             );
         }
         if !used.is_empty() {

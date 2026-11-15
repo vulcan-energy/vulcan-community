@@ -864,7 +864,12 @@ pub(crate) fn apply_desnz_defaults(
         }
     }
     let mut unshaded = Vec::new();
-    for zone_value in model["Zone"].as_object_mut().into_iter().flatten().map(|(_, v)| v) {
+    for zone_value in model["Zone"]
+        .as_object_mut()
+        .into_iter()
+        .flatten()
+        .map(|(_, v)| v)
+    {
         for (name, element) in zone_value["BuildingElement"]
             .as_object_mut()
             .into_iter()

@@ -354,6 +354,13 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     setIsSaveErrorModalOpen(true);
   }, [positionSaveErrorDropdown]);
 
+  // Another surface (the Quick sim card) opens this same list.
+  useEffect(() => {
+    const open = () => openSaveErrorDropdown(buildErrorChipRef.current ?? saveButtonRef.current);
+    window.addEventListener('open-build-errors', open);
+    return () => window.removeEventListener('open-build-errors', open);
+  }, [openSaveErrorDropdown]);
+
   const updateSaveErrorPosition = useCallback(() => {
     const anchor = errorAnchorRef.current || saveButtonRef.current;
     if (!anchor) return;
