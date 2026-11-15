@@ -2869,7 +2869,7 @@ export function GlobalSettingsModal({
                 }}
               >
                 <GlobalSettingsAccordionHeader
-                  title="Ventilation Environment"
+                  title="Ventilation environment"
                   expanded={ventilationEnvExpanded}
                   onToggle={() =>
                     setVentilationEnvExpanded(!ventilationEnvExpanded)
@@ -3309,7 +3309,7 @@ export function GlobalSettingsModal({
                       minWidth: 0,
                     }}
                   >
-                    Thermal Bridging
+                    Thermal bridging
                   </span>
                   <svg
                     width="16"

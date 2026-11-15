@@ -192,11 +192,19 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     description: 'Minimum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',
     type: 'number',
     units: 'L/min',
+    correctsSchema: true,
   },
   'max_flow_rate': {
     description: 'Maximum flow rate of the heating circuit, in litres per minute (L/min). For a value in L/s, multiply by 60.',
     type: 'number',
     units: 'L/min',
+    correctsSchema: true,
+  },
+  'DispatchMode': {
+    description: 'How the circuit shares the load between its heat sources. Needed when it has more than one. Alternate: the sources are called in priority order and each takes the load that is left. Parallel: the load is split between the sources in proportion to their capacity.',
+    type: 'string',
+    // The schema text names the HeatSource key; this one is in plain words.
+    correctsSchema: true,
   },
   'inverter_peak_power_dc': {
     description: 'Peak electrical DC power input to the inverter, in kilowatts (kW). This represents the maximum DC power the PV array can deliver into the inverter under standard test conditions.',

@@ -12,8 +12,8 @@ const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = 
   target: 'Global Settings',
   dwelling: 'Global Settings > Dwelling Details',
   airTightness: 'Global Settings > Air Tightness',
-  ventilation: 'Global Settings > Ventilation Environment',
-  thermalBridging: 'Global Settings > Thermal Bridging',
+  ventilation: 'Global Settings > Ventilation environment',
+  thermalBridging: 'Global Settings > Thermal bridging',
 };
 const VENTILATION_SETTINGS = new Set(['cross_vent_possible', 'terrain_class', 'altitude', 'shield_class', 'noise_nuisance', 'ventilation_zone_base_height']);
 

@@ -80,7 +80,7 @@ it('takes the band and construction from the element, else its host wall, else t
 
 it('labels fields and values for people, with units', () => {
   expect(hemieFieldLabel('glazing_gap')).toBe('Glazing gap (mm)');
-  expect(hemieFieldLabel('areal_heat_capacity')).toBe('Areal heat capacity (J/m²·K)');
+  expect(hemieFieldLabel('areal_heat_capacity')).toBe('Heat capacity per area (J/m²·K)');
   expect(hemieValueLabel('glazing_gap', 12)).toBe('12 mm');
   expect(hemieValueLabel('frame_material', 'wood or PVC')).toBe('Wood or PVC');
   expect(hemieValueLabel('insulation_location', 'at_joists')).toBe('At joists');

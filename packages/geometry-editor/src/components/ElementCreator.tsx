@@ -2083,7 +2083,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       const value = resolveHeatSourceWetReferenceName(element);
       if (!value || seen.has(value)) continue;
       seen.add(value);
-      const label = element.name && element.name !== value ? `${element.name} (${value})` : value;
+      const label = element.name || value;
       options.push({ value, label });
     }
     return options;
@@ -4301,6 +4301,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (selection.type !== 'element' && selection.type !== 'global') return null;
     const el = getElementById(selection.id);
     if (!el) return null;
+    // A type the target excludes (Lighting on an existing building) has no position to state.
+    if (targetRules(schemaPort, modelSettings).excludedElementTypes[elementType]) return null;
     if (!elementSupportsGenericElevationControl(elementType, el, buildingElementGroundFormState.floorType)) return null;
     return (
       <>
@@ -5064,7 +5066,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 </div>
                 {!constructionBands && (targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
                 <div className="element-label">
-                  Simplified Thermal Bridging
+                  Simplified thermal bridging
                 </div>
                 <div className="element-input" ref={registerBaseFieldRef('simplifiedThermalBridging')}>
                   <label className="checkbox-container">
