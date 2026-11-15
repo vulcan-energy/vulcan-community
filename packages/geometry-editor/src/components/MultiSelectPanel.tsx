@@ -19,7 +19,7 @@ import { SearchableDescribedSelect, type SearchableDescribedOption } from './Sea
 import { Tooltip } from './Tooltip';
 import { loadBundledAssemblyLibrary, type BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import type { AssemblyExample, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
-import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
+import { MASS_CLASS_LABELS, parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
 import type { GroundFloorType } from '../lib/groundUValueCalculator';
 import { getElementTypeDisplayName } from '../lib/displayNames';
 import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS } from '../lib/assemblyMaterialFabric';
@@ -3225,7 +3225,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderExtraJsonSelectRow(
           'securityRisk',
-          'Security Risk',
+          'Security risk',
           windowSecurityRiskSummary,
           activeWindowSurfaceIds.length > 0,
           BOOLEAN_SELECT_OPTIONS,
@@ -3843,9 +3843,9 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               constructionFieldScopeKey,
               constructionTargetIds,
               'mass',
-              'Mass Distribution Class',
+              'Mass distribution',
               constructionMassSummary,
-              MASS_DISTRIBUTION_CLASS_ENUM.map((value) => ({ value, label: value })),
+              MASS_DISTRIBUTION_CLASS_ENUM.map((value) => ({ value, label: MASS_CLASS_LABELS[value] })),
               (_el, value) => ({ mass_distribution_class: value }),
             )}
             {arealBandOptions.length > 0 && renderManualSelectRow(

@@ -9,6 +9,8 @@ import { deriveFloorsFromElements, editorFloorsAndElementsForParsedCsv } from '.
 import { validateElementCore } from '../../validation/validateElement';
 import { unavailableGeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProvenance';
+import { computeGroundUValueFromElementModel } from '../../../lib/groundUValueCalculator';
+import { GROUND_U_VALUE_MANUAL_KEY } from '../../../lib/groundSuspendedFabricSync';
 import type { Element, Floor } from '../../types';
 
 const wall = (id = 'p'): Element => ({ id, name: `Party ${id}`, type: 'BuildingElementPartyWall', zoneId: 'z', width: 2, height: 3, area: 6, parent_element: null, coordinates: [], extra_json: { u_value: .25, advanced: 'keep' } });
@@ -456,5 +458,40 @@ describe('CSV-side validation matches the editor', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('calculated floor U-value on an existing building', () => {
+  const floorCsv = (existing: boolean, extra: Record<string, unknown>) => `Metadata,,
+VulcanCsvVersion,3
+IsExistingBuilding,${existing ? 'TRUE' : 'FALSE'}
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Zone 1,Zone,50,20,2.5,FALSE
+
+Ground Elements,,
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,parent_element,coords,extra_json
+Floor,Zone 1,BuildingElementGround,20,0,0,18,Slab_no_edge_insulation,,0.3,,"0,0,0|5,0,0|5,4,0|0,4,0","${JSON.stringify({ thermal_resistance_floor_construction: 1.5, ...extra }).replace(/"/g, '""')}"
+`;
+  const calculated = computeGroundUValueFromElementModel({ total_area: 20, perimeter: 18, thickness_walls: 0.3 }, { thermal_resistance_floor_construction: 1.5 }, 'Slab_no_edge_insulation')!;
+  const load = (existing: boolean, extra: Record<string, unknown>) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const result = store.getState().loadFromCSV(floorCsv(existing, extra));
+    const floor = Object.values(store.getState().elementsById).find((el) => el.name === 'Floor')!;
+    return { result, uValue: floor.extra_json?.u_value };
+  };
+
+  it('removes a U-value the editor wrote on its own, with a load notice, so the age band applies', () => {
+    const { result, uValue } = load(true, { u_value: Number(calculated.toFixed(4)) });
+    expect(uValue).toBeUndefined();
+    expect(result.upgraded).toBe(true);
+    expect(result.warnings).toContain('Calculated floor U-value removed, so the age band applies: Floor. To use a calculated value, apply it in the U-value calculator.');
+  });
+
+  it('keeps a U-value the user applied, one that differs from the calculation, and any value on a new build', () => {
+    expect(load(true, { u_value: Number(calculated.toFixed(4)), [GROUND_U_VALUE_MANUAL_KEY]: true }).uValue).toBe(Number(calculated.toFixed(4)));
+    expect(load(true, { u_value: 0.45 }).uValue).toBe(0.45);
+    expect(load(false, { u_value: Number(calculated.toFixed(4)) }).uValue).toBe(Number(calculated.toFixed(4)));
   });
 });

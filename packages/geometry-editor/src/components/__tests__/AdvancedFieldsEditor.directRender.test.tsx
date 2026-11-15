@@ -1203,7 +1203,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
   ],
   'core/System:SpaceHeatSystem': [
-    'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
+    'bypass_fraction_recirculated | Return water recirculated | textbox | 0 | 1 | - | tip',
     'Control | Control | textbox | - | - | - | tip',
     'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
     'design_flow_temp | Design Flow Temp | textbox | 0 | - | - | tip',
@@ -1230,7 +1230,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'treatment | Blinds / curtains | other:DIV | - | - | - | no-tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'g_value | G-Value | textbox | 0 | 1 | - | tip',
-    'security_risk | Security Risk? | select | - | - | - | tip',
+    'security_risk | Security risk | select | - | - | - | tip',
     'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
   ],
   'fhs/BuildingElementGround [- Exposed_floor Slab_no_edge_insulation ceiling door fancoil floor radiator roof ufh wall]': [
@@ -1434,7 +1434,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'temp_setback | Temp Setback | textbox | - | - | - | tip',
   ],
   'fhs/System:SpaceHeatSystem': [
-    'bypass_fraction_recirculated | Bypass Fraction Recirculated | textbox | 0 | 1 | - | tip',
+    'bypass_fraction_recirculated | Return water recirculated | textbox | 0 | 1 | - | tip',
     'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
     'design_flow_temp | Design Flow Temp | textbox | 20 | 120 | - | tip',
     'ecodesign_control_class | Ecodesign Controller · Ecodesign Control Class | select | - | - | - | tip',
@@ -1650,7 +1650,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         // (`{type:'boolean', enum:[true,false]}`, inlined by AdvancedFieldsEditor's
         // subschema memo -- see the inline comment there) to EnumControl instead --
         // an expected delta, not a surprise (see the R4.3b brief's "Known effects").
-        row('security_risk', 'Security Risk?', SELECT),
+        row('security_risk', 'Security risk', SELECT),
         row('window_part_list', 'Window Part List', TEXT(null)),
       ],
     );
@@ -2219,7 +2219,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       },
     };
     const singlePlantRows = [
-      row('bypass_fraction_recirculated', 'Bypass Fraction Recirculated', TEXT('0')),
+      row('bypass_fraction_recirculated', 'Return water recirculated', TEXT('0')),
       row('design_flow_temp', 'Design Flow Temp', TEXT('20')),
       row('ecodesign_control_class', 'Ecodesign Controller · Ecodesign Control Class', SELECT),
       row('max_outdoor_temp', 'Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
@@ -2332,7 +2332,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('frac_convective', 'Living warm air · Frac Convective', TEXT('0.1')),
         row('temp_flow_limit_upper', 'Living warm air · Upper flow temperature limit', TEXT('0', '0')),
         row('temp_diff_emit_dsgn', 'Living warm air · Design temperature drop', TEXT(null)),
-        row('bypass_fraction_recirculated', 'Zone 1 circuit · Bypass Fraction Recirculated', TEXT('0')),
+        row('bypass_fraction_recirculated', 'Zone 1 circuit · Return water recirculated', TEXT('0')),
         row('design_flow_temp', 'Zone 1 circuit · Design Flow Temp', TEXT('20')),
         row('ecodesign_control_class', 'Zone 1 circuit · Ecodesign Controller · Ecodesign Control Class', SELECT),
         row('max_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
@@ -2392,7 +2392,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         onChange,
       },
       [
-        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · Bypass Fraction Recirculated', TEXT('0')),
+        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · Return water recirculated', TEXT('0')),
         row('design_flow_temp', 'Kitchen/Diner rads · Design Flow Temp', TEXT('20')),
         row('ecodesign_control_class', 'Kitchen/Diner rads · Ecodesign Controller · Ecodesign Control Class', SELECT),
         row('max_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
@@ -3395,6 +3395,12 @@ describe('EPC system pickers and defaults', () => {
     expect(curve.description).toContain('heat pump with radiators: curve 5');
     expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }, { const: 'LPG bulk', title: 'LPG, bulk' }]);
     expect(out.properties.EnergySupply_heat_network).toBeUndefined();
+  });
+
+  it('offers an electric-only system the electricity supplies only', () => {
+    const schema = { properties: { type: { const: 'ElecStorageHeater' }, EnergySupply: { type: 'string' } } };
+    const out = applyEcodesignControlClassEnum(schema, { supplyNames: ['mains elec', 'mains gas'], electricSupplyNames: ['mains elec'] }) as { properties: Record<string, Record<string, unknown>> };
+    expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }]);
   });
 
   it('gives a blank field the derived value of its system, and the existing-building defaults', () => {

@@ -18,6 +18,7 @@ import {
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
 import { resolveEffectiveVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
+import { isExistingBuilding } from '../../../lib/windowOpenings';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import {
   CURRENT_VULCAN_CSV_VERSION,
@@ -132,7 +133,7 @@ export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
 import { lineFaceEnvelope } from '../../../lib/profileLineFace';
-import { assertCsvMigrationResolved, csvMigrationIssues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
+import { assertCsvMigrationResolved, csvMigrationIssues, dropCalculatedGroundUValues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
 
 export interface IoSlice {
   sourceCsvVersion: number;
@@ -2425,9 +2426,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
+    const calculatedGroundU = isExistingBuilding(get())
+      ? dropCalculatedGroundUValues(loadedElements)
+      : { elements: loadedElements, names: [] };
     const upgradedElements = rederiveContextShadingFromDrawing(
       liftStoreyIndexDuctsToMetres(
-        upgradePcdbProductReferences(loadedElements),
+        upgradePcdbProductReferences(calculatedGroundU.elements),
         withEffectiveStoreyHeights(get().floors, loadedElements),
       ),
       get().globalOrientationOffset,
@@ -2441,7 +2445,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
+    const calculatedGroundUNotice = calculatedGroundU.names.length
+      ? [`Calculated floor U-value removed, so the age band applies: ${calculatedGroundU.names.join(', ')}. To use a calculated value, apply it in the U-value calculator.`]
+      : [];
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed), ...calculatedGroundUNotice], upgraded };
   }
 
   /**

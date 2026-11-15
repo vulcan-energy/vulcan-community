@@ -112,6 +112,8 @@ import {
   groundTotalAreaMismatch,
 } from '../../lib/groundFloorArea';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../lib/overrideProvenance';
+import { isExistingBuilding } from '../../lib/windowOpenings';
+import { useGeometryStore } from '../../stores/geometryStore';
 import {
   computeWeightedExternalWallAssemblyThicknessDetailsForGroundElement,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
@@ -224,6 +226,7 @@ export interface BuildingElementGroundFormState {
 }
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState {
+  const existingBuilding = useGeometryStore(isExistingBuilding);
   const { schemaPort } = ctx;
   const schemaMode = ctx.schemaMode;
   const suspendedProperties = schemaPort.availability === 'available'
@@ -565,7 +568,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
           })
         : null;
 
-    const uSync = applyComputedGroundUValueAutofill(nextExtra, uComputed);
+    const uSync = applyComputedGroundUValueAutofill(nextExtra, uComputed, existingBuilding);
     if (uSync.changed) {
       nextExtra = uSync.extra;
       changed = true;
@@ -605,6 +608,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     groundTotalAreaManual,
     derivedGroundPerimeter,
     selectedGroundShape,
+    existingBuilding,
     numbersClose,
   ]);
 

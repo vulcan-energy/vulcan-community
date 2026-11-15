@@ -74,7 +74,7 @@ export interface FieldMetadataMatch {
 }
 
 /** Short field label in Advanced Fields (tooltip body uses `WINDOW_SECURITY_RISK_HELPER` only — no repeated question). */
-export const WINDOW_SECURITY_RISK_LABEL = 'Security Risk?' as const;
+export const WINDOW_SECURITY_RISK_LABEL = 'Security risk' as const;
 export const WINDOW_SECURITY_RISK_HELPER =
   'A window is a security risk if you are unable to leave it open at night. If it is on the ground floor, in a basement, or is easily accessible, it is a security risk.' as const;
 
@@ -163,6 +163,11 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     description: 'Heat transfer rate of the cylinder coil (unit: W/K).',
     type: 'number',
     units: 'W/K',
+  },
+  '*:no_thermostatic_control': {
+    label: 'No thermostat',
+    description: 'Yes if this system has no thermostatic control.',
+    type: 'boolean',
   },
   'nominal_eer': {
     label: 'Nominal EER',
@@ -524,6 +529,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
   'electricity_standby': { label: 'Standby power' },
   'primary_flow_rate': { label: 'Primary flow rate' },
   'daily_losses': { label: 'Standing heat loss' },
+  'bypass_fraction_recirculated': { label: 'Return water recirculated' },
   'System:HotWaterSource:tank_volume_declared': {
     description: "Tank volume stored in the database (unit: litres)",
     type: 'number',

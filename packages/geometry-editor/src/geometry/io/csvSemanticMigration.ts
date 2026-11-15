@@ -3,6 +3,8 @@
 
 import type { Element, Floor } from '../types';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
+import { computeGroundUValueFromElementModel } from '../../lib/groundUValueCalculator';
+import { GROUND_U_VALUE_MANUAL_KEY } from '../../lib/groundSuspendedFabricSync';
 
 export type UValueInterpretation = 'whole_wall' | 'half_construction';
 export type CsvMigrationIssue = { elementId: string; elementName: string; value: number; code: 'CSV_U_VALUE_MEANING_REQUIRED' };
@@ -95,6 +97,25 @@ export function upgradePcdbProductReferences(elements: readonly Element[]): Elem
     return { ...element, extra_json: next };
   });
   return changed ? result : (elements as Element[]);
+}
+
+/** Existing-building saves from before the editor stopped writing the calculated ground U-value
+ * on its own. A U-value the user did not state (no manual mark) that equals the calculator's
+ * result for the saved inputs is removed, so the age band applies. Returns the same array when
+ * nothing changed, and the names of the floors changed. */
+export function dropCalculatedGroundUValues(elements: readonly Element[]): { elements: Element[]; names: string[] } {
+  const names: string[] = [];
+  const result = elements.map((element) => {
+    const extra = element.extra_json;
+    if (element.type !== 'BuildingElementGround' || typeof extra?.u_value !== 'number' || extra[GROUND_U_VALUE_MANUAL_KEY] === true) return element;
+    const computed = computeGroundUValueFromElementModel(element, extra, element.floor_type);
+    if (computed == null || Math.abs(Number(computed.toFixed(4)) - extra.u_value) > 1e-5) return element;
+    names.push(element.name);
+    const rest = { ...extra };
+    delete rest.u_value;
+    return { ...element, extra_json: rest };
+  });
+  return { elements: names.length ? result : (elements as Element[]), names };
 }
 
 /** Saves from before ducts started at the unit's height in metres: a duct drawn from a unit on

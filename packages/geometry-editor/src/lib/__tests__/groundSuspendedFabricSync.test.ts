@@ -114,7 +114,7 @@ describe('assemblyTotalThicknessMFromOpaqueElement', () => {
 
 describe('applyComputedGroundUValueAutofill', () => {
   it('updates ground u_value from the computed value when it is auto-owned', () => {
-    const out = applyComputedGroundUValueAutofill({ u_value: 0.4 }, 0.26789);
+    const out = applyComputedGroundUValueAutofill({ u_value: 0.4 }, 0.26789, false);
     expect(out.changed).toBe(true);
     expect(out.extra.u_value).toBe(0.2679);
   });
@@ -123,11 +123,16 @@ describe('applyComputedGroundUValueAutofill', () => {
     const out = applyComputedGroundUValueAutofill(
       { u_value: 0.4, [GROUND_U_VALUE_MANUAL_KEY]: true },
       0.26789,
+      false,
     );
     expect(out.changed).toBe(false);
     expect(out.extra.u_value).toBe(0.4);
     expect(out.extra[GROUND_U_VALUE_MANUAL_KEY]).toBe(true);
   });
+});
+
+it('writes no calculated ground u_value on an existing building: the age band applies', () => {
+  expect(applyComputedGroundUValueAutofill({}, 0.26789, true)).toEqual({ extra: {}, changed: false });
 });
 
 describe('applySuspendedThermalTransmWallsManualTracking', () => {
@@ -532,7 +537,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
 
   it('updates an auto-owned ground perimeter to the exposed wall-linked value', () => {
     const updateElement = vi.fn();
-    syncGroundExposedPerimetersFromWalls({ g1: ground, w1: southWall }, updateElement);
+    syncGroundExposedPerimetersFromWalls({ g1: ground, w1: southWall }, updateElement, false);
 
     expect(updateElement).toHaveBeenCalledWith('g1', { perimeter: 5 });
   });
@@ -544,7 +549,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
       extra_json: { [GROUND_EXPOSED_PERIMETER_MANUAL_KEY]: true },
     } as Element;
     const updateElement = vi.fn();
-    syncGroundExposedPerimetersFromWalls({ g1: manualGround, w1: southWall }, updateElement);
+    syncGroundExposedPerimetersFromWalls({ g1: manualGround, w1: southWall }, updateElement, false);
 
     expect(updateElement).not.toHaveBeenCalled();
   });
@@ -560,7 +565,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     } as Element;
     const updateElement = vi.fn();
 
-    syncGroundExposedPerimetersFromWalls({ g1: ground, g2: sameStoreyGround }, updateElement);
+    syncGroundExposedPerimetersFromWalls({ g1: ground, g2: sameStoreyGround }, updateElement, false);
 
     expect(updateElement).not.toHaveBeenCalledWith('g1', expect.objectContaining({ total_area: expect.anything() }));
     expect(updateElement).not.toHaveBeenCalledWith('g2', expect.objectContaining({ total_area: expect.anything() }));
@@ -577,7 +582,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     } as Element;
     const updateElement = vi.fn();
 
-    syncGroundExposedPerimetersFromWalls({ g1: ground, g2: otherZoneGround }, updateElement);
+    syncGroundExposedPerimetersFromWalls({ g1: ground, g2: otherZoneGround }, updateElement, false);
 
     expect(updateElement).toHaveBeenCalledWith('g1', expect.objectContaining({ total_area: 50 }));
     expect(updateElement).toHaveBeenCalledWith('g2', expect.objectContaining({ total_area: 50 }));
@@ -591,7 +596,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     } as Element;
     const updateElement = vi.fn();
 
-    syncGroundExposedPerimetersFromWalls({ g1: manualGround, w1: southWall }, updateElement);
+    syncGroundExposedPerimetersFromWalls({ g1: manualGround, w1: southWall }, updateElement, false);
 
     expect(updateElement).not.toHaveBeenCalled();
   });
@@ -613,7 +618,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     } as Element;
     const autoGround = { ...ground, perimeter: 4 } as Element;
     const updateElement = vi.fn();
-    syncGroundExposedPerimetersFromWalls({ g1: autoGround, a1: adjacent, w2: westWall }, updateElement);
+    syncGroundExposedPerimetersFromWalls({ g1: autoGround, a1: adjacent, w2: westWall }, updateElement, false);
 
     expect(updateElement).toHaveBeenCalledWith('g1', { perimeter: 9 });
   });
@@ -639,7 +644,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
       p2: party('p2', 'East party', [{ x: 5, y: 0, z: 0 }, { x: 5, y: 4, z: 0 }]),
       p3: party('p3', 'North party', [{ x: 5, y: 4, z: 0 }, { x: 0, y: 4, z: 0 }]),
       p4: party('p4', 'West party', [{ x: 0, y: 4, z: 0 }, { x: 0, y: 0, z: 0 }]),
-    }, updateElement);
+    }, updateElement, false);
 
     expect(updateElement).toHaveBeenCalledWith('g1', { perimeter: 0 });
   });
@@ -683,7 +688,7 @@ describe('syncGroundExposedPerimetersFromWalls', () => {
     const elements = Object.fromEntries([west, east, ...walls].map((element) => [element.id, element]));
     const updateElement = vi.fn();
 
-    syncGroundExposedPerimetersFromWalls(elements, updateElement);
+    syncGroundExposedPerimetersFromWalls(elements, updateElement, false);
 
     const patches = new Map(updateElement.mock.calls.map(([id, patch]) => [id, patch as Record<string, unknown>]));
     const westPatch = patches.get('g1')!;

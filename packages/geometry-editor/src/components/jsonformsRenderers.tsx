@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React, { useState } from 'react';
+import { MASS_CLASS_LABELS } from '../lib/assemblyAppliedUi';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
 import { numericInputAttributesFromSchema, useNumericDraftInput } from './numericDraftInput';
@@ -2352,6 +2353,7 @@ const ENUM_VALUE_LABELS: Readonly<Record<string, string>> = {
   HeatNetwork: 'Heat network',
   glycol25: 'Glycol, 25%',
   unknown: 'Not known',
+  ...MASS_CLASS_LABELS,
 };
 /** MVHR and similar units are inside or outside the thermal envelope: say so. */
 const ENVELOPE_LOCATION_KEYS: ReadonlySet<string> = new Set(['mvhr_location', 'location_mvhr']);
@@ -2360,9 +2362,9 @@ const enumOptionLabel = (propKey: string, value: string, fallback: string): stri
     ? `${value === 'inside' ? 'Inside' : 'Outside'} the thermal envelope`
     : ENUM_VALUE_LABELS[value] ?? fallback;
 
-/** A snake_case enum value as words; any other value as written. */
+/** A lower-case enum value as words with a capital (`other wet rooms`: "Other wet rooms"); any other value as written. */
 const enumValueWords = (value: string): string =>
-  /^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(value) ? `${value[0].toUpperCase()}${value.slice(1).replace(/_/g, ' ')}` : value;
+  /^[a-z][a-z0-9]*([_ -][a-z0-9]+)*$/.test(value) ? `${value[0].toUpperCase()}${value.slice(1).replace(/_/g, ' ')}` : value;
 
 export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange, path, propKey, label, errors, schema, uischema, config, enabled }) => {
   const defaults = useDefaultValues();

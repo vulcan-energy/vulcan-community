@@ -1046,8 +1046,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   useEffect(() => {
     const latest = latestElementsByIdRef.current;
     syncSuspendedGroundFabricFromWalls(latest, updateElement, defaultsLookup);
-    syncGroundExposedPerimetersFromWalls(latest, updateElement);
-  }, [defaultsLookup, suspendedGroundFabricSyncSignature, updateElement]);
+    syncGroundExposedPerimetersFromWalls(latest, updateElement, existingBuilding);
+  }, [defaultsLookup, existingBuilding, suspendedGroundFabricSyncSignature, updateElement]);
 
   const primaryFhsZoneId = useMemo(
     () => zones.find((zone) => !zone.isPlaceholder)?.id,
@@ -5428,7 +5428,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   });
                   if (uComputed != null && Number.isFinite(uComputed) && uComputed > 0) {
                     nextExtra.u_value = Number(uComputed.toFixed(4));
-                    delete nextExtra[GROUND_U_VALUE_MANUAL_KEY];
+                    // Applying an assembly states the U-value; on an existing building it replaces the age band.
+                    if (existingBuilding) nextExtra[GROUND_U_VALUE_MANUAL_KEY] = true;
+                    else delete nextExtra[GROUND_U_VALUE_MANUAL_KEY];
                   }
                 }
                 updateElement(selection.id, {
