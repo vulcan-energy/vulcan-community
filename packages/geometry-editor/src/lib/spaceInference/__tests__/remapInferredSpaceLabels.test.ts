@@ -50,6 +50,24 @@ describe('remapZoneSpaceLabelsFromInference', () => {
     expect(labels[1].coordinates.every((c) => c.z === 1)).toBe(true);
   });
 
+  it('counts a labelled space that matches no footprint as a cleared room type', () => {
+    idSeq = 0;
+    const square = (x: number) => [
+      { x, y: 0 }, { x: x + 2, y: 0 }, { x: x + 2, y: 2 }, { x, y: 2 },
+    ];
+    const prev: SpaceLabel[] = [{
+      id: 'gone', name: 'Bedroom 1', zoneId: ZONE, storey: 0, room_type: 'bedroom',
+      coordinates: square(0).map((p) => ({ ...p, z: 0 })), _nameAutoSync: true,
+    }];
+    // The bedroom's room is gone and a new, unnamed space appears elsewhere: same count, one type lost.
+    const { labels, roomTypesCleared } = remapZoneSpaceLabelsFromInference(
+      prev, [{ storeyIndex: 0, wallZIndex: 0, ring: square(50), areaM2: 4 }], ZONE, nid,
+    );
+    expect(labels).toHaveLength(1);
+    expect(labels[0]!.room_type).toBe('');
+    expect(roomTypesCleared).toBe(1);
+  });
+
   it('strong match preserves room_type when footprint moves slightly', () => {
     idSeq = 0;
     const prev: SpaceLabel[] = [

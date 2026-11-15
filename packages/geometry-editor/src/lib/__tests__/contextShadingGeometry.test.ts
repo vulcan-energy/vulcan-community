@@ -125,4 +125,17 @@ describe('context shading distance', () => {
     expect(rederiveContextShadingFromDrawing(stored, 0, integerAngles)).toBe(stored);
     expect(rederiveContextShadingFromDrawing(stored, 0)).not.toBe(stored);
   });
+
+  it('never mutates the stored element when the typing coerces in place', () => {
+    const extra = { note: 1.5 };
+    const elements = [
+      { id: 'f', name: 'Floor', type: 'BuildingElementGround', ...floor },
+      { id: 's', name: 'Block', type: 'ContextShading', parent_element: 'Floor', distance: 8.25, ...block, extra_json: extra },
+    ] as unknown as Element[];
+    rederiveContextShadingFromDrawing(elements, 0, (element) => {
+      (element.extra_json as Record<string, number>).note = 2;
+      return element;
+    });
+    expect(extra.note).toBe(1.5);
+  });
 });

@@ -308,7 +308,8 @@ export function rederiveContextShadingFromDrawing<T extends Element>(
       end_angle: roundToTwoDecimals(angles.end_angle),
       distance: calculateContextShadingDistanceFromCoordinates(shading, parent, elements),
     };
-    const candidate = typed({ ...element, ...derived }) as unknown as ContextShading;
+    // A copy down to extra_json: the typing coerces in place.
+    const candidate = typed({ ...element, ...derived, extra_json: element.extra_json && { ...element.extra_json } }) as unknown as ContextShading;
     if (candidate.start_angle === shading.start_angle && candidate.end_angle === shading.end_angle && candidate.distance === shading.distance) {
       return element;
     }
