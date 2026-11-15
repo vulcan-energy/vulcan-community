@@ -497,6 +497,40 @@ mod tests {
     }
 
     #[test]
+    fn a_floor_over_an_unheated_space_takes_hemies_heat_capacity() {
+        let floor = |space: &str| {
+            format!(
+                "Over,Z,BuildingElementAdjacentUnconditionedSpace_Simple,48,180,,,,,\"{}\",\"{{\"\"adjacent_space_type\"\":\"\"{space}\"\",\"\"areal_heat_capacity\"\":50000}}\"",
+                coords(0, &BOX)
+            )
+        };
+        for (space, capacity) in [("garage", None), ("corridor", None)] {
+            let text = csv(
+                SETTINGS,
+                &box_walls(&BOX, &[0]),
+                &format!(
+                    "{NON_EXPOSED}\n{}\n{}",
+                    floor(space),
+                    party_plane("Party ceiling", 1, 0.0, "")
+                ),
+            );
+            let (model, errors, _) = run_on(&text, flat_model(2));
+            assert!(errors.is_empty(), "{errors:#?}");
+            let zone = &model["Zone"];
+            let main = &zone["building_parts"]["Main"];
+            assert_eq!(main["floor"]["adjacent_space"], space);
+            let construction =
+                &zone["constructions"][main["floor"]["construction"].as_str().unwrap()];
+            // The element's own value is set aside either way.
+            assert_eq!(
+                construction["areal_heat_capacity"].as_f64(),
+                capacity,
+                "{construction}"
+            );
+        }
+    }
+
+    #[test]
     fn party_ceilings_over_one_part_agree_on_their_construction_weight() {
         let text = csv(
             SETTINGS,

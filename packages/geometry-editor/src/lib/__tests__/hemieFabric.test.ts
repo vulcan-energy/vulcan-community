@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
+import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieRequiredPlaceholder, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
 const plane = [...line, { x: 4, y: 4, z: 0 }];
@@ -159,4 +159,13 @@ it('offers each construction type the areal heat capacity the converter takes', 
     expect(hemieHeatCapacityBands(type), type).toEqual([]);
   }
   for (const type of ['party_floor', 'party_ceiling', undefined]) expect(hemieHeatCapacityBands(type)).toBeUndefined();
+});
+
+it('shows the door and window heat capacity the converter fills as the placeholder', () => {
+  const rust = readFileSync(join(import.meta.dirname, '../../../../../crates/vulcan-model-transform/src/hemie.rs'), 'utf8');
+  const value = (name: string) => Number(new RegExp(`const ${name}: f64 = ([\\d_.]+);`).exec(rust)![1].replace(/_/g, '')).toLocaleString('en-GB');
+  expect(hemieRequiredPlaceholder('external_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
+  expect(hemieRequiredPlaceholder('party_or_sheltered_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
+  expect(hemieRequiredPlaceholder('window', 'areal_heat_capacity')).toBe(`${value('WINDOW_HEAT_CAPACITY')} (default)`);
+  expect(hemieRequiredPlaceholder('window', 'glazing_type')).toBeUndefined();
 });

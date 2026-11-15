@@ -444,7 +444,7 @@ pub(super) fn attach_bays(
         };
         let mut bay_value = Map::new();
         placed.insert(front_window.name.to_string());
-        let Some(w) = window(ctx, front_window, true) else {
+        let Some(w) = window(ctx, front_window) else {
             continue;
         };
         bay_value.insert("front_window".into(), w);
@@ -454,7 +454,7 @@ pub(super) fn attach_bays(
             ([x], [y]) => {
                 placed.insert(x.name.to_string());
                 placed.insert(y.name.to_string());
-                let (wx, wy) = (window(ctx, x, true), window(ctx, y, true));
+                let (wx, wy) = (window(ctx, x), window(ctx, y));
                 if wx != wy {
                     ctx.errors.push(error("BAY", x.path(), format!("Bay side windows '{}' and '{}' differ. Both sides of a bay share one window: make them the same.", x.name, y.name)));
                     continue;
@@ -761,12 +761,7 @@ pub(super) fn conservatory_walls(
                 None => ctx.errors.push(error("CONSERVATORY", source.path(), format!("Sheltered conservatory wall '{}' does not state the unheated space it borders. Choose its unheated space type.", source.name))),
             }
         }
-        let extra = if kind == Kind::External {
-            vec![("areal_heat_capacity", json!(UNUSED_WINDOW_HEAT_CAPACITY))]
-        } else {
-            Vec::new()
-        };
-        let key = ctx.construction("window", &glazed, &extra);
+        let key = ctx.construction("window", &glazed, &[]);
         walls[wi]
             .value
             .insert("glazing_construction".into(), json!(key));
@@ -853,11 +848,7 @@ pub(super) fn conservatory_roof(
         return None;
     }
     let fraction = fraction.min(1.0);
-    let key = ctx.construction(
-        "window",
-        &lights,
-        &[("areal_heat_capacity", json!(UNUSED_WINDOW_HEAT_CAPACITY))],
-    );
+    let key = ctx.construction("window", &lights, &[]);
     let mut roof = ctx.with_age_band(
         planes,
         json!({"glazing_fraction": fraction, "window_type": window_type, "glazing_construction": key}),

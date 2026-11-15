@@ -94,13 +94,13 @@ export function hemieHeatCapacityBands(constructionType: string | undefined): re
 }
 
 /**
- * The placeholder of a construction setting field with no default: the pinned HEM:EPC schema
- * requires a door's areal heat capacity, and a window's in a party or sheltered wall.
+ * The placeholder of a construction setting field the converter fills when unset (`require` in
+ * `hemie.rs`): a door's and a window's areal heat capacity, in J/m²·K.
  */
 export function hemieRequiredPlaceholder(constructionType: string, field: string): string | undefined {
   if (field !== 'areal_heat_capacity') return undefined;
-  if (constructionType.endsWith('_door')) return 'Required, no default';
-  return constructionType === 'window' ? 'Only for a window in a party or sheltered wall' : undefined;
+  if (constructionType.endsWith('_door')) return '50,000 (default)';
+  return constructionType === 'window' ? '20,000 (default)' : undefined;
 }
 
 /** The door element flag that marks the front door; one door only. */

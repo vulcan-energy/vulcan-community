@@ -369,21 +369,34 @@ pub(crate) fn mvhr_ductwork(
         .iter()
         .map(|d| d.get("cross_section_shape").cloned())
         .collect());
-    // DESNZ-defined sizes: a rectangular duct's perimeter or a circular duct's external
-    // diameter, in mm.
-    let size = one(ducts
-        .iter()
-        .map(|d| {
-            let (field, sizes) = match d["cross_section_shape"].as_str()? {
-                "rectangular" => ("duct_perimeter_mm", [328.0, 528.0, 620.0]),
-                "circular" => ("external_diameter_mm", [100.0, 125.0, 150.0]),
-                _ => return None,
-            };
-            let mm = d[field].as_f64()?;
-            let index = sizes.iter().position(|s| *s == mm)?;
-            Some(json!(["small", "medium", "large"][index]))
-        })
-        .collect());
+    // DESNZ-defined: the size bands, a rectangular duct's perimeter or a circular duct's
+    // external diameter in mm, as a representative size.
+    // Ours: each drawn duct takes its nearest band (the larger one at a tie), and the ductwork
+    // the band with the greatest length (the larger one at a tie).
+    let mut band_lengths = [0.0; 3];
+    let mut banded = false;
+    for d in &ducts {
+        let (field, sizes) = match d["cross_section_shape"].as_str() {
+            Some("rectangular") => ("duct_perimeter_mm", [328.0, 528.0, 620.0]),
+            Some("circular") => ("external_diameter_mm", [100.0, 125.0, 150.0]),
+            _ => continue,
+        };
+        let Some(mm) = d[field].as_f64() else {
+            continue;
+        };
+        let distance = |i: usize| (sizes[i] - mm).abs();
+        let band = (0..3)
+            .rev()
+            .min_by(|a, b| distance(*a).total_cmp(&distance(*b)));
+        band_lengths[band.unwrap_or(2)] += d["length"].as_f64().unwrap_or(0.0);
+        banded = true;
+    }
+    let size = banded.then(|| {
+        let band = (0..3)
+            .max_by(|a, b| band_lengths[*a].total_cmp(&band_lengths[*b]))
+            .unwrap_or(2);
+        json!(["small", "medium", "large"][band])
+    });
     let insulated = one(ducts
         .iter()
         .map(|d| {
@@ -519,11 +532,18 @@ pub(crate) fn check_solar_absorption(
 
 /// Inputs a new build states and an existing building may leave to a DESNZ-defined default: the
 /// model path, the `type` that has the field (empty: any), the field, and the existing-building
-/// default (None: HEMIE applies it). Values: direct feed maximum power 15 kW, mixer shower 9 L/min;
-/// the rest are HEMIE's (air conditioning and heat-pump warm-air convective fraction, instant
+/// default (None: HEMIE applies it, or asks for it). Values: direct feed maximum power 15 kW,
+/// mixer shower 9 L/min; a tank's location has none; the rest are HEMIE's (air conditioning and heat-pump warm-air convective fraction, instant
 /// heater power and convective type, storage heater units, immersion power and position, coil
 /// position, solar loop inputs, buffer tank pump flow rate).
-const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 15] = [
+const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 17] = [
+    (&["HotWaterSource", "*"], "StorageTank", "location", None),
+    (
+        &["HotWaterSource", "*"],
+        "SmartHotWaterTank",
+        "location",
+        None,
+    ),
     (
         &["HeatSourceWet", "*"],
         "DirectFeed",
@@ -782,10 +802,12 @@ pub(crate) fn apply_desnz_defaults(
             .into_iter()
             .flatten()
             .any(|e| e["wet_emitter_type"] == "radiator");
+        // HEMIE requires the circuit's thermal mass with radiators, and HEM adds it to each
+        // radiator's own (from its product), so it is only the mass not in the radiators.
         if existing && radiators && system.get("thermal_mass").is_none_or(Value::is_null) {
             need(
                 "thermal_mass",
-                "for the radiators of an existing building".into(),
+                "for the radiators of an existing building. HEM adds it to the radiators' own thermal mass, which their products give, so enter only the mass not in the radiators".into(),
             );
         }
         if !used.is_empty() {
@@ -825,7 +847,7 @@ pub(crate) fn apply_desnz_defaults(
                 (false, _) => {
                     // A blank value, so the schema adds no second error for it.
                     system.remove(field);
-                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", if kind.is_empty() { "buffer tank" } else { kind })));
+                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", match kind { "" => "buffer tank", "StorageTank" => "storage tank", "SmartHotWaterTank" => "smart hot water tank", _ => kind })));
                 }
             }
         }
@@ -1900,6 +1922,93 @@ mod tests {
         assert!(errors[0]
             .message
             .contains("for a SolidFuelBoiler heat source"));
+        assert!(errors[1]
+            .message
+            .contains("enter only the mass not in the radiators"));
+    }
+
+    #[test]
+    fn ductwork_takes_the_nearest_size_band_with_the_most_length() {
+        let duct = |shape: &str, field: &str, mm: f64, length: f64| json!({"duct_type": "intake", "length": length, "cross_section_shape": shape, field: mm});
+        let size = |ducts: &[Value]| {
+            mvhr_ductwork("MVHR", None, ducts, Some("inside")).0["ductwork_size"].clone()
+        };
+        // An odd size takes the nearest band; halfway takes the larger.
+        assert_eq!(
+            size(&[duct("circular", "external_diameter_mm", 110.0, 1.0)]),
+            "small"
+        );
+        assert_eq!(
+            size(&[duct("circular", "external_diameter_mm", 112.5, 1.0)]),
+            "medium"
+        );
+        assert_eq!(
+            size(&[duct("rectangular", "duct_perimeter_mm", 600.0, 1.0)]),
+            "large"
+        );
+        // Mixed sizes take the band with the greatest length; a tie takes the larger.
+        let mixed = [
+            duct("circular", "external_diameter_mm", 100.0, 2.0),
+            duct("circular", "external_diameter_mm", 150.0, 1.5),
+            duct("rectangular", "duct_perimeter_mm", 620.0, 0.4),
+        ];
+        assert_eq!(size(&mixed), "small");
+        assert_eq!(
+            size(
+                &mixed[..2]
+                    .iter()
+                    .cloned()
+                    .chain([duct("circular", "external_diameter_mm", 150.0, 0.5)])
+                    .collect::<Vec<_>>()
+            ),
+            "large"
+        );
+        // No size drawn: the default, named in the notice.
+        let (out, notice) = mvhr_ductwork(
+            "MVHR",
+            None,
+            &[json!({"duct_type": "intake", "length": 1.0})],
+            Some("inside"),
+        );
+        assert!(out.get("ductwork_size").is_none());
+        assert!(notice.unwrap().message.contains("size"));
+    }
+
+    #[test]
+    fn a_new_build_tank_states_its_location_and_an_existing_one_leaves_it_to_hemie() {
+        for (existing, errors_expected) in [(false, 2), (true, 0)] {
+            let mut model = json!({
+                "IsExistingBuilding": existing,
+                "HotWaterSource": {
+                    "hw": {"type": "StorageTank", "volume": 200, "daily_losses": 1.6},
+                    "smart": {"type": "SmartHotWaterTank", "product_id": 1}
+                }
+            });
+            let mut errors = Vec::new();
+            apply_desnz_defaults(
+                &mut model,
+                false,
+                &mut errors,
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
+            let found: Vec<&str> = errors
+                .iter()
+                .map(|e| e.path.as_str())
+                .filter(|p| p.ends_with("/location"))
+                .collect();
+            assert_eq!(found.len(), errors_expected, "{errors:#?}");
+            if !existing {
+                assert!(errors.iter().any(|e| e.message == "'hw' (storage tank) needs its location. A new build states it: there is no default."), "{errors:#?}");
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.message.starts_with("'smart' (smart hot water tank)")),
+                    "{errors:#?}"
+                );
+            }
+            assert!(model["HotWaterSource"]["hw"].get("location").is_none());
+        }
     }
 
     #[test]
