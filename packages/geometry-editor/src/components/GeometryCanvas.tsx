@@ -302,16 +302,7 @@ import {
   resolveDevelopmentModelVerticalContext,
   type DevelopmentContextVerticalRelation,
 } from '../lib/developmentContextShading';
-import {
-  getFloorStackWarningElementIds,
-  targetValidationFlags,
-  validateElementCore,
-  heatingSizingWarningsFor,
-  type ValidationContext,
-} from '../geometry/validation/validateElement';
-import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import type { Vec3 } from '../geometry/thermalBridge/linearTbSegmentOverlap';
-import { selectPartFData } from '../geometry/validation/partF/selector';
 import { getOverlapBadgeMenuLayerStyle, type OverlapBadgeMenuAnchor } from '../lib/overlapBadgeMenu';
 
 const SPACE_LABEL_CANVAS_FILL = 'rgba(14, 165, 233, 0.22)';
@@ -1224,7 +1215,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   initialElementsPanelPlacement = 'right',
 }) => {
   const geometryStore = useGeometryStoreApi();
-  const schemaPort = useGeometrySchemaPort();
+  // Subscribed for its revision: a new schema snapshot re-renders the canvas, and the store's
+  // validation context (keyed on that revision) is read again.
+  useGeometrySchemaPort();
   const sourceComparisonPort = useGeometrySourceComparisonPort();
   const sourceComparisonSnapshot = useSyncExternalStore(
     sourceComparisonPort.subscribe,
@@ -2021,9 +2014,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     snapToParent, snapCorners, snapAngles, selectedElementIds, guideOverlay, guideOverlaySource,
     guideOverlayByFloor, guideOverlaySourceByFloor, vertexSnapMode,
     canUndo, canRedo, complianceSettings,
-    defaultsPath, defaultsJson, defaultsLoading, defaultsLookup, junctionPsiDefaultsPath, junctionPsiDefaultsMap,
-    calculateContextShadingDistance,
-    canvasViewResetKey, csvValidationCache, targetValidation, hostValidationFindings, heatingSizing,
+    defaultsPath, defaultsJson,
+    canvasViewResetKey, csvValidationCache, targetValidation,
   } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
@@ -2052,15 +2044,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       complianceSettings: s.complianceSettings,
       defaultsPath: s.defaultsPath,
       defaultsJson: s.defaultsJson,
-      defaultsLoading: s.defaultsLoading,
-      defaultsLookup: s.getDefaultsLookup(),
-      junctionPsiDefaultsPath: s.junctionPsiDefaultsPath,
-      junctionPsiDefaultsMap: s.junctionPsiDefaultsMap,
-      calculateContextShadingDistance: s.calculateContextShadingDistance,
       csvValidationCache: s.csvValidationCache,
       targetValidation: s.targetValidation,
-      hostValidationFindings: s.hostValidationFindings,
-      heatingSizing: s.heatingSizing,
     }))
   );
 
@@ -2661,16 +2646,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     elementIds,
   ]);
 
-  const elementsForValidation = useMemo(() => Object.values(elementsById), [elementsById]);
-  const linearGeometryIssues = useMemo(
-    () => findLinearThermalBridgeIssues(elementsForValidation, floors),
-    [elementsForValidation, floors],
-  );
+  // The store builds the model-wide validation inputs once per input set and validates each element
+  // once per context; the inspector reads the same results.
+  const elementValidationContext = useGeometryStore((s) => s.getElementValidationContext());
+  const validateElement = useGeometryStore((s) => s.validateElement);
   // Both issues of an overlap pair carry the same stretch: keep one per pair for the canvas halo,
   // skipping stretches with no plan length (vertical TBs, risers) that would draw as a dot.
   const overlapStretches = useMemo(() => {
     const byKey = new Map<string, { elementIds: string[]; stretch: [Vec3, Vec3] }>();
-    for (const { elementId, overlapStretch } of linearGeometryIssues) {
+    for (const { elementId, overlapStretch } of elementValidationContext.linearThermalBridgeIssues ?? []) {
       if (!overlapStretch) continue;
       const [a, b] = overlapStretch;
       if (Math.hypot(b.x - a.x, b.y - a.y) < 0.01) continue;
@@ -2680,64 +2664,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       byKey.set(key, entry);
     }
     return [...byKey.entries()];
-  }, [linearGeometryIssues]);
-  // Everything but the sizing warnings, so a sizing result alone never reruns the Part F data below.
-  const baseElementValidationContext = useMemo<ValidationContext>(() => {
-    return {
-      schemaPort,
-      elementsById,
-      zones,
-      floors,
-      globalOrientationOffset,
-      ...targetValidationFlags(schemaPort, complianceSettings),
-      complianceSettings,
-      numberOfBedrooms: complianceSettings?.NumberOfBedrooms,
-      calculateContextShadingDistance,
-      defaultsLoading,
-      defaultsLookup,
-      junctionPsiWorkspaceByType:
-        junctionPsiDefaultsPath && junctionPsiDefaultsPath.trim() !== ''
-          ? junctionPsiDefaultsMap
-          : undefined,
-      linearThermalBridgeIssues: linearGeometryIssues,
-      floorStackWarningElementIds: getFloorStackWarningElementIds(elementsForValidation, floors),
-      partFFindings: selectPartFData({
-        zones,
-        elementsById,
-        spaceLabelsById,
-        spaceLabelIds,
-        complianceSettings,
-        elements: elementsForValidation,
-        defaults: defaultsJson,
-        defaultsLookup,
-      }).findings,
-      hostFindings: hostValidationFindings,
-    };
-  }, [
-    calculateContextShadingDistance,
-    hostValidationFindings,
-    complianceSettings,
-    defaultsLoading,
-    defaultsJson,
-    defaultsLookup,
-    elementsById,
-    elementsForValidation,
-    floors,
-    globalOrientationOffset,
-    junctionPsiDefaultsMap,
-    junctionPsiDefaultsPath,
-    linearGeometryIssues,
-    schemaPort,
-    spaceLabelIds,
-    spaceLabelsById,
-    zones,
-  ]);
-  // The same map for the same result and elements, so a status change alone leaves the context as it was.
-  const sizingWarnings = heatingSizingWarningsFor(heatingSizing, elementsById);
-  const sharedElementValidationContext = useMemo<ValidationContext>(
-    () => ({ ...baseElementValidationContext, heatingSizingWarnings: sizingWarnings }),
-    [baseElementValidationContext, sizingWarnings],
-  );
+  }, [elementValidationContext]);
 
   // Deduplicate element validation calls within a geometry state snapshot while reusing
   // model-wide validation inputs that are identical for every element row.
@@ -2746,17 +2673,17 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     [elementIds, elementsById, targetValidation, zones],
   );
   const validationById = useMemo(
-    () => new Map(
-      elementIds.map((id) => {
-        const element = elementsById[id];
-        return [id, withTargetIssues(validateElementCore(element, sharedElementValidationContext), targetIssues.elements.get(id))] as const;
-      }),
-    ),
-    [elementIds, elementsById, sharedElementValidationContext, targetIssues],
+    () => {
+      void elementValidationContext;
+      return new Map(
+        elementIds.map((id) => [id, withTargetIssues(validateElement(elementsById[id]), targetIssues.elements.get(id))] as const),
+      );
+    },
+    [elementIds, elementsById, elementValidationContext, targetIssues, validateElement],
   );
   const getValidation = useCallback(
-    (el: Element) => validationById.get(el.id) ?? validateElementCore(el, sharedElementValidationContext),
-    [sharedElementValidationContext, validationById],
+    (el: Element) => validationById.get(el.id) ?? validateElement(el),
+    [validateElement, validationById],
   );
 
   const overlayFileInputRef = useRef<HTMLInputElement>(null);

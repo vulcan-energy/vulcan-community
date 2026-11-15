@@ -5,7 +5,8 @@ import { withCanvasAlpha, type ElementCanvasPalette } from '../../lib/shapeUtils
 import { readRootCssVar } from '../../lib/cssVars';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 
-export type CanvasElementRendererPalette = ElementCanvasPalette & { hover: string };
+/** `labelText` strokes point-element icons; read here once rather than per element render. */
+export type CanvasElementRendererPalette = ElementCanvasPalette & { hover: string; labelText: string };
 
 export interface CanvasInteractionPalette {
   snap: string;
@@ -76,6 +77,10 @@ export function readBaseCanvasElementPalette(): ElementCanvasPalette {
 }
 
 export function readCanvasElementPalette(): CanvasElementRendererPalette {
+  return { ...readThemedCanvasElementPalette(), labelText: readRootCssVar('--canvas-label-text', '#ffffff') };
+}
+
+function readThemedCanvasElementPalette(): Omit<CanvasElementRendererPalette, 'labelText'> {
   const accent = readRootCssVar('--accent-primary', '#eafd5a');
   const customLightTheme =
     typeof document !== 'undefined' &&

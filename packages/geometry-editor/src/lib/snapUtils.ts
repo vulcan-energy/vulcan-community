@@ -1588,6 +1588,36 @@ export function planConnectedDrag(
   return moved;
 }
 
+const vertexXIndex = new WeakMap<Record<string, Element>, { ids: string[]; byBucket: Map<number, number[]> }>();
+/**
+ * Ids of the elements with a vertex within {@link SERVICE_POINT_COINCIDENCE_EPS_M} of `x`, in
+ * `Object.keys(elementsById)` order. {@link pointsConnected} needs that much in x (and keeps the
+ * stored x, as {@link networkPoint3} does), so a scan over these finds what a scan over every element
+ * finds. The index is built once per element record: canvas indicators query every vertex.
+ * The record must not be mutated after a query; write a new record instead.
+ */
+function idsWithVertexNearX(elementsById: Record<string, Element>, x: number): string[] {
+  let index = vertexXIndex.get(elementsById);
+  if (!index) {
+    const ids = Object.keys(elementsById);
+    const byBucket = new Map<number, number[]>();
+    ids.forEach((id, position) => {
+      for (const coord of elementsById[id]?.coordinates ?? []) {
+        if (!Number.isFinite(coord.x)) continue;
+        const bucket = Math.floor(coord.x / SERVICE_POINT_COINCIDENCE_EPS_M);
+        const positions = byBucket.get(bucket) ?? [];
+        if (positions[positions.length - 1] !== position) positions.push(position);
+        byBucket.set(bucket, positions);
+      }
+    });
+    vertexXIndex.set(elementsById, (index = { ids, byBucket }));
+  }
+  if (!Number.isFinite(x)) return [];
+  const bucket = Math.floor(x / SERVICE_POINT_COINCIDENCE_EPS_M);
+  const positions = [bucket - 1, bucket, bucket + 1].flatMap((b) => index.byBucket.get(b) ?? []);
+  return [...new Set(positions)].sort((a, b) => a - b).map((position) => index.ids[position]!);
+}
+
 // Helper to detect which vertices of an element are exactly snapped to other elements (for persistent indicators)
 export const getExactSnappedVertices = (
   element: Element,
@@ -1608,7 +1638,7 @@ export const getExactSnappedVertices = (
     // Early exit: if this vertex is already snapped, skip further checks
     if (snappedVertices.has(index)) return;
 
-    for (const otherId of Object.keys(elementsById)) {
+    for (const otherId of idsWithVertexNearX(elementsById, storedCoord.x)) {
       if (otherId === element.id) continue; // Skip self
       const other = elementsById[otherId];
       if (skipTypes?.length && other.type && skipTypes.includes(String(other.type))) {
@@ -1757,7 +1787,7 @@ export const findConnectedElementsAtVertex = (
 
   const vertex = element.coordinates[vertexIndex];
 
-  for (const otherId of Object.keys(elementsById)) {
+  for (const otherId of idsWithVertexNearX(elementsById, vertex.x)) {
     if (otherId === element.id) continue; // Skip self
     const other = elementsById[otherId];
     if (!other.coordinates) continue;

@@ -31,6 +31,7 @@ import {
   type GeometrySnapCache,
 } from '../../lib/snapUtils';
 import { readRootCssVar } from '../../lib/cssVars';
+import { jsonValuesEqual } from '../../lib/jsonTypes';
 import type { WindowVentilation3D } from '../../lib/geometry3dPrimitivesTypes';
 import { computeElement3DFrameTarget } from '../../lib/geometry3dFrame';
 import { buildClosedPrismGeometry, buildSlopedPolygonBufferGeometry, elevationAtSlopedVertexM } from '../../lib/geometry3dSloped';
@@ -734,6 +735,30 @@ function thermalBridgePreviewSurfaceForPrimitive(
 
 function muteThermalBridgePreviewFabricColor(color: string): string {
   return `#${new THREE.Color(color).lerp(new THREE.Color('#35434a'), 0.62).getHexString()}`;
+}
+
+/** The primitives last built for each element object. */
+const primitivesByElement = new WeakMap<Element, Geometry3DPrimitive[]>();
+/**
+ * Keeps the previous primitive objects of an unchanged element whose primitives come out equal, so
+ * its meshes keep their GPU geometry; every change otherwise rebuilt and uploaded the whole model.
+ * `primitives` lists each element's primitives together, as `buildGeometry3DPrimitives` returns them.
+ */
+function withStablePrimitives(primitives: Geometry3DPrimitive[], elementsById: Record<string, Element>): Geometry3DPrimitive[] {
+  const out: Geometry3DPrimitive[] = [];
+  for (let start = 0; start < primitives.length;) {
+    const { elementId } = primitives[start]!;
+    let end = start + 1;
+    while (end < primitives.length && primitives[end]!.elementId === elementId) end += 1;
+    const built = primitives.slice(start, end);
+    const element = elementsById[elementId];
+    const previous = element ? primitivesByElement.get(element) : undefined;
+    const stable = previous && jsonValuesEqual(previous, built) ? previous : built;
+    if (element) primitivesByElement.set(element, stable);
+    out.push(...stable);
+    start = end;
+  }
+  return out;
 }
 
 const CAMERA_FRAME_OFFSET = new THREE.Vector3(10, 8, 10);
@@ -1885,6 +1910,7 @@ const PolygonPrismMesh: React.FC<{
 
     return extruded;
   }, [primitive]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   const emissiveProps = openingKind
     ? openingEmissive(openingKind, primitive.isCurrentFloor)
@@ -2013,6 +2039,7 @@ const PolygonSlopedMesh: React.FC<{
       primitive.surface,
     );
   }, [primitive]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   return (
     <>
@@ -2089,6 +2116,7 @@ const PlanarFaceMesh: React.FC<{
     () => buildPlanarFaceGeometry(primitive.points, primitive.thicknessM),
     [primitive.points, primitive.thicknessM],
   );
+  useEffect(() => () => geometry.dispose(), [geometry]);
   const displayColor = floorDimmedMeshColor(
     previewDimmed ? muteThermalBridgePreviewFabricColor(primitive.color) : primitive.color,
     primitive.isCurrentFloor,
@@ -2867,7 +2895,10 @@ export const GeometryCanvas3D = memo<GeometryCanvas3DProps>(function GeometryCan
     () => {
       void themeId;
       void customTheme;
-      return buildGeometry3DPrimitives({ elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset });
+      return withStablePrimitives(
+        buildGeometry3DPrimitives({ elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset }),
+        elementsById,
+      );
     },
     [elementsById, elementIds, floors, currentFloorZ, globalOrientationOffset, themeId, customTheme],
   );

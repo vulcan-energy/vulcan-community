@@ -72,7 +72,6 @@ import {
   getCumulativeBaseHeightsByFloorId,
   getEffectiveStoreyHeight,
   isVerticalLineWall,
-  withEffectiveStoreyHeights,
 } from '../../lib/zoneDerivation';
 import { deriveFromHostRoof, isOpeningWithinWallLine, isPanelFullyOnRoof } from '../../lib/pvHostDerivation';
 import {
@@ -1271,6 +1270,20 @@ const converterBuilds = (type: string, field: string): boolean =>
 const isExistingBuildingContext = (context: ValidationContext): boolean =>
   (context.complianceSettings as { IsExistingBuilding?: boolean } | undefined)?.IsExistingBuilding === true;
 
+const ventilationBaseHeights = new WeakMap<Element[], WeakMap<object, WeakMap<object, number | undefined>>>();
+const NO_FLOORS = {};
+/** {@link resolveEffectiveVentilationZoneBaseHeight}, a model-wide value, once per (elements, floors, settings) for every window. */
+function ventilationZoneBaseHeightFor(elements: Element[], floors: Floor[] | undefined, complianceSettings: GlobalSettingsShape): number | undefined {
+  let byFloors = ventilationBaseHeights.get(elements);
+  if (!byFloors) ventilationBaseHeights.set(elements, (byFloors = new WeakMap()));
+  let bySettings = byFloors.get(floors ?? NO_FLOORS);
+  if (!bySettings) byFloors.set(floors ?? NO_FLOORS, (bySettings = new WeakMap()));
+  if (!bySettings.has(complianceSettings)) {
+    bySettings.set(complianceSettings, resolveEffectiveVentilationZoneBaseHeight({ elements, floors, complianceSettings }));
+  }
+  return bySettings.get(complianceSettings);
+}
+
 export const validateElementCore = (
   element: Element,
   context: ValidationContext,
@@ -1574,11 +1587,7 @@ export const validateElementCore = (
         () => getAreaBasedElementExportGeometry(el, context.globalOrientationOffset),
       ));
       if (complianceValidationEnabled && context.complianceSettings) {
-        const ventilationZoneBaseHeight = resolveEffectiveVentilationZoneBaseHeight({
-          elements: allElements,
-          floors,
-          complianceSettings: context.complianceSettings,
-        });
+        const ventilationZoneBaseHeight = ventilationZoneBaseHeightFor(allElements, floors, context.complianceSettings);
         if (ventilationZoneBaseHeight !== undefined) {
           const windowBaseHeight = getAreaBasedElementExportGeometry(el, context.globalOrientationOffset).baseHeight;
           if (windowBaseHeight < ventilationZoneBaseHeight) {
@@ -2354,7 +2363,7 @@ export const validateElementCore = (
           const derived = deriveFromHostRoof(
             onSiteElement,
             hostRoof,
-            elementsById ? withEffectiveStoreyHeights(floors ?? [], Object.values(elementsById)) : floors,
+            elementsById ? effectiveFloors() : floors,
             context.globalOrientationOffset,
           );
           const epsAng = 0.5;
@@ -2967,8 +2976,7 @@ export const validateElementCore = (
             const floorZIndex = Math.floor(z);
             const bh = (element as { base_height?: unknown }).base_height;
             const hasBaseHeight = typeof bh === 'number' && Number.isFinite(bh);
-            const allElements = elementsById ? Object.values(elementsById) : [];
-            const effFloors = withEffectiveStoreyHeights(floors, allElements);
+            const effFloors = effectiveFloors();
             if (floorZIndex !== 0 && hasBaseHeight) {
               const plate = calculateDerivedBaseHeight(z, effFloors);
               const TOL = 0.05;

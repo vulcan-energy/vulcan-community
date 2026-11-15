@@ -13,6 +13,7 @@ import {
   constrainPointOrthogonally,
   findClosestSnapCorner,
   findConnectedDragNeighbours,
+  findConnectedElementsAtVertex,
   getNearbySnapWallSegments,
   type SnapWallSegmentTarget,
   planConnectedDrag,
@@ -1228,5 +1229,37 @@ describe('getNearbySnapWallSegments', () => {
     const cache = buildGeometrySnapCacheFromTargets([], [wall]);
     expect(cache.spatialIndex!.wallBuckets.size).toBeLessThan(20_000);
     expect(getNearbySnapWallSegments(cache, { x: 1500.1, y: 1499.9 }, 0.2)).toEqual([wall]);
+  });
+});
+
+describe('vertex coincidence over many elements', () => {
+  it('finds what a scan of every element finds, in element order', () => {
+    let seed = 13;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    // Ends on a coarse grid, some nudged across the 5 mm tolerance and its bucket edges.
+    const v = () => Math.round(rand() * 20) * 0.5 + (rand() < 0.4 ? (rand() - 0.5) * 0.012 : 0);
+    const types = ['BuildingElementOpaque', 'BuildingElementTransparent', 'WaterPipework', 'ThermalBridgeLinear'];
+    const elementsById: Record<string, Element> = {};
+    for (let i = 0; i < 300; i += 1) {
+      const z = rand() < 0.5 ? 0 : 1;
+      elementsById[`e${i}`] = {
+        id: `e${i}`, name: `e${i}`, type: types[i % types.length],
+        coordinates: Array.from({ length: i % 5 === 0 ? 3 : 2 }, () => ({ x: v(), y: v(), z })),
+      } as Element;
+    }
+    const elements = Object.values(elementsById);
+    for (const element of elements) {
+      const exact = [...getExactSnappedVertices(element, elementsById)];
+      const expected = element.coordinates!.flatMap((coord, index) =>
+        elements.some((other) => other.id !== element.id
+          && (!['BuildingElementOpaque', 'BuildingElementTransparent'].includes(element.type) || ['BuildingElementOpaque', 'BuildingElementTransparent'].includes(other.type))
+          && (element.type !== 'WaterPipework' || other.type === 'WaterPipework')
+          && other.coordinates!.some((q) => pointsConnected(element, coord, other, q))) ? [index] : []);
+      expect(exact.sort()).toEqual(expected);
+      for (const [index, coord] of element.coordinates!.entries()) {
+        expect(findConnectedElementsAtVertex(element, index, elementsById)).toEqual(
+          elements.filter((other) => other.id !== element.id && other.coordinates!.some((q) => pointsConnected(element, coord, other, q))));
+      }
+    }
   });
 });

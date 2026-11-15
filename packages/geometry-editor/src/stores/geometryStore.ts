@@ -124,6 +124,7 @@ import {
 } from '../lib/spaceInference/remapInferredSpaceLabels';
 import { detectMissingElements as detectMissingElementsCore } from '../geometry/validation/detectMissingElements';
 import type { HostValidationFindings, MissingElement, ValidationResult } from '../geometry/validation/types';
+import type { ValidationContext } from '../geometry/validation/validateElement';
 import type { TargetValidation } from '../types/buildErrors';
 // Cross-repo public API: web/ does `export * from '.../stores/geometryStore'`. Do not
 // remove or relocate these re-exports without a paired web/ PR.
@@ -1736,6 +1737,8 @@ export interface GeometryState extends
   collectAllGeometryWarnings: () => { warnings: string[]; criticalIssues: string[] };
   detectMissingElements: () => MissingElement[];
   validateElement: (element: Element, elementsById?: Record<string, Element>) => ValidationResult;
+  /** The context {@link validateElement} uses for the current state: the same object while its inputs are unchanged. */
+  getElementValidationContext: () => ValidationContext;
 }
 
 // Helper function to generate unique IDs
@@ -2816,52 +2819,84 @@ const applyAutoNameToElementDraft = (
   }
 };
 
-// Validation utility function to check for missing or invalid data
-const validateElementForState = (
-  state: GeometryState,
-  defaultsLookup: DefaultsLookup,
-  schemaPort: GeometrySchemaPort,
-  element: Element,
-  elementsById?: Record<string, Element>,
-): ValidationResult => {
-  const eb = elementsById ?? state.elementsById;
-  const linearThermalBridgeIssues = findLinearThermalBridgeIssues(Object.values(eb), state.floors);
-  const cs = state.complianceSettings;
-  // Blocking checks follow the selected target's rules.
-  const partFFindings = selectPartFData({
-    zones: state.zones,
-    elementsById: eb,
-    spaceLabelsById: state.spaceLabelsById,
-    spaceLabelIds: state.spaceLabelIds,
-    complianceSettings: cs,
-    elements: Object.values(eb),
-    defaults: state.defaultsJson,
-    defaultsLookup,
-  }).findings;
-  return validateElementCore(element, {
-    schemaPort,
-    sourceCsvVersion: state.sourceCsvVersion,
-    csvUpgradeRequested: state.csvUpgradeRequested,
-    elementsById: eb,
-    zones: state.zones,
-    floors: state.floors,
-    globalOrientationOffset: state.globalOrientationOffset,
-    ...targetValidationFlags(schemaPort, cs),
-    complianceSettings: cs,
-    numberOfBedrooms: cs?.NumberOfBedrooms,
-    calculateContextShadingDistance: state.calculateContextShadingDistance,
-    unusedContextShading: state.targetValidation?.distantShading?.unused_objects,
-    defaultsLoading: state.defaultsLoading,
-    defaultsLookup,
-    junctionPsiWorkspaceByType:
-      state.junctionPsiDefaultsPath && state.junctionPsiDefaultsPath.trim() !== ''
-        ? state.junctionPsiDefaultsMap
-        : undefined,
-    linearThermalBridgeIssues,
-    partFFindings,
-    hostFindings: state.hostValidationFindings,
-    heatingSizingWarnings: heatingSizingWarningsFor(state.heatingSizing, eb),
-  });
+/**
+ * Element validation for the editor: the canvas halos and the inspector read the same results.
+ * The model-wide inputs (thermal-bridge geometry, Part F, floor stack) are built once per input
+ * set, and each element is validated once per context, so a selection or a second reader costs
+ * a lookup. Every state field `validateElementCore` reads through the context is in the key.
+ */
+const createElementValidation = (schemaPort: GeometrySchemaPort) => {
+  let baseKey: readonly unknown[] = [];
+  let base: ValidationContext | null = null;
+  let context: ValidationContext | null = null;
+  let contextSizing: unknown;
+  let results = new WeakMap<Element, ValidationResult>();
+  const contextFor = (state: GeometryState, elementsById?: Record<string, Element>): ValidationContext => {
+    const eb = elementsById ?? state.elementsById;
+    const defaultsLookup = state.defaultsLookup;
+    const key = [
+      eb, state.zones, state.floors, state.globalOrientationOffset, state.complianceSettings,
+      state.sourceCsvVersion, state.csvUpgradeRequested, state.calculateContextShadingDistance,
+      state.targetValidation, state.defaultsLoading, defaultsLookup, state.defaultsJson,
+      state.junctionPsiDefaultsPath, state.junctionPsiDefaultsMap, state.spaceLabelsById,
+      state.spaceLabelIds, state.hostValidationFindings, schemaPort.getRevision?.(),
+    ];
+    if (!base || key.length !== baseKey.length || key.some((value, index) => value !== baseKey[index])) {
+      const cs = state.complianceSettings;
+      const elements = Object.values(eb);
+      baseKey = key;
+      context = null;
+      base = {
+        schemaPort,
+        sourceCsvVersion: state.sourceCsvVersion,
+        csvUpgradeRequested: state.csvUpgradeRequested,
+        elementsById: eb,
+        zones: state.zones,
+        floors: state.floors,
+        globalOrientationOffset: state.globalOrientationOffset,
+        // Blocking checks follow the selected target's rules.
+        ...targetValidationFlags(schemaPort, cs),
+        complianceSettings: cs,
+        numberOfBedrooms: cs?.NumberOfBedrooms,
+        calculateContextShadingDistance: state.calculateContextShadingDistance,
+        unusedContextShading: state.targetValidation?.distantShading?.unused_objects,
+        defaultsLoading: state.defaultsLoading,
+        defaultsLookup,
+        junctionPsiWorkspaceByType:
+          state.junctionPsiDefaultsPath && state.junctionPsiDefaultsPath.trim() !== ''
+            ? state.junctionPsiDefaultsMap
+            : undefined,
+        linearThermalBridgeIssues: findLinearThermalBridgeIssues(elements, state.floors),
+        floorStackWarningElementIds: getFloorStackWarningElementIds(elements, state.floors),
+        partFFindings: selectPartFData({
+          zones: state.zones,
+          elementsById: eb,
+          spaceLabelsById: state.spaceLabelsById,
+          spaceLabelIds: state.spaceLabelIds,
+          complianceSettings: cs,
+          elements,
+          defaults: state.defaultsJson,
+          defaultsLookup,
+        }).findings,
+        hostFindings: state.hostValidationFindings,
+      };
+    }
+    // The same map for the same sizing result and elements, so a sizing status change alone keeps the context.
+    const sizing = heatingSizingWarningsFor(state.heatingSizing, eb);
+    if (!context || sizing !== contextSizing) {
+      contextSizing = sizing;
+      context = { ...base, heatingSizingWarnings: sizing };
+      results = new WeakMap();
+    }
+    return context;
+  };
+  const validate = (state: GeometryState, element: Element, elementsById?: Record<string, Element>): ValidationResult => {
+    const ctx = contextFor(state, elementsById);
+    let result = results.get(element);
+    if (!result) results.set(element, (result = validateElementCore(element, ctx)));
+    return result;
+  };
+  return { contextFor, validate };
 };
 
 export const validateZone = validateZoneCore;
@@ -2999,6 +3034,7 @@ const createGeometryState = (
   const modelSchemaProfilePort =
     options.modelSchemaProfilePort ?? unavailableGeometryModelSchemaProfilePort;
   const schemaPort = options.schemaPort ?? unavailableGeometrySchemaPort;
+  const elementValidation = createElementValidation(schemaPort);
   const workspaceResourcePort =
     options.workspaceResourcePort ?? unavailableGeometryWorkspaceResourcePort;
   const defaultDefaultsPath = resolveDefaultDefaultsPath(options.defaultDefaultsPath);
@@ -3210,8 +3246,8 @@ const createGeometryState = (
   getDefaultsLookup: () => get().defaultsLookup,
   ...createComplianceSlice(set, get, api),
   ...createHeatingSizingSlice(options.heatingSizingProvider)(set, get, api),
-  validateElement: (element, elementsById) =>
-    validateElementForState(get(), get().defaultsLookup, schemaPort, element, elementsById),
+  validateElement: (element, elementsById) => elementValidation.validate(get(), element, elementsById),
+  getElementValidationContext: () => elementValidation.contextFor(get()),
 
   // Multi-select state
   selectedElementIds: [],
@@ -4336,7 +4372,8 @@ const createGeometryState = (
         floorGroups.get(z)!.push(w);
       }
 
-      const updated = { ...state.elementsById };
+      // A new record per write: snapUtils indexes a record on first query, so it must not change after.
+      let updated = { ...state.elementsById };
       let changed = false;
 
       for (const [, group] of floorGroups.entries()) {
@@ -4470,11 +4507,11 @@ const createGeometryState = (
 
             // Only apply if resulting length is valid
             if (newLenA >= 0.001) {
-              updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+              updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
               changed = true;
             }
             if (newLenB >= 0.001) {
-              updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+              updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
               changed = true;
             }
           }
@@ -4564,7 +4601,7 @@ const createGeometryState = (
                 newA2 = { x: inter.x, y: inter.y, z: a2.z } as any;
                 const newLen = Math.hypot(newA2.x - newA1.x, newA2.y - newA1.y);
                 if (newLen >= 0.001) {
-                  updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               } else if (lenA2 > lenA1) {
@@ -4572,7 +4609,7 @@ const createGeometryState = (
                 newA1 = { x: inter.x, y: inter.y, z: a1.z } as any;
                 const newLen = Math.hypot(newA2.x - newA1.x, newA2.y - newA1.y);
                 if (newLen >= 0.001) {
-                  updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
@@ -4589,7 +4626,7 @@ const createGeometryState = (
                 newB2 = { x: inter.x, y: inter.y, z: b2.z } as any;
                 const newLen = Math.hypot(newB2.x - newB1.x, newB2.y - newB1.y);
                 if (newLen >= 0.001) {
-                  updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               } else if (lenB2 > lenB1) {
@@ -4597,7 +4634,7 @@ const createGeometryState = (
                 newB1 = { x: inter.x, y: inter.y, z: b1.z } as any;
                 const newLen = Math.hypot(newB2.x - newB1.x, newB2.y - newB1.y);
                 if (newLen >= 0.001) {
-                  updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
@@ -4654,7 +4691,7 @@ const createGeometryState = (
                 }
 
                 if (aChanged) {
-                  updated[A_orig.id] = { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [A_orig.id]: { ...(A as any), coordinates: [newA1, newA2], _v: ((A as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
@@ -4694,7 +4731,7 @@ const createGeometryState = (
                 }
 
                 if (bChanged) {
-                  updated[B_orig.id] = { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element;
+                  updated = { ...updated, [B_orig.id]: { ...(B as any), coordinates: [newB1, newB2], _v: ((B as any)._v ?? 0) + 1 } as Element };
                   changed = true;
                 }
               }
