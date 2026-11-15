@@ -7,7 +7,7 @@ import { asSchemaNode, isSchemaNode, type SchemaNode } from './schemaTypes';
 import { resolveRefChain, resolveRefNode } from './schemaRefResolver';
 import { flattenIfThenAllOfProperties } from './systemSchemaFlatten';
 import { isForbiddenSchemaNode } from './schemaShape';
-import { dereferenceSchemaNodeInRoot } from './subschemaCache';
+import { dereferenceSchemaNodeInRoot, sharedDereferencedNodeInRoot } from './subschemaCache';
 import { targetRules, targetSchemaMode, type GeometrySchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 
 export type GeometrySchemaAssetSource = Readonly<{
@@ -2544,24 +2544,8 @@ export function thermalBridgingAcceptsTotal(root: unknown): boolean {
   return field === undefined || schemaNodeAcceptsNumber(field, root);
 }
 
-// Lookups start at the root, and dereferencing a whole target schema costs ~100 ms for HEM:EPC.
-// Loaded schemas are never mutated, so each node is dereferenced once per root.
-const resolvedNodesByRoot = new WeakMap<object, WeakMap<object, Record<string, unknown>>>();
-
-function resolvedInRoot(node: Record<string, unknown>, root: unknown): Record<string, unknown> {
-  if (!isRecord(root)) return dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
-  let resolvedNodes = resolvedNodesByRoot.get(root);
-  if (!resolvedNodes) {
-    resolvedNodes = new WeakMap();
-    resolvedNodesByRoot.set(root, resolvedNodes);
-  }
-  let resolved = resolvedNodes.get(node);
-  if (!resolved) {
-    resolved = dereferenceSchemaNodeInRoot(node, root) as Record<string, unknown>;
-    resolvedNodes.set(node, resolved);
-  }
-  return resolved;
-}
+const resolvedInRoot = (node: Record<string, unknown>, root: unknown) =>
+  sharedDereferencedNodeInRoot(node, root) as Record<string, unknown>;
 
 function findFieldInSchemaBranches(node: unknown, key: string, root: unknown): unknown {
   if (!isRecord(node)) return undefined;
