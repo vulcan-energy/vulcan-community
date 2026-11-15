@@ -35,7 +35,7 @@ describe('DerivedNumberField', () => {
     const { onChange } = renderField({ manualValue: 60 });
 
     expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('60');
-    expect(screen.getByText('(set by you)')).toBeTruthy();
+    expect(screen.getByText('(manual override)')).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText('Reset ground floor area to derived value'));
     expect(onChange).toHaveBeenCalledWith(undefined);
@@ -94,7 +94,7 @@ describe('DerivedNumberField', () => {
     renderField({ derivedValue: 0, manualValue: 60, placeholderWhenUnavailable: 'Draw a floor' });
 
     expect(screen.queryByText('(auto)')).toBeNull();
-    expect(screen.queryByText('(set by you)')).toBeNull();
+    expect(screen.queryByText('(manual override)')).toBeNull();
     expect(screen.queryByLabelText('Reset ground floor area to derived value')).toBeNull();
     expect((screen.getByRole('textbox') as HTMLInputElement).placeholder).toBe('Draw a floor');
   });
