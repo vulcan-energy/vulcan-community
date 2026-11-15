@@ -152,7 +152,7 @@ describe('R6 ElementCreator Lighting commit fence', () => {
       coordinates: [{ x: 0, y: 0, z: 0 }], efficacy: 90, count: 4, power: 8,
     } as Element);
     const fieldLabel = screen.getByText(label);
-    const fieldInput = fieldLabel.closest('.tooltip-container')?.nextElementSibling?.querySelector('input');
+    const fieldInput = (fieldLabel.closest('.field-label-row') ?? fieldLabel.closest('.tooltip-container'))?.nextElementSibling?.querySelector('input');
     expect(fieldInput).toBeInstanceOf(HTMLInputElement);
     fireEvent.change(fieldInput as HTMLInputElement, { target: { value: String(value) } });
     const edited = store.getState().elementsById.light;
@@ -383,7 +383,7 @@ describe('BuildingElementGround selection stability', () => {
     } as Element;
     const store = renderElement(ground);
     const fieldLabel = screen.getByText('Total Area');
-    const fieldInput = fieldLabel.closest('.tooltip-container')?.nextElementSibling?.querySelector('input');
+    const fieldInput = (fieldLabel.closest('.field-label-row') ?? fieldLabel.closest('.tooltip-container'))?.nextElementSibling?.querySelector('input');
     expect(fieldInput).toBeInstanceOf(HTMLInputElement);
 
     fireEvent.change(fieldInput as HTMLInputElement, { target: { value: '12' } });
@@ -392,7 +392,7 @@ describe('BuildingElementGround selection stability', () => {
       total_area: 12,
       [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
     });
-    expect(screen.getByText(/Warning: entered total differs from the automatic floor total of 10 m²/)).toBeTruthy();
+    expect(screen.getByText(/Differs from the 10 m² of floors drawn/)).toBeTruthy();
 
     act(() => {
       store.getState().updateElement('ground', { perimeter: 4 });
@@ -403,7 +403,7 @@ describe('BuildingElementGround selection stability', () => {
       [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use automatically derived total area' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Total area: use the drawing, 10 m²' }));
 
     expect(store.getState().elementsById.ground).toMatchObject({
       total_area: 10,

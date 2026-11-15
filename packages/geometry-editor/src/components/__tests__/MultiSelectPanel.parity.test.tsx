@@ -216,15 +216,15 @@ describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
         ['object', 'Obstacle'], ['overhang', 'Overhang'], ['sidefinleft', 'Left fin'],
         ['sidefinright', 'Right fin'], ['reveal', 'Reveal'],
       ]);
-    expect(input('Distance (m)')).toHaveAttribute('placeholder', 'No current value');
-    expect(input('Height (m)')).toHaveAttribute('placeholder', 'No current value');
-    expect(input('Transparency')).toHaveAttribute('placeholder', 'No current value');
+    expect(input('Distance (m)')).toHaveAttribute('placeholder', 'Not stated');
+    expect(input('Height (m)')).toHaveAttribute('placeholder', 'Not stated');
+    expect(input('Transparency')).toHaveAttribute('placeholder', 'Not stated');
     expect(screen.queryByRole('textbox', { name: 'Depth (m)' })).not.toBeInTheDocument();
 
     cleanup();
     mount([windowShading('shade', { shading_type: 'overhang' })]);
     expect(fieldLabels()).toEqual(['Linked Window', 'Shading Type', 'Distance', 'Depth']);
-    expect(input('Depth (m)')).toHaveAttribute('placeholder', 'No current value');
+    expect(input('Depth (m)')).toHaveAttribute('placeholder', 'Not stated');
     expect(screen.queryByRole('textbox', { name: 'Height (m)' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Transparency' })).not.toBeInTheDocument();
   });

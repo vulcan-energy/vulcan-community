@@ -218,12 +218,13 @@ export interface ElementFormBuildCtx {
 export interface ElementFormRenderCtx {
   elementType: ElementType;
   fieldUnit: (fieldKey: string) => string | undefined;
-  renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string) => ReactNode;
+  renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string, source?: ReactNode) => ReactNode;
   renderFieldLabelWithComparisonIndicator: (
     label: string,
     elementType: string,
     indicatorMessages?: readonly string[],
     evidenceFieldKey?: string,
+    source?: ReactNode,
   ) => ReactNode;
   registerBaseFieldRefs: (fieldKeys: string | string[]) => (node: HTMLDivElement | null) => void;
   /** Singular variant used verbatim by OnSiteGeneration's legacy render code

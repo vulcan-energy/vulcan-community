@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import React from 'react';
+import './FieldSource.css';
 
 /**
  * How the button is positioned vertically relative to the control it acts on. Required, so
@@ -15,8 +16,10 @@ import React from 'react';
  *   label is a sibling emitted before the row (`renderFieldLabel`, `.element-input`) or
  *   because the row sets its own `alignItems`. The button takes no vertical offset; adding
  *   one here pushes it *below* the input.
+ * - `'note'` - the small "↺ Use …" control that sits where a field's source note goes
+ *   (`FieldSource.tsx`), never in the input row, so it cannot squash the input.
  */
-export type ResetFieldButtonAlign = 'input-row' | 'inline';
+export type ResetFieldButtonAlign = 'input-row' | 'inline' | 'note';
 
 /**
  * Anchored from the *top* and pushed down by the label's height, deliberately. The obvious
@@ -42,6 +45,7 @@ export function ResetFieldButton({
   label,
   style,
   disabled,
+  quiet,
 }: {
   onClick: React.MouseEventHandler<HTMLButtonElement>;
   align: ResetFieldButtonAlign;
@@ -50,7 +54,25 @@ export function ResetFieldButton({
   label?: string;
   style?: React.CSSProperties;
   disabled?: boolean;
+  /** `'note'` only: shown while the field row is hovered or focused (an imported model states every field). */
+  quiet?: boolean;
 }) {
+  if (align === 'note') {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={quiet ? 'field-source-reset field-source-reset--quiet' : 'field-source-reset'}
+        style={style}
+        title={title}
+        aria-label={ariaLabel}
+      >
+        <span aria-hidden>↺</span>
+        {label ?? 'Use default'}
+      </button>
+    );
+  }
   return (
     <button
       type="button"

@@ -3,6 +3,7 @@
 
 import React, { useId } from 'react';
 import './StandardDropdown.css';
+import './FieldSource.css';
 import {
   StandardControlShell,
   type StandardControlSize,
@@ -32,6 +33,8 @@ interface StandardDropdownProps {
   selectRef?: React.Ref<HTMLSelectElement>;
   /** Display-only trailing unit. It is never included in the selected value or events. */
   unit?: string;
+  /** Where the value comes from (`FieldSource.tsx`), shown at the right of the label row. */
+  labelExtra?: React.ReactNode;
   id?: string;
   name?: string;
   'aria-label'?: string;
@@ -53,6 +56,7 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
   onBlur,
   selectRef,
   unit,
+  labelExtra,
   id,
   name,
   'aria-label': ariaLabel,
@@ -124,11 +128,18 @@ export const StandardDropdown: React.FC<StandardDropdownProps> = ({
 
   return (
     <div className={`standard-dropdown-container ${className}`}>
-      {label && (
+      {label && (labelExtra ? (
+        <div className="field-label-row">
+          <label htmlFor={dropdownId} className="standard-dropdown-label">
+            {label}
+          </label>
+          <span className="field-label-row__source">{labelExtra}</span>
+        </div>
+      ) : (
         <label htmlFor={dropdownId} className="standard-dropdown-label">
           {label}
         </label>
-      )}
+      ))}
       <StandardControlShell
         unit={unit}
         size={size}

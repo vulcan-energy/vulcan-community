@@ -24,6 +24,7 @@ import {
   useIntegerInput,
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
+import { Readout, SourceNote } from '../FieldSource';
 
 const LIGHTING_ENTRY_MODE_KEY = '_lighting_entry_mode';
 const LIGHTING_GRADE_KEY = '_lighting_grade';
@@ -427,32 +428,14 @@ export const lightingFormModule: ElementFormModule<LightingFormState> = {
                 size="md"
               />
             </div>
-            {renderFieldLabel('Efficacy (lm/W):', elementType)}
+            {/* Guided entry: grade sets efficacy and lamp type sets power, so both read as text. */}
+            {renderFieldLabel('Efficacy (lm/W):', elementType, undefined, <SourceNote>from the grade</SourceNote>)}
             <div className="element-input">
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={LIGHTING_GRADE_TO_EFFICACY[lightingGrade] ?? ''}
-                unit={fieldUnit('efficacy')}
-                disabled
-                variant="ghost"
-                size="md"
-              />
+              <Readout value={LIGHTING_GRADE_TO_EFFICACY[lightingGrade] ?? ''} unit={fieldUnit('efficacy')} label="Efficacy" />
             </div>
-            {renderFieldLabel('Power (W):', elementType)}
+            {renderFieldLabel('Power (W):', elementType, undefined, <SourceNote>from the lamp type</SourceNote>)}
             <div className="element-input">
-              <StandardInput
-                type="text"
-                inputMode="numeric"
-                value={LIGHTING_LAMP_TYPE_DEFAULT_POWER[lightingLampType]}
-                unit={fieldUnit('power')}
-                disabled
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            <div className="element-editor-note">
-              Grade writes efficacy and lamp type writes power.
+              <Readout value={LIGHTING_LAMP_TYPE_DEFAULT_POWER[lightingLampType]} unit={fieldUnit('power')} label="Power" />
             </div>
           </>
         )}

@@ -55,12 +55,12 @@ import type { GeometryStoreApi } from '../../stores/geometryStore';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { ResetFieldButton } from '../ResetFieldButton';
+import { SourceNote } from '../FieldSource';
 import { WallShapeRows, type WallShapeCommit } from '../WallShapeRows';
 import {
   decimalInputProps,
   parseLiveDecimalInput,
   readExtraJsonRecord,
-  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import type { ElementFormSelection } from './types';
@@ -106,7 +106,7 @@ export function useWallFamilyFormState({
   floors: Floor[];
   commitExistingElementDraftRef: MutableRefObject<(overrides?: Partial<Element>) => void>;
   elementType: ElementType;
-  renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string) => ReactNode;
+  renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string, source?: ReactNode) => ReactNode;
   fieldUnit: (fieldKey: string) => string | undefined;
   getFieldValidationState: (
     fieldName: string,
@@ -344,6 +344,23 @@ export function useWallFamilyFormState({
       </button>
     ) : null;
 
+  // A sloped surface's width and height come from its drawn shape until typed over (authored markers).
+  const slopedSource = (dimension: 'width' | 'height') => {
+    if (!selectedSlopedDimensions) return undefined;
+    const overridden = dimension === 'width' ? showSlopedWidthReset : showSlopedHeightReset;
+    if (!overridden) return <SourceNote>from the drawing</SourceNote>;
+    const shown = `${selectedSlopedDimensions[dimension]} m`;
+    return (
+      <ResetFieldButton
+        align="note"
+        title={`Use the drawing: ${shown}`}
+        ariaLabel={`${dimension === 'width' ? 'Width' : 'Height'}: use the drawing, ${shown}`}
+        label={`Use the drawing: ${shown}`}
+        onClick={dimension === 'width' ? resetSlopedWidthToCanvas : resetSlopedHeightToCanvas}
+      />
+    );
+  };
+
   const renderLinearDimensionsFields = (
     fieldRef: (fieldKey: string) => (el: HTMLDivElement | null) => void,
     options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
@@ -359,17 +376,8 @@ export function useWallFamilyFormState({
           min="0"
           variant="ghost"
           size="md"
-          className="flex-1"
+          className={selectedSlopedDimensions && !showSlopedHeightReset ? 'flex-1 field-value--source' : 'flex-1'}
         />
-        {showSlopedHeightReset ? (
-          <ResetFieldButton
-            align="inline"
-            title={`Use shape-calculated sloped height (${selectedSlopedDimensions?.height ?? ''} m)`}
-            ariaLabel="Use shape calculated height"
-            label="Use shape calculated"
-            onClick={resetSlopedHeightToCanvas}
-          />
-        ) : null}
         {options.includeWallShape ? wallShapeToggle : null}
         <FieldValidationIndicator
           hasIssue={!!heightValidation}
@@ -380,7 +388,7 @@ export function useWallFamilyFormState({
     );
     return (
       <>
-        {renderFieldLabel('Width (m):', elementType, 'width')}
+        {renderFieldLabel('Width (m):', elementType, 'width', slopedSource('width'))}
         <div
           className="element-input"
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -393,17 +401,8 @@ export function useWallFamilyFormState({
             min="0"
             variant="ghost"
             size="md"
-            className="flex-1"
+            className={selectedSlopedDimensions && !showSlopedWidthReset ? 'flex-1 field-value--source' : 'flex-1'}
           />
-          {showSlopedWidthReset ? (
-            <ResetFieldButton
-              align="inline"
-              title={`Use shape-calculated sloped width (${selectedSlopedDimensions?.width ?? ''} m)`}
-              ariaLabel="Use shape calculated width"
-              label="Use shape calculated"
-              onClick={resetSlopedWidthToCanvas}
-            />
-          ) : null}
           <FieldValidationIndicator
             hasIssue={!!widthValidation}
             issue={widthValidation?.message}
@@ -411,7 +410,7 @@ export function useWallFamilyFormState({
           />
         </div>
         {selectedSlopedDimensionNotes?.width ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             {selectedSlopedDimensionNotes.width}
           </div>
         ) : null}
@@ -434,7 +433,7 @@ export function useWallFamilyFormState({
           </WallShapeRows>
         ) : (
           <>
-            {renderFieldLabel('Height (m):', elementType, 'height')}
+            {renderFieldLabel('Height (m):', elementType, 'height', slopedSource('height'))}
             <div
               className="element-input"
               style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -445,7 +444,7 @@ export function useWallFamilyFormState({
           </>
         )}
         {selectedSlopedDimensionNotes?.height ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             {selectedSlopedDimensionNotes.height}
           </div>
         ) : null}

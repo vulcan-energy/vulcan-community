@@ -62,7 +62,8 @@ import {
   type UnheatedPitchedRoofCeilingElevationSource,
 } from '../../lib/unheatedPitchedRoofCeiling';
 import { ParentElementDropdown } from '../ParentElementDropdown';
-import { ResetFieldButton } from '../ResetFieldButton';
+import { DerivedSource, ParentSourceNote, Readout, SourceNote } from '../FieldSource';
+import { isOverridden } from '../../lib/fieldSource';
 import { StandardInput } from '../StandardInput';
 import { CompactSegmentedControl } from '../WindowDetailControls';
 import type { Element } from '../../geometry/types';
@@ -70,7 +71,6 @@ import {
   decimalInputProps,
   useDecimalInput,
   formatToTwoDecimals,
-  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
@@ -81,7 +81,7 @@ import type {
   ElementFormStateCtx,
 } from './types';
 
-// INLINE_FIELD_NOTE_STYLE/formatToTwoDecimals: RESOLVED in slice-6 STAGE 6 —
+// INLINE_FIELD_NOTE_STYLE (now the field-source-note class)/formatToTwoDecimals: RESOLVED in slice-6 STAGE 6 —
 // now imported from formPrimitives.ts above instead of duplicated locally;
 // see that file's own comment.
 
@@ -333,7 +333,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           if (suspendedTarget) {
             return {
               value: roundToTwoDecimals(suspendedTarget.surfaceM),
-              note: 'suspended floor upper surface',
+              note: 'from the suspended floor',
               title: 'Reset to suspended floor upper surface',
             };
           }
@@ -343,8 +343,8 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             return {
               value: roundToTwoDecimals(basementTarget.targetBaseHeightM),
               note: isUnheatedBasement
-                ? 'unheated basement wall height above ground'
-                : 'basement floor surface',
+                ? 'from the unheated basement'
+                : 'from the basement floor',
               title: isUnheatedBasement
                 ? 'Reset to unheated basement wall height'
                 : 'Reset to basement floor surface',
@@ -355,7 +355,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       return derivedBaseHeight > 0
         ? {
             value: derivedBaseHeight,
-            note: 'cumulative floor heights',
+            note: 'from the floors below',
             title: 'Reset to height derived from floors below',
           }
         : null;
@@ -402,26 +402,23 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             includeWallShape: true,
           })
         )}
-        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
-        <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRef('area')}>
-          <StandardInput
-            type="text"
-            inputMode="numeric"
+        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
+        <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'stretch' }} ref={registerBaseFieldRef('area')}>
+          {/* Net area is set by the drawing: HEM takes no other value, so it reads as text. */}
+          <Readout
             value={formatToTwoDecimals(selectedOpaqueAreaSummary ? selectedOpaqueAreaSummary.netArea : (selectedShape === 'polygon' ? derivedPolygonArea : liveRectArea))}
             unit={fieldUnit('area')}
-            readOnly
-            variant="ghost"
-            size="md"
+            label="Area"
           />
-          {selectedOpaqueAreaSummary && (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Gross area: {formatToTwoDecimals(selectedOpaqueAreaSummary.grossArea)} m²
+          {selectedOpaqueAreaSummary && (selectedOpaqueAreaSummary.cover || selectedOpaqueAreaSummary.subtractedArea > 0) && (
+            <div className="field-source-note">
+              {formatToTwoDecimals(selectedOpaqueAreaSummary.grossArea)} m²
               {selectedOpaqueAreaSummary.cover
-                ? ` · Covered by ${selectedOpaqueAreaSummary.cover.wallNames.join(', ')}: ${formatToTwoDecimals(selectedOpaqueAreaSummary.cover.area)} m² subtracted`
+                ? ` less ${formatToTwoDecimals(selectedOpaqueAreaSummary.cover.area)} m² covered by ${selectedOpaqueAreaSummary.cover.wallNames.join(', ')}`
                 : ''}
               {selectedOpaqueAreaSummary.subtractedArea > 0
-                ? ` · Linked openings / cutouts subtracted: ${formatToTwoDecimals(selectedOpaqueAreaSummary.subtractedArea)} m²`
-                : selectedOpaqueAreaSummary.cover ? '' : ' · No linked openings or cutouts subtracted'}
+                ? ` less ${formatToTwoDecimals(selectedOpaqueAreaSummary.subtractedArea)} m² of openings`
+                : ''}
             </div>
           )}
         </div>
@@ -464,8 +461,17 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             </div>
           </>
         ) : null}
-        {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
+        {renderFieldLabel(
+          'Orientation (degrees):',
+          elementType,
+          'orientation360',
+          state.parentElement ? <ParentSourceNote parentName={state.parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined,
+        )}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRefs('orientation360')}>
+          {state.parentElement ? (
+            // A hosted element faces the way its host does: HEM takes no other value.
+            <Readout value={Number.isFinite(state.orientation360) ? state.orientation360 : 0} unit={fieldUnit('orientation360')} label="Orientation" />
+          ) : (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
             <div style={{ flex: '1 1 auto', minWidth: 0 }}>
               <StandardInput
@@ -482,7 +488,6 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
                 step="1"
                 min="0"
                 max="360"
-                readOnly={!!state.parentElement}
                 variant="ghost"
                 size="md"
               />
@@ -506,60 +511,43 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
               </button>
             )}
           </div>
-          {state.parentElement && (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Inherited from parent: {state.parentElement}
-            </div>
           )}
         </div>
-        {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
+        {renderFieldLabel(
+          'Base Height (m):',
+          elementType,
+          'base_height',
+          <DerivedSource
+            derived={baseHeightResetTarget?.value}
+            current={state.baseHeightInput.value}
+            tolerance={0.01}
+            info={<SourceNote>{baseHeightResetTarget?.note}</SourceNote>}
+            useLabel={`Use ${baseHeightResetTarget?.note?.replace(/^from /, '') ?? 'the floor'}`}
+            unit="m"
+            fieldLabel="Base height"
+            onUse={(value) => {
+              state.baseHeightInput.setValue(value);
+              commitExistingElementDraft({ base_height: value });
+            }}
+          />,
+        )}
         <div
           className="element-input"
           style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
           ref={registerBaseFieldRefs('base_height')}
         >
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-            <div
-              className={
-                baseHeightResetTarget && typeof state.baseHeightInput.value === 'number' && Math.abs(state.baseHeightInput.value - baseHeightResetTarget.value) > 0.01
-                  ? 'custom-value'
-                  : ''
-              }
-              style={{ flex: 1 }}
-            >
-              <StandardInput
-                {...decimalInputProps(state.baseHeightInput)}
-                unit={fieldUnit('base_height')}
-                step="0.01"
-                min={baseHeightResetTarget && baseHeightResetTarget.value < 0 ? undefined : '0'}
-                variant="ghost"
-                size="md"
-                className="flex-1"
-                placeholder={baseHeightResetTarget ? String(baseHeightResetTarget.value) : undefined}
-              />
-            </div>
-            {baseHeightResetTarget && typeof state.baseHeightInput.value === 'number' && Math.abs(state.baseHeightInput.value - baseHeightResetTarget.value) > 0.01 && (
-              <ResetFieldButton
-                onClick={() => {
-                  state.baseHeightInput.setValue(baseHeightResetTarget.value);
-                  commitExistingElementDraft({ base_height: baseHeightResetTarget.value });
-                }}
-                align="inline"
-                title={baseHeightResetTarget.title}
-                ariaLabel="Reset Base Height"
-                label="Reset"
-              />
-            )}
-          </div>
+          <StandardInput
+            {...decimalInputProps(state.baseHeightInput)}
+            unit={fieldUnit('base_height')}
+            step="0.01"
+            min={baseHeightResetTarget && baseHeightResetTarget.value < 0 ? undefined : '0'}
+            variant="ghost"
+            size="md"
+            className={baseHeightResetTarget && !isOverridden(baseHeightResetTarget.value, state.baseHeightInput.value, 0.01) ? 'flex-1 field-value--source' : 'flex-1'}
+            placeholder={baseHeightResetTarget ? String(baseHeightResetTarget.value) : undefined}
+          />
           {lowestEdgeM !== null ? (
-            <div style={INLINE_FIELD_NOTE_STYLE}>Lowest edge {formatToTwoDecimals(lowestEdgeM)} m</div>
-          ) : null}
-          {baseHeightResetTarget ? (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              {typeof state.baseHeightInput.value === 'number' && Math.abs(state.baseHeightInput.value - baseHeightResetTarget.value) > 0.01
-                ? `Default: ${baseHeightResetTarget.value} m · ${baseHeightResetTarget.note}`
-                : `Suggested: ${baseHeightResetTarget.value} m · ${baseHeightResetTarget.note}`}
-            </div>
+            <div className="field-source-note">Lowest edge {formatToTwoDecimals(lowestEdgeM)} m</div>
           ) : null}
         </div>
         {canMarkUnheatedPitchedRoof ? (
@@ -593,6 +581,9 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
               'Ceiling / heat-loss boundary elevation (m):',
               elementType,
               UNHEATED_PITCHED_ROOF_CEILING_ELEVATION_KEY,
+              unheatedPitchedRoofCeilingElevationSuggestion && unheatedPitchedRoofCeilingElevationSuggestion.source !== 'authored'
+                ? <SourceNote>from the {unheatedPitchedRoofCeilingElevationSourceLabel(unheatedPitchedRoofCeilingElevationSuggestion.source)}</SourceNote>
+                : undefined,
             )}
             <div
               className="element-input"
@@ -616,11 +607,6 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
                     : undefined
                 }
               />
-              {unheatedPitchedRoofCeilingElevationSuggestion ? (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Blank = automatic {unheatedPitchedRoofCeilingElevationSuggestion.value} m from {unheatedPitchedRoofCeilingElevationSourceLabel(unheatedPitchedRoofCeilingElevationSuggestion.source)}. Used for 3D and automatic thermal bridges. The roof base height stays at the roof plane.
-                </div>
-              ) : null}
             </div>
           </>
         ) : null}

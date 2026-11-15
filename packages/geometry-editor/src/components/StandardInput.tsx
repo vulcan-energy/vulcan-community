@@ -3,6 +3,7 @@
 
 import React, { useId, useState } from 'react';
 import './StandardInput.css';
+import './FieldSource.css';
 import {
   StandardControlShell,
   type StandardControlSize,
@@ -17,6 +18,8 @@ interface StandardInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEle
   size?: StandardControlSize;
   /** Display-only trailing unit. It is never included in the input value or events. */
   unit?: string;
+  /** Where the value comes from (`FieldSource.tsx`), shown at the right of the label row. */
+  labelExtra?: React.ReactNode;
 }
 
 export const StandardInput: React.FC<StandardInputProps> = ({
@@ -26,6 +29,7 @@ export const StandardInput: React.FC<StandardInputProps> = ({
   variant = 'default',
   size = 'md',
   unit,
+  labelExtra,
   className = '',
   id,
   type,
@@ -120,11 +124,18 @@ export const StandardInput: React.FC<StandardInputProps> = ({
 
   return (
     <div className={`standard-input-container ${className}`}>
-      {label && (
+      {label && (labelExtra ? (
+        <div className="field-label-row">
+          <label htmlFor={inputId} className="standard-input-label">
+            {label}
+          </label>
+          <span className="field-label-row__source">{labelExtra}</span>
+        </div>
+      ) : (
         <label htmlFor={inputId} className="standard-input-label">
           {label}
         </label>
-      )}
+      ))}
       <StandardControlShell
         unit={unit}
         size={size}

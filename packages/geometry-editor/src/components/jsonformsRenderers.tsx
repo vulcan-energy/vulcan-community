@@ -8,8 +8,8 @@ import { ResetFieldButton } from './ResetFieldButton';
 import { numericInputAttributesFromSchema, useNumericDraftInput } from './numericDraftInput';
 import { StandardDropdown } from './StandardDropdown';
 import { StandardControlShell } from './StandardControlShell';
-import { StatusPill } from './StatusPill';
-import type { StatusPillType } from './StatusPill';
+import { DefaultNote, SourceNote } from './FieldSource';
+import { formatSourceValue } from '../lib/fieldSource';
 import { ValidationIndicator } from './ValidationIndicator';
 import { generateRobustPlaceholder } from '../lib/schemaPlaceholders';
 import { getSchemaParamIdForField } from '../lib/fieldTooltipMap';
@@ -718,41 +718,8 @@ function groundAdvancedUValueMatchesComputed(
   const u = groundUComputedWPerM2K;
   if (typeof u !== 'number' || !Number.isFinite(u) || u <= 0) return false;
   const cur = readFiniteControlNumber(data);
-  const uRounded = Number(u.toFixed(4));
-  const curRounded = cur != null ? Number(cur.toFixed(4)) : null;
-  return curRounded != null && Math.abs(curRounded - uRounded) <= 1e-5;
-}
-
-// Helper function to determine status pill type
-function getStatusPillType(
-  data: unknown,
-  sourceValue: unknown,
-  sourceKind: 'assembly' | 'default',
-  isJsonLike: boolean,
-  groundPill?: { isGroundUField: boolean; groundUComputedWPerM2K?: number | null },
-): StatusPillType {
-  if (
-    groundPill?.isGroundUField &&
-    groundAdvancedUValueMatchesComputed(data, groundPill.groundUComputedWPerM2K)
-  ) {
-    return 'calculated';
-  }
-
-  if (isMeaningfulExplicitValue(data, isJsonLike) && !valuesEquivalent(data, sourceValue, isJsonLike)) {
-    return 'custom';
-  }
-
-  if (sourceValue !== undefined && sourceValue !== null) {
-    if (Array.isArray(sourceValue) && sourceValue.length === 0) {
-      return 'no-default-schema';
-    }
-    if (typeof sourceValue === 'object' && Object.keys(sourceValue).length === 0) {
-      return 'no-default-schema';
-    }
-    return sourceKind === 'assembly' ? 'calculated' : 'default-used';
-  }
-
-  return 'no-default-schema';
+  // Compared at the precision "Use calculation: X" shows (formatSourceValue), so 0.13 matches 0.1296.
+  return cur != null && formatSourceValue(cur) === formatSourceValue(u);
 }
 
 function isMeaningfulExplicitValue(data: unknown, isJsonLike: boolean): boolean {
@@ -800,22 +767,10 @@ function resolveFieldSource(
   propKey: string | undefined,
   defaultValue: unknown,
   config: RendererConfig | undefined,
-): {
-  value: unknown;
-  kind: 'assembly' | 'default';
-  buttonLabel?: string;
-  buttonTitle?: string;
-  buttonAriaLabel?: string;
-} {
+): FieldSourceInfo {
   const assemblySourceValues = config?.assemblySourceValues ?? {};
   if (propKey && Object.prototype.hasOwnProperty.call(assemblySourceValues, propKey)) {
-    return {
-      value: assemblySourceValues[propKey],
-      kind: 'assembly',
-      buttonLabel: 'Reset to assembly',
-      buttonTitle: 'Restore value from applied assembly',
-      buttonAriaLabel: 'Reset field to assembly value',
-    };
+    return { value: assemblySourceValues[propKey], kind: 'assembly' };
   }
   /** FHS suspended `shield_fact_location`: template often omits it; ISO 13370 path uses {@link parseWindShieldLocation}. */
   const templateDefault =
@@ -826,16 +781,12 @@ function resolveFieldSource(
 type FieldSourceInfo = {
   value: unknown;
   kind: 'assembly' | 'default';
-  buttonLabel?: string;
-  buttonTitle?: string;
-  buttonAriaLabel?: string;
 };
 
 type FieldPresentationState = {
   fieldSource: FieldSourceInfo;
-  statusPillType: StatusPillType;
-  isCustom: boolean;
-  showReset: boolean;
+  /** System Sample mode: the source is the chosen preset, which reads as the default. */
+  isSamplePreset: boolean;
 };
 
 /**
@@ -900,51 +851,90 @@ function computeFieldPresentationState(args: {
 
   if (config?.systemSampleMode) {
     const baseline = readValueAtDataPath(config.systemSampleBaselineExtraJson, path, config.systemSamplePathSegments);
-    if (baseline.exists) {
-      const matchesBaseline = valuesEquivalent(data, baseline.value, isJsonLike);
-      return {
-        fieldSource: {
-          value: baseline.value,
-          kind: 'assembly',
-          buttonLabel: 'Reset to default',
-          buttonTitle: 'Restore value from selected sample preset',
-          buttonAriaLabel: 'Reset field to sample preset value',
-        },
-        statusPillType: matchesBaseline ? 'default-used' : 'custom',
-        isCustom: !matchesBaseline,
-        showReset: !matchesBaseline,
-      };
-    }
-    const hasExplicitValue = isMeaningfulExplicitValue(data, isJsonLike);
-    // System Sample mode: if the preset file omits a key and the UI value is still blank/unset,
-    // treat that state as Preset (the preset intentionally leaves it unset).
-    if (!hasExplicitValue) {
-      return {
-        fieldSource,
-        statusPillType: 'default-used',
-        isCustom: false,
-        showReset: false,
-      };
-    }
-    // Preset omits this key; user set an explicit value => Custom, with reset back to omitted/blank.
+    if (baseline.exists) return { fieldSource: { value: baseline.value, kind: 'assembly' }, isSamplePreset: true };
+    // The preset omits this key: blank follows it, a stated value can go back to blank.
     return {
-      fieldSource: {
-        value: undefined,
-        kind: 'assembly',
-        buttonLabel: 'Reset to default',
-        buttonTitle: 'Restore field to omitted value in selected sample preset',
-        buttonAriaLabel: 'Reset field to omitted sample preset value',
-      },
-      statusPillType: 'custom',
-      isCustom: hasExplicitValue,
-      showReset: true,
+      fieldSource: isMeaningfulExplicitValue(data, isJsonLike) ? { value: undefined, kind: 'assembly' } : fieldSource,
+      isSamplePreset: true,
     };
   }
+  return { fieldSource, isSamplePreset: false };
+}
 
-  const statusPillType = getStatusPillType(data, fieldSource.value, fieldSource.kind, isJsonLike);
-  const isCustom = shouldShowResetToSource(data, fieldSource.value, isJsonLike);
-  const showReset = shouldShowResetToSource(data, fieldSource.value, isJsonLike);
-  return { fieldSource, statusPillType, isCustom, showReset };
+/**
+ * Where an Advanced Fields value comes from, as the one source treatment (`FieldSource.tsx`):
+ * a quiet note while it follows its source, one "↺ Use …" control once it differs, and
+ * nothing for an entered value with no source to go back to. There is no "Custom" chip:
+ * entered is the normal state. A stated value equal to its default reads as the default
+ * (grey, "default"): no authored marker exists for HEM inputs, so equal means default.
+ */
+function resolveAdvancedFieldSource(args: {
+  data: unknown;
+  isJsonLike: boolean;
+  fieldSource: FieldSourceInfo;
+  isSamplePreset: boolean;
+  path: string;
+  handleChange: (path: string, value: unknown) => void;
+  fieldLabel: string;
+  unit: string | undefined;
+  isGroundUField: boolean;
+  groundUComputedWPerM2K: number | null | undefined;
+  openGroundUCalculator: (() => void) | undefined;
+}): { source: React.ReactNode; followsSource: boolean } {
+  const { data, isJsonLike, fieldSource, isSamplePreset, path, handleChange, fieldLabel, unit } = args;
+  const hasExplicit = isMeaningfulExplicitValue(data, isJsonLike);
+  const withUnit = (value: number) => `${formatSourceValue(value)}${unit ? ` ${unit}` : ''}`;
+  const sourceButton = (label: string, value: unknown, shownValue?: string, quiet?: boolean) => (
+    <ResetFieldButton
+      align="note"
+      quiet={quiet}
+      label={shownValue ? `${label}: ${shownValue}` : label}
+      title={shownValue ? `${label}: ${shownValue}` : label}
+      ariaLabel={`${fieldLabel}: ${label.toLowerCase()}${shownValue ? `, ${shownValue}` : ''}`}
+      onClick={(e) => {
+        e.preventDefault();
+        handleChange(path, value);
+      }}
+    />
+  );
+
+  if (args.isGroundUField && fieldSource.kind === 'default') {
+    const u = args.groundUComputedWPerM2K;
+    if (typeof u === 'number' && Number.isFinite(u) && u > 0) {
+      if (groundAdvancedUValueMatchesComputed(data, u)) {
+        return {
+          source: <SourceNote link="from the floor calculation" onGo={args.openGroundUCalculator} title="Open the floor calculation" />,
+          followsSource: true,
+        };
+      }
+      const uRounded = Number(u.toFixed(4));
+      return { source: sourceButton('Use calculation', uRounded, withUnit(uRounded)), followsSource: false };
+    }
+  }
+
+  const sourceValue = fieldSource.value;
+  const hasSource = isMeaningfulExplicitValue(sourceValue, isJsonLike);
+  const isAssembly = fieldSource.kind === 'assembly' && !isSamplePreset;
+  if (!hasSource) {
+    if (!hasExplicit) return { source: null, followsSource: false };
+    // Sample preset that omits the key: a stated value can go back to the preset's blank.
+    // No default at all: blank is still a choice HEM takes (not stated), so it stays reachable.
+    return isSamplePreset
+      ? { source: sourceButton('Use default', undefined), followsSource: false }
+      : { source: sourceButton('Clear', undefined, undefined, true), followsSource: false };
+  }
+  const blankFollowsSource = fieldSource.kind === 'default';
+  const matches = hasExplicit ? valuesEquivalent(data, sourceValue, isJsonLike) : blankFollowsSource;
+  if (matches) {
+    return {
+      source: isAssembly ? <SourceNote>from the assembly</SourceNote> : <DefaultNote />,
+      followsSource: hasExplicit,
+    };
+  }
+  const shown = typeof sourceValue === 'number' ? withUnit(sourceValue) : undefined;
+  return isAssembly || isSamplePreset
+    ? { source: sourceButton(isAssembly ? 'Use assembly' : 'Use default', sourceValue, shown), followsSource: false }
+    : { source: sourceButton('Use default', undefined, shown), followsSource: false };
 }
 
 /**
@@ -992,10 +982,10 @@ type AdvancedControlPreamble = {
   hasEvidence: boolean;
   defaultValue: unknown;
   fieldSource: FieldSourceInfo;
-  statusPillType: StatusPillType;
-  statusPillLabelOverride: string | undefined;
-  isCustom: boolean;
-  showReset: boolean;
+  /** The row's source note or "↺ Use …" control, for the label row. */
+  source: React.ReactNode;
+  /** A stated value equal to its source: it reads grey, like the placeholder. */
+  followsSource: boolean;
   isRuField: boolean;
   isGroundUField: boolean;
   groundUComputedWPerM2K: number | null | undefined;
@@ -1051,14 +1041,11 @@ type AdvancedControlPreamble = {
  * previously reached the context port via `ProviderFieldLabelWithTooltip`; without this
  * fallback the R4.6b-1 move would have taken that away from them.
  *
- * THREE PREVIOUSLY-DIVERGENT LINES ARE UNIFIED HERE, all verified inert by the rendered-
- * row sweep in `AdvancedFieldsEditor.directRender.test.tsx`:
- *  - `statusPillType` now always goes through the ground-U-aware `getStatusPillType`
- *    branch (Boolean/Enum used `computeFieldPresentationState`'s own result). Identical
- *    output: `isGroundUField` requires `BuildingElementGround.u_value`, a NUMBER, which
- *    only ever reaches NumberControl, so the extra argument is `undefined` for
- *    Boolean/Enum and the two expressions collapse to the same call.
- *  - `isCustom` now always subtracts `matchesGroundCalc`, for the same reason.
+ * The row's source (note or "↺ Use …") is resolved here too, once for every control, by
+ * `resolveAdvancedFieldSource`; it replaced the per-control Custom/Calculated pill and reset.
+ *
+ * UNIFIED HERE, verified inert by the rendered-row sweep in
+ * `AdvancedFieldsEditor.directRender.test.tsx`:
  *  - `isJsonLike` now always comes from `schemaIsJsonLike(s)`. Number, Boolean and Enum
  *    each hard-coded `false` into `computeFieldPresentationState` (only Text and
  *    WindowPartList computed it), which is a claim about the schema, not about the
@@ -1070,15 +1057,14 @@ type AdvancedControlPreamble = {
  *    its default by `JSON.stringify` rather than `String()`, and what makes
  *    `isMeaningfulExplicitValue` read an empty `{}`/`[]` as unset. Both questions are
  *    answered by the schema, not by which control the picker happened to choose.
- * Unifying beats a `groundAware: boolean` flag that only one caller could ever set.
  */
 function useAdvancedControlPreamble(
-  props: Pick<AdvancedControlProps, 'data' | 'path' | 'propKey' | 'label' | 'schema' | 'uischema' | 'config'>,
+  props: Pick<AdvancedControlProps, 'data' | 'handleChange' | 'path' | 'propKey' | 'label' | 'schema' | 'uischema' | 'config'>,
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
 ): AdvancedControlPreamble {
   const contextSchemaPort = useGeometrySchemaPort();
-  const { data, path, propKey, label, schema, uischema, config } = props;
+  const { data, handleChange, path, propKey, label, schema, uischema, config } = props;
   const cfg = rendererConfig(config);
   const schemaPort = cfg.schemaPort ?? contextSchemaPort;
   const s = schemaWithOverride(uischema, schema);
@@ -1107,12 +1093,20 @@ function useAdvancedControlPreamble(
     path,
   });
   const fieldSource = state.fieldSource;
-  const groundPillArg = isGroundUField ? { isGroundUField: true, groundUComputedWPerM2K } : undefined;
-  const statusPillType = cfg.systemSampleMode
-    ? state.statusPillType
-    : getStatusPillType(data, fieldSource.value, fieldSource.kind, isJsonLike, groundPillArg);
-  const matchesGroundCalc =
-    isGroundUField && groundAdvancedUValueMatchesComputed(data, groundUComputedWPerM2K);
+  const fieldUnit = fieldUnitForAdornment(fieldPresentation);
+  const { source, followsSource } = resolveAdvancedFieldSource({
+    data,
+    isJsonLike,
+    fieldSource,
+    isSamplePreset: state.isSamplePreset,
+    path,
+    handleChange,
+    fieldLabel: fieldPresentation.label ?? label,
+    unit: fieldUnit,
+    isGroundUField,
+    groundUComputedWPerM2K,
+    openGroundUCalculator: cfg.openGroundUCalculator,
+  });
 
   return {
     cfg,
@@ -1125,16 +1119,13 @@ function useAdvancedControlPreamble(
     isJsonLike,
     valueString: advancedControlValueString(data, isJsonLike),
     fieldPresentation,
-    fieldUnit: fieldUnitForAdornment(fieldPresentation),
+    fieldUnit,
     indicatorMessages: fieldIndicatorsFor(cfg, propKey),
     hasEvidence: hasEvidenceFor(cfg, propKey),
     defaultValue,
     fieldSource,
-    statusPillType,
-    statusPillLabelOverride:
-      cfg.systemSampleMode && statusPillType === 'default-used' ? 'Preset' : undefined,
-    isCustom: state.isCustom && !matchesGroundCalc,
-    showReset: state.showReset,
+    source,
+    followsSource,
     isRuField: isRuUnheatedSpaceField(propKey),
     isGroundUField,
     groundUComputedWPerM2K,
@@ -1161,67 +1152,6 @@ function safeJsonStringify(value: unknown): string {
   } catch {
     return '';
   }
-}
-
-function renderResetToSourceButton(
-  handleChange: (path: string, value: unknown) => void,
-  path: string,
-  source: {
-    value: unknown;
-    kind: 'assembly' | 'default';
-    buttonLabel?: string;
-    buttonTitle?: string;
-    buttonAriaLabel?: string;
-  },
-) {
-  return source.kind === 'assembly' ? (
-    <ResetFieldButton
-      align="inline"
-      onClick={() => handleChange(path, source.value)}
-      label={source.buttonLabel}
-      title={source.buttonTitle}
-      ariaLabel={source.buttonAriaLabel}
-    />
-  ) : (
-    <ResetFieldButton align="inline" onClick={() => handleChange(path, undefined)} />
-  );
-}
-
-function renderAdvancedFieldResetToSourceButton(
-  handleChange: (path: string, value: unknown) => void,
-  path: string,
-  fieldSource: ReturnType<typeof resolveFieldSource>,
-  opts: {
-    show: boolean;
-    isGroundUField: boolean;
-    groundUComputedWPerM2K?: number | null;
-    /** Current control value (e.g. JsonForms `data` for `u_value`). */
-    groundUControlData?: unknown;
-  },
-) {
-  if (opts.isGroundUField && fieldSource.kind === 'default') {
-    const u = opts.groundUComputedWPerM2K;
-    const canApply = typeof u === 'number' && Number.isFinite(u) && u > 0;
-    const matchesCalc = groundAdvancedUValueMatchesComputed(opts.groundUControlData, u);
-    if (!canApply || matchesCalc) return null;
-
-    const uRounded = Number(u.toFixed(4));
-
-    return (
-      <ResetFieldButton
-        align="inline"
-        onClick={(e) => {
-          e.preventDefault();
-          handleChange(path, uRounded);
-        }}
-        label="Use calculated"
-        title="Set U-value to the ISO 13370 result from current floor geometry and advanced inputs (same as calculator)"
-        ariaLabel="Use calculator result for ground U-value"
-      />
-    );
-  }
-  if (!opts.show) return null;
-  return renderResetToSourceButton(handleChange, path, fieldSource);
 }
 
 /**
@@ -1391,7 +1321,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     fieldPresentation,
     indicatorMessages,
     hasEvidence,
-  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   // Second presentation, same port — see this component's docstring.
   const midpointPresentation = resolveFieldPresentation({
     mode: cfg.useFHSSchemaForValidation ? 'fhs' : 'core',
@@ -1605,8 +1535,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       renderAdvancedFieldLabelRow(
         indicatorMessages,
         hasEvidence,
-        'default-used',
-        undefined,
+        null,
         cfg.useFHSSchemaForValidation,
         fieldPresentation,
       ),
@@ -1723,8 +1652,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
-      'default-used',
-      undefined,
+      null,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
     ),
@@ -1746,8 +1674,7 @@ const ADVANCED_CTRL_LABEL_ROW: React.CSSProperties = {
 function renderAdvancedFieldLabelRow(
   indicatorMessages: readonly string[] | undefined,
   hasEvidence: boolean | undefined,
-  statusPillType: StatusPillType,
-  statusPillLabelOverride: string | undefined,
+  source: React.ReactNode,
   useFHSSchema: boolean | undefined,
   presentation: ResolvedFieldPresentation,
 ): React.ReactNode {
@@ -1756,12 +1683,7 @@ function renderAdvancedFieldLabelRow(
       <div style={{ flex: 1, minWidth: 0 }}>
         {renderFieldLabelWithIndicator(indicatorMessages, hasEvidence, useFHSSchema, presentation)}
       </div>
-      {/* Only a value that differs from its source earns a pill; Default, Preset and Schema add nothing to read. */}
-      {(statusPillType === 'custom' || statusPillType === 'calculated') && (
-        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-          <StatusPill type={statusPillType} labelOverride={statusPillLabelOverride} />
-        </div>
-      )}
+      {source ? <div style={{ flexShrink: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', textAlign: 'right' }}>{source}</div> : null}
     </div>
   );
 }
@@ -1907,15 +1829,11 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     indicatorMessages,
     hasEvidence,
     defaultValue,
-    fieldSource,
-    statusPillType,
-    statusPillLabelOverride,
-    isCustom,
-    showReset,
+    source,
+    followsSource,
     isRuField,
     isGroundUField,
-    groundUComputedWPerM2K,
-  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   // One derivation feeding both the input placeholder and the copy button beside it.
@@ -2027,7 +1945,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
           size="md"
           helperText={undefined}
           placeholder={isBlank ? (defaultPlaceholder ?? examplePlaceholderText(examplePlaceholder)) : undefined}
-          className={isCustom ? 'custom-value' : ''}
+          className={followsSource ? 'field-value--source' : ''}
         />
         {!cfg.validateValue && localError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{localError}</div>)}
       </>,
@@ -2045,20 +1963,13 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
         isGroundUField && openGroundUCalculator ? (
           <GroundUCalculatorButton key="ground-u-calculator" onClick={openGroundUCalculator} hasValue={valueString !== ''} />
         ) : null,
-        renderAdvancedFieldResetToSourceButton(handleChange, path, fieldSource, {
-          show: showReset,
-          isGroundUField,
-          groundUComputedWPerM2K,
-          groundUControlData: data,
-        }),
       ],
     'flex-start',
     0,
     renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
-      statusPillType,
-      statusPillLabelOverride,
+      source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
     ),
@@ -2081,15 +1992,11 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     indicatorMessages,
     hasEvidence,
     defaultValue,
-    fieldSource,
-    statusPillType,
-    statusPillLabelOverride,
-    isCustom,
-    showReset: showFieldSourceReset,
+    source,
+    followsSource,
     isRuField,
     isGroundUField,
-    groundUComputedWPerM2K,
-  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+  } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const openRuCalculator = cfg.openRuCalculator;
   const openGroundUCalculator = cfg.openGroundUCalculator;
   const resyncSuspendedThermalTransmWalls = cfg.resyncSuspendedThermalTransmWalls;
@@ -2200,16 +2107,21 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
       ) : null
     ) : null;
 
-  const thermalTransmWallSyncButton =
+  // thermal_transm_walls follows the adjacent walls' area-weighted U unless stated otherwise.
+  const thermalTransmWallSource =
     showSuspendedThermalTransmSyncReset && resyncSuspendedThermalTransmWalls ? (
       <ResetFieldButton
-        align="inline"
-        title="Apply area-weighted U from the adjacent opaque walls listed below."
-        ariaLabel="Use wall value — apply area-weighted U from adjacent walls"
-        label="Use wall value"
+        align="note"
+        title="Apply the area-weighted U of the adjacent walls listed below"
+        ariaLabel={`${fieldPresentation.label ?? label}: use the walls, ${suspendedThermalTransmWallsAutoValue}`}
+        label={`Use the walls: ${suspendedThermalTransmWallsAutoValue}${fieldUnit ? ` ${fieldUnit}` : ''}`}
         onClick={() => resyncSuspendedThermalTransmWalls()}
       />
-    ) : null;
+    ) : suspendedThermalTransmWallsAutoValue != null ? (
+      <SourceNote>from the walls</SourceNote>
+    ) : (
+      source
+    );
 
   // R4.5 DELETION NOTE: NumberControl used to have its own `options.length > 0` ->
   // StandardDropdown escape hatch here (`extractOptions(s)`, deleted alongside this
@@ -2254,13 +2166,12 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
                 unit={fieldUnit}
                 helperText={undefined}
                 placeholder={defaultValue !== undefined ? String(defaultValue) : undefined}
-                className={isCustom ? 'custom-value' : ''}
+                className={followsSource ? 'field-value--source' : ''}
               />
               {!cfg.validateValue && fieldError && (
                 <div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{fieldError}</div>
               )}
             </div>
-            {thermalTransmWallSyncButton}
           </div>
           {suspendedThermalTransmSourcesInfo}
         </>
@@ -2280,7 +2191,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
             unit={fieldUnit}
             helperText={undefined}
             placeholder={defaultValue !== undefined ? String(defaultValue) : undefined}
-            className={isCustom ? 'custom-value' : ''}
+            className={followsSource ? 'field-value--source' : ''}
           />
           {!cfg.validateValue && fieldError && (<div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>{fieldError}</div>)}
           {suspendedThermalTransmSourcesInfo}
@@ -2294,20 +2205,13 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
       isGroundUField && openGroundUCalculator ? (
         <GroundUCalculatorButton key="ground-u-calculator" onClick={openGroundUCalculator} hasValue={valueString !== ''} />
       ) : null,
-      renderAdvancedFieldResetToSourceButton(handleChange, path, fieldSource, {
-        show: !cfg.tableCell && !isSuspendedGroundThermalTransmWallsFieldActive && showFieldSourceReset,
-        isGroundUField,
-        groundUComputedWPerM2K,
-        groundUControlData: data,
-      }),
     ],
     'flex-start',
     0,
     cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
-      statusPillType,
-      statusPillLabelOverride,
+      isSuspendedGroundThermalTransmWallsFieldActive ? thermalTransmWallSource : source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
     ),
@@ -2326,37 +2230,28 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     indicatorMessages,
     hasEvidence,
     defaultValue,
-    fieldSource,
-    statusPillType,
-    statusPillLabelOverride,
-    isCustom,
-    showReset,
-  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+    source,
+  } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
 
   return renderAdvancedFieldRow(
     propKey,
     isCompact,
     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      {/* Blank shows the default it takes; the label row says "default". */}
       <input
         type="checkbox"
-        checked={!!data}
+        aria-label={fieldPresentation.label ?? label}
+        checked={data === undefined || data === null || data === '' ? Boolean(defaultValue) : !!data}
         onChange={(e) => handleChange(path, e.currentTarget.checked)}
-        style={{ accentColor: isCustom ? 'var(--status-info-text)' : undefined }}
       />
-      {defaultValue !== undefined && (
-        <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 12 }}>
-          Default: {String(defaultValue)}
-        </span>
-      )}
     </label>,
-    showReset ? [renderResetToSourceButton(handleChange, path, fieldSource)] : [],
+    [],
     'center',
     0,
     renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
-      statusPillType,
-      statusPillLabelOverride,
+      source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
     ),
@@ -2412,11 +2307,9 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     hasEvidence,
     defaultValue,
     fieldSource,
-    statusPillType,
-    statusPillLabelOverride,
-    isCustom,
-    showReset,
-  } = useAdvancedControlPreamble({ data, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
+    source,
+    followsSource,
+  } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   const fromEnum = Array.isArray(s.enum) ? s.enum : null;
   const fromOneOf = schemaAlternatives(s, 'oneOf');
   const fromAnyOf = schemaAlternatives(s, 'anyOf');
@@ -2491,12 +2384,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
   options = options.filter((o, i) => options.findIndex((x) => x.label === o.label) === i || o.value === valueString);
   const selectedLabel = options.find((o) => o.value === valueString)?.label ?? valueString;
   const selectedOptionDescription = optionDescriptions.get(valueString);
-  // The value actually shown as "the default" -- prefers a resolved `fieldSource`
-  // (kind 'default', a defined/non-empty value) and otherwise falls back to the raw
-  // `defaultValue`. Factored out so the "Default: X" helper line below and the
-  // R4.3b placeholder just below it read the exact same source; this is a pure
-  // refactor of the ternary that used to be inlined into `sourceHelperText` alone --
-  // behaviourally identical for every existing case.
+  // The value shown as the default: a resolved `fieldSource` default, else the raw `defaultValue`.
   const effectiveDefaultForDisplay =
     fieldSource.kind === 'default' &&
     fieldSource.value !== undefined &&
@@ -2504,37 +2392,18 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     String(fieldSource.value) !== ''
       ? fieldSource.value
       : defaultValue;
-  const sourceHelperText =
-    effectiveDefaultForDisplay !== undefined
-      ? `${cfg.systemSampleMode ? 'Preset' : 'Default'}: ${options.find((o) => o.value === String(effectiveDefaultForDisplay))?.label ?? String(effectiveDefaultForDisplay)}`
-      : undefined;
-  // R4.3b (Baz-requested presentation amendment, post-screenshot-review): an unset
-  // enum field with a resolvable default shows that default INLINE in the closed
-  // select, label-mapped through `options` (e.g. mass_distribution_class's raw
-  // default code 'D' displays as "D: Mass equally distributed", not the bare code) --
-  // matching the look the retired TextControl-fallback dropdown had (its own
-  // `extractOptions` placeholder resolved the same way, see TextControl below). The
-  // "Default: X" helper line stays as well; showing both was already the old path's
-  // behaviour for fields that had one, and dropping either is out of scope here. Uses
-  // the SAME `effectiveDefaultForDisplay` source as the helper line above -- no
-  // second default lookup.
+  // An unset enum with a default shows that default, label-mapped, in the closed select
+  // (mass class 'D' reads "D: Mass equally distributed"); the label row says "default".
   const placeholder =
     valueString === '' && effectiveDefaultForDisplay !== undefined
       ? (options.find((o) => o.value === String(effectiveDefaultForDisplay))?.label ??
           String(effectiveDefaultForDisplay))
       : undefined;
   const shouldShowOptionDescription = propKey !== 'ecodesign_control_class';
+  // The default shows as the placeholder and the label row says "default", so no "Default: X" line.
   const helperText = propKey === 'security_risk'
     ? WINDOW_SECURITY_RISK_HELPER
-    : shouldShowOptionDescription && selectedOptionDescription && sourceHelperText
-      ? (
-          <>
-            {selectedOptionDescription}
-            <br />
-            {sourceHelperText}
-          </>
-        )
-      : (shouldShowOptionDescription ? selectedOptionDescription : undefined) ?? sourceHelperText;
+    : shouldShowOptionDescription ? selectedOptionDescription : undefined;
   const fieldUnit = coerceType === 'number' ? resolvedFieldUnit : undefined;
 
   if (isReadOnly) {
@@ -2575,8 +2444,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       cfg.tableCell ? null : renderAdvancedFieldLabelRow(
         indicatorMessages,
         hasEvidence,
-        statusPillType,
-        statusPillLabelOverride,
+        source,
         cfg.useFHSSchemaForValidation,
         fieldPresentation,
       ),
@@ -2598,16 +2466,15 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       unit={fieldUnit}
       helperText={helperText}
       placeholder={placeholder}
-      className={isCustom ? 'custom-value' : ''}
+      className={followsSource ? 'field-value--source' : ''}
     />,
-    showReset && !cfg.tableCell ? [renderResetToSourceButton(handleChange, path, fieldSource)] : [],
+    [],
     'flex-start',
     0,
     cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
       hasEvidence,
-      statusPillType,
-      statusPillLabelOverride,
+      source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
     ),

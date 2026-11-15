@@ -1,0 +1,110 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* Where a value comes from: one quiet note, one "↺ Use …" control, one read-out. */
+
+.field-source-note,
+.element-editor-note {
+  font-size: var(--font-size-xxs, 11px);
+  line-height: 1.35;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.element-editor-note {
+  padding-top: 4px;
+}
+
+.field-source-note__link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.field-source-note__link:hover,
+.field-source-note__link:focus-visible {
+  color: var(--accent-primary);
+}
+
+.field-source-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xxs, 11px);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.field-source-reset:hover,
+.field-source-reset:focus-visible {
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+/* "↺ Clear" on a stated value with no default: there on hover or keyboard focus, so an
+   imported model that states every field does not show one on every row. */
+@media (hover: hover) {
+  [data-field-key]:not(:hover):not(:focus-within) .field-source-reset--quiet {
+    opacity: 0;
+  }
+}
+
+/* Label left, source right; wraps under the label when the panel is narrow. */
+.field-label-row {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 2px;
+  min-width: 0;
+}
+
+.field-label-row > :first-child {
+  min-width: 0;
+}
+
+.field-label-row__source {
+  margin-left: auto;
+  min-width: 0;
+  text-align: right;
+}
+
+/* A value that follows its source reads like a placeholder; typed values stay white. */
+.field-value--source .standard-input,
+.field-value--source .standard-dropdown,
+.field-value--source.standard-input {
+  color: var(--text-placeholder, rgba(183, 206, 196, 0.4));
+}
+
+/* A value HEM does not let you set: text, still selectable and copyable. */
+.field-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-height: 1.5rem;
+  font-size: 13px;
+  color: var(--text-primary);
+  user-select: text;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-readout__unit {
+  color: var(--text-secondary);
+}

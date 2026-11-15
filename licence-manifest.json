@@ -2425,6 +2425,22 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/FieldSource.css",
+      "source_path": "packages/geometry-editor/src/components/FieldSource.css",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/FieldSource.tsx",
+      "source_path": "packages/geometry-editor/src/components/FieldSource.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/FilenameBar.css",
       "source_path": "packages/geometry-editor/src/components/FilenameBar.css",
       "license": "AGPL-3.0-only",
@@ -4972,6 +4988,14 @@
     {
       "path": "packages/geometry-editor/src/lib/fieldPresentation.ts",
       "source_path": "packages/geometry-editor/src/lib/fieldPresentation.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/fieldSource.ts",
+      "source_path": "packages/geometry-editor/src/lib/fieldSource.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

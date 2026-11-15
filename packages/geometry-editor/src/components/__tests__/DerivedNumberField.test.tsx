@@ -23,11 +23,12 @@ function renderField(props: Partial<React.ComponentProps<typeof DerivedNumberFie
 }
 
 describe('DerivedNumberField', () => {
-  it('shows the derived value and tags it auto', () => {
+  it('shows the derived value grey, copyable, with its source', () => {
     const { input } = renderField();
 
     expect(input.value).toBe('48.5');
-    expect(screen.getByText('(auto)')).toBeTruthy();
+    expect(input.closest('.standard-input-container')).toHaveClass('field-value--source');
+    expect(screen.getByText('from the drawing')).toBeTruthy();
     expect(screen.queryByLabelText('Reset ground floor area to derived value')).toBeNull();
   });
 
@@ -35,7 +36,8 @@ describe('DerivedNumberField', () => {
     const { onChange } = renderField({ manualValue: 60 });
 
     expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('60');
-    expect(screen.getByText('(manual override)')).toBeTruthy();
+    expect(screen.getByRole('textbox').closest('.standard-input-container')).not.toHaveClass('field-value--source');
+    expect(screen.getByRole('button', { name: 'Reset ground floor area to derived value' })).toHaveTextContent('Use the drawing: 48.5');
 
     fireEvent.click(screen.getByLabelText('Reset ground floor area to derived value'));
     expect(onChange).toHaveBeenCalledWith(undefined);
