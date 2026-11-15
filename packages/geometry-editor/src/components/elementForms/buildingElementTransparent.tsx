@@ -169,7 +169,7 @@ import {
   slopedPolygonNeedsRectangleRebuild,
 } from '../../lib/slopedElementDimensions';
 import { ParentElementDropdown } from '../ParentElementDropdown';
-import { ResetFieldButton } from '../ResetFieldButton';
+import { DerivedSource, ParentSourceNote, Readout, SourceNote, isOverridden } from '../FieldSource';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, isConservatoryGlazing, windowSections, withConservatoryGlazingOpeningType, withWindowSections } from '../../lib/hemieBundles';
@@ -180,7 +180,6 @@ import {
   decimalInputProps,
   useDecimalInput,
   formatToTwoDecimals,
-  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
@@ -206,7 +205,7 @@ import type {
   ElementFormStateCtx,
 } from './types';
 
-// INLINE_FIELD_NOTE_STYLE/formatToTwoDecimals: RESOLVED in slice-6 STAGE 6 —
+// INLINE_FIELD_NOTE_STYLE (now the field-source-note class)/formatToTwoDecimals: RESOLVED in slice-6 STAGE 6 —
 // now imported from formPrimitives.ts above instead of duplicated locally;
 // see that file's own comment.
 
@@ -648,16 +647,12 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             </button>
           </div>
         ) : null}
-        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
+        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
         <div className="element-input" ref={registerBaseFieldRef('area')}>
-          <StandardInput
-            type="text"
-            inputMode="numeric"
+          <Readout
             value={formatToTwoDecimals(selectedShape === 'polygon' ? derivedPolygonArea : liveRectArea)}
             unit={fieldUnit('area')}
-            readOnly
-            variant="ghost"
-            size="md"
+            label="Area"
           />
         </div>
         {!openingsInTable && !state.constructionBands && <>
@@ -678,60 +673,62 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value)} issue={getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value) || undefined} />
         </div>
-        {renderFieldLabel('Mid Height (m):', elementType)}
+        {renderFieldLabel(
+          'Mid Height (m):',
+          elementType,
+          undefined,
+          <DerivedSource
+            derived={state.derivedWindowMidHeight > 0 ? state.derivedWindowMidHeight : null}
+            current={state.midHeightInput.value}
+            note={<SourceNote>base + height ÷ 2</SourceNote>}
+            useLabel="Use base + height ÷ 2"
+            unit="m"
+            fieldLabel="Mid height"
+            onUse={(value) => {
+              state.midHeightInput.setValue(value);
+              state.commitOpeningField('mid_height')(value);
+            }}
+          />,
+        )}
         <div
           className="element-input"
-          style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           ref={registerBaseFieldRef('midHeight')}
         >
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', width: '100%' }}>
-            <div
-              className={
-                state.derivedWindowMidHeight > 0 &&
-                typeof state.midHeightInput.value === 'number' &&
-                Math.abs(state.midHeightInput.value - state.derivedWindowMidHeight) > 0.005
-                  ? 'custom-value'
-                  : ''
-              }
-              style={{ flex: 1 }}
-            >
-              <StandardInput
-                {...decimalInputProps(state.midHeightInput)}
-                unit={fieldUnit('mid_height')}
-                step="0.01"
-                min="0"
-                variant="ghost"
-                size="md"
-                className="flex-1"
-                placeholder={state.derivedWindowMidHeight > 0 ? String(state.derivedWindowMidHeight) : undefined}
-              />
-            </div>
-            {state.derivedWindowMidHeight > 0 &&
-            typeof state.midHeightInput.value === 'number' &&
-            Math.abs(state.midHeightInput.value - state.derivedWindowMidHeight) > 0.005 ? (
-              <ResetFieldButton
-                onClick={() => {
-                  state.midHeightInput.setValue(state.derivedWindowMidHeight);
-                  state.commitOpeningField('mid_height')(state.derivedWindowMidHeight);
-                }}
-                align="inline"
-                title={`Reset to ${state.derivedWindowMidHeight} m (base + height/2)`}
-                ariaLabel="Reset Mid Height"
-                label="Reset"
-              />
-            ) : null}
-            <FieldValidationIndicator
-              hasIssue={!!getFieldValidationIssue('midHeight', state.midHeightInput.value)}
-              issue={getFieldValidationIssue('midHeight', state.midHeightInput.value) || undefined}
-            />
-          </div>
-          {state.derivedWindowMidHeight > 0 ? (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Default: {state.derivedWindowMidHeight} m (base_height + height / 2)
-            </div>
-          ) : null}
+          <StandardInput
+            {...decimalInputProps(state.midHeightInput)}
+            unit={fieldUnit('mid_height')}
+            step="0.01"
+            min="0"
+            variant="ghost"
+            size="md"
+            className={state.derivedWindowMidHeight > 0 && !isOverridden(state.derivedWindowMidHeight, state.midHeightInput.value) ? 'flex-1 field-value--source' : 'flex-1'}
+            placeholder={state.derivedWindowMidHeight > 0 ? String(state.derivedWindowMidHeight) : undefined}
+          />
+          <FieldValidationIndicator
+            hasIssue={!!getFieldValidationIssue('midHeight', state.midHeightInput.value)}
+            issue={getFieldValidationIssue('midHeight', state.midHeightInput.value) || undefined}
+          />
         </div>
-        {renderFieldLabel('Max Window Open Area (m²):', elementType)}
+        {renderFieldLabel(
+          'Max Window Open Area (m²):',
+          elementType,
+          undefined,
+          state.freeAreaHeightInput.value !== '' ? (
+            <DerivedSource
+              derived={state.derivedWindowMaxOpenArea}
+              current={state.maxWindowOpenAreaInput.value}
+              note={<SourceNote>width × free area height</SourceNote>}
+              useLabel="Use width × free height"
+              unit="m²"
+              fieldLabel="Max window open area"
+              onUse={(value) => {
+                state.maxWindowOpenAreaInput.setValue(value);
+                state.commitOpeningField('max_window_open_area')(value);
+              }}
+            />
+          ) : undefined,
+        )}
         <div
           className="element-input"
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -744,32 +741,13 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             min="0"
             variant="ghost"
             size="md"
-            className="flex-1"
+            className={state.freeAreaHeightInput.value !== '' && !isOverridden(state.derivedWindowMaxOpenArea, state.maxWindowOpenAreaInput.value) ? 'flex-1 field-value--source' : 'flex-1'}
           />
-          {typeof state.maxWindowOpenAreaInput.value === 'number' &&
-          state.freeAreaHeightInput.value !== '' &&
-          Math.abs(state.maxWindowOpenAreaInput.value - state.derivedWindowMaxOpenArea) > 0.005 ? (
-            <button
-              type="button"
-              onClick={() => {
-                state.maxWindowOpenAreaInput.setValue(state.derivedWindowMaxOpenArea);
-                state.commitOpeningField('max_window_open_area')(state.derivedWindowMaxOpenArea);
-              }}
-              className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
-              title={`Use suggested ${state.derivedWindowMaxOpenArea} m²`}
-              aria-label="Use suggested max window open area"
-            >
-              Use Suggested
-            </button>
-          ) : null}
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('maxWindowOpenArea', state.maxWindowOpenAreaInput.value)} issue={getFieldValidationIssue('maxWindowOpenArea', state.maxWindowOpenAreaInput.value) || undefined} />
-        </div>
-        <div style={INLINE_FIELD_NOTE_STYLE}>
-          Suggested from width x free area height (capped by total window area).
         </div>
         {openingFields}
         </>}
-        {openingNote ? <div style={INLINE_FIELD_NOTE_STYLE}>{openingNote}</div> : null}
+        {openingNote ? <div className="field-source-note">{openingNote}</div> : null}
         {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
             <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type</div>
@@ -915,30 +893,38 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             </div>
           </>
         ) : null}
-        {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-        <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }} ref={registerBaseFieldRef('orientation360')}>
-          <StandardInput
-            type="text"
-            inputMode="numeric"
-            value={Number.isFinite(state.orientation360) ? state.orientation360 : state.getCurrentOrientation(currentElementForOrientationFallback() as Element)}
-            unit={fieldUnit('orientation360')}
-            onChange={(e) => state.setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
-            onBlur={(e) => {
-              const parsed = Math.round(parseFloat(e.currentTarget.value) || 0);
-              state.setOrientation360(parsed);
-              state.applyOrientationToGeometry(parsed);
-            }}
-            step="1"
-            min="0"
-            max="360"
-            readOnly={!!state.parentElement}
-            variant="ghost"
-            size="md"
-          />
-          {state.parentElement && (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Inherited from parent: {state.parentElement}
-            </div>
+        {renderFieldLabel(
+          'Orientation (degrees):',
+          elementType,
+          'orientation360',
+          state.parentElement ? <ParentSourceNote parentName={state.parentElement} ctx={ctx} /> : undefined,
+        )}
+        <div className="element-input" ref={registerBaseFieldRef('orientation360')}>
+          {state.parentElement ? (
+            // A window faces the way its wall does: HEM takes no other value.
+            <Readout
+              value={Number.isFinite(state.orientation360) ? state.orientation360 : state.getCurrentOrientation(currentElementForOrientationFallback() as Element)}
+              unit={fieldUnit('orientation360')}
+              label="Orientation"
+            />
+          ) : (
+            <StandardInput
+              type="text"
+              inputMode="numeric"
+              value={Number.isFinite(state.orientation360) ? state.orientation360 : state.getCurrentOrientation(currentElementForOrientationFallback() as Element)}
+              unit={fieldUnit('orientation360')}
+              onChange={(e) => state.setOrientation360(Math.round(parseFloat(e.target.value) || 0))}
+              onBlur={(e) => {
+                const parsed = Math.round(parseFloat(e.currentTarget.value) || 0);
+                state.setOrientation360(parsed);
+                state.applyOrientationToGeometry(parsed);
+              }}
+              step="1"
+              min="0"
+              max="360"
+              variant="ghost"
+              size="md"
+            />
           )}
         </div>
         {renderFieldLabel('Base Height (m):', elementType, 'base_height')}

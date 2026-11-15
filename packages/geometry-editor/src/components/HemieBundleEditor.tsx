@@ -26,7 +26,6 @@ import {
 } from '../lib/hemieBundles';
 import { StandardDropdown } from './StandardDropdown';
 import { StandardInput } from './StandardInput';
-import { INLINE_FIELD_NOTE_STYLE } from './elementForms/formPrimitives';
 
 type Field<P> = (
   | { key: keyof P; label: string; kind: 'number'; unit?: string; optional?: true }
@@ -144,18 +143,18 @@ export function HemieBundleEditor({ anchor }: { anchor: Element }) {
               size="md"
             />
           )}
-          {field.note ? <div style={INLINE_FIELD_NOTE_STYLE}>{field.note}</div> : null}
+          {field.note ? <div className="field-source-note">{field.note}</div> : null}
         </FieldRow>
       )])}
-      {problem ? <div style={INLINE_FIELD_NOTE_STYLE} role="alert">{problem}</div> : null}
+      {problem ? <div className="field-source-note" role="alert">{problem}</div> : null}
       {host && hostProblem ? (
         <>
-          <div style={INLINE_FIELD_NOTE_STYLE} role="alert">{hostProblem}</div>
+          <div className="field-source-note" role="alert">{hostProblem}</div>
           <button type="button" className="btn btn-nav btn-small" onClick={() => commit(draft)}>Place again</button>
         </>
       ) : null}
       {!isBay && parameters.conservatoryType !== 'non-separated' ? (
-        <div style={INLINE_FIELD_NOTE_STYLE}>
+        <div className="field-source-note">
           Not entered in the EPC: only a heated conservatory open to the dwelling is.{' '}
           {parameters.conservatoryType === 'unheated'
             ? <>&apos;{tag.host_wall}&apos; is a sheltered wall where the conservatory adjoins it.</>

@@ -73,13 +73,6 @@ import { useGeometryStore } from '../../stores/geometryStore';
 import { isExistingBuilding } from '../../lib/windowOpenings';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
 
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
-
 export interface MechanicalVentilationFormState {
   /** An existing building takes a hosted fan's height, orientation and pitch from its host element. */
   existingBuilding: boolean;
@@ -381,8 +374,8 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 size="md"
               />
               {parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
+                <div className="field-source-note">
+                  from {parentElement}
                 </div>
               )}
             </div>
@@ -406,8 +399,8 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
                 size="md"
               />
               {parentElement && (
-                <div style={INLINE_FIELD_NOTE_STYLE}>
-                  Inherited from parent: {parentElement}
+                <div className="field-source-note">
+                  from {parentElement}
                 </div>
               )}
             </div>

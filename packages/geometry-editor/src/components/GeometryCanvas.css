@@ -1871,7 +1871,6 @@
 }
 
 .element-editor-segment__label,
-.element-editor-note,
 .system-pcdb-card__helper,
 .system-pcdb-card__key {
   font-size: var(--font-size-xxs);
@@ -1910,10 +1909,6 @@
   background: var(--surface-overlay-selected);
   color: var(--text-primary);
   box-shadow: var(--shadow-subtle);
-}
-
-.element-editor-note {
-  padding-top: 4px;
 }
 
 .system-pcdb-applied-card {

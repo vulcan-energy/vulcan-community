@@ -53,7 +53,6 @@ import {
   readExtraJsonRecord,
   readFiniteNumber,
   formatToTwoDecimals,
-  INLINE_FIELD_NOTE_STYLE,
 } from './elementForms/formPrimitives';
 // PR #31's pitchDraftInput/commitTypedPitch (useNumericDraftInput) landed in
 // elementForms/wallShared.tsx instead of here — see that file's own import comment for why.
@@ -358,7 +357,7 @@ const readPositiveZoneNumber = (value: number | ''): number | null => {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 };
 
-// INLINE_FIELD_NOTE_STYLE moved to elementForms/formPrimitives.ts (slice-6
+// INLINE_FIELD_NOTE_STYLE (now the field-source-note class) moved to elementForms/formPrimitives.ts (slice-6
 // brief STAGE 6 constants dedup — imported above); see that file's comment.
 const EDITOR_FIELD_ACTION_ROW_STYLE: React.CSSProperties = {
   display: 'flex',
@@ -477,6 +476,7 @@ import { ProductSlotChips } from './ProductSlotChips';
 import { StandardCard } from './StandardCard';
 import { StandardInput } from './StandardInput';
 import { ResetFieldButton } from './ResetFieldButton';
+import { DerivedSource, FieldLabelRow, Readout, SourceNote } from './FieldSource';
 import { formatTreatedFloorAreaMismatch, getTreatedFloorAreaLabelMismatch } from '../lib/spaceLabelDerivation';
 import { analyzeZoneSpaceLabels } from '../lib/spaceLabelGeometry';
 import { StandardDropdown } from './StandardDropdown';
@@ -1132,9 +1132,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     elementType: string,
     indicatorMessages?: readonly string[],
     evidenceFieldKey?: string,
+    source?: React.ReactNode,
   ) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-      {renderFieldLabel(label, elementType, evidenceFieldKey)}
+      {renderFieldLabel(label, elementType, evidenceFieldKey, source)}
       {indicatorMessages && indicatorMessages.length > 0 && (
         <ValidationIndicator
           hasIssues
@@ -1848,7 +1849,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const fieldUnit = elementFieldPresentation.unit;
 
   // Helper function to render a field label with tooltip and optional evidence pill
-  const renderFieldLabel = (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string) => {
+  const renderFieldLabel = (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string, source?: React.ReactNode) => {
     const presentation = resolveElementFieldPresentation(
       fieldLabel,
       targetElementType,
@@ -1866,19 +1867,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       </div>
     );
 
-    if (presentation?.tooltipInfo) {
-      return (
-        <Tooltip
-          content={formatSchemaInfoForTooltip(presentation.tooltipInfo)}
-          useFHSSchema={useFHSSchema}
-          position="right"
-          maxWidth={350}
-        >
-          {labelContent}
-        </Tooltip>
-      );
-    }
-    return labelContent;
+    const label = presentation?.tooltipInfo ? (
+      <Tooltip
+        content={formatSchemaInfoForTooltip(presentation.tooltipInfo)}
+        useFHSSchema={useFHSSchema}
+        position="right"
+        maxWidth={350}
+      >
+        {labelContent}
+      </Tooltip>
+    ) : labelContent;
+    // Where the value comes from sits at the right of the label row (FieldSource.tsx).
+    return <FieldLabelRow label={label} source={source} />;
   };
 
   // Orchestrator-invoked dormer bundle machinery (slice-6 brief STAGE 5,
@@ -3778,7 +3778,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           {title}
         </summary>
         <div className="dormer-editor-section__body">
-          <div className="dormer-editor-section__description" style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="dormer-editor-section__description field-source-note">
             {description}
           </div>
           {sectionKey !== 'window' &&
@@ -4326,7 +4326,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   className="element-editor-type-picker"
                 />
                 {elementTypeExclusion ? (
-                  <div style={INLINE_FIELD_NOTE_STYLE}>{elementTypeExclusion}</div>
+                  <div className="field-source-note">{elementTypeExclusion}</div>
                 ) : null}
               </div>
               {(selection.type === 'element' || selection.type === 'global') && (
@@ -4707,11 +4707,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   })()
                 ) : (
                   <>
-                <div className="element-label">
-                  {renderFieldLabelWithComparisonIndicator('Floor Area (m²):', 'Zone', zoneComparisonFieldIndicators.floorArea, 'floorArea')}
-                </div>
-                <div className="element-input" ref={registerBaseFieldRefs(['floorArea', 'floor_area'])}>
-                  {(() => {
+                {(() => {
                     // Calculate the geometry-derived floor area for reset-to-default support
                     const allElements = Object.values(elementsById) as import('../geometry/types').Element[];
                     const derived = selection?.type === 'zone'
@@ -4719,11 +4715,42 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       : { floorArea: 0, areaSource: undefined, contributingElements: [] };
                     const derivedValue = derived.floorArea;
                     const currentValue = Number(zoneFloorArea) || 0;
-                    // Value is "custom" when the user has entered a value that differs from the derived value
-                    const isCustom = derivedValue > 0 && Math.abs(currentValue - derivedValue) > 0.005;
+                    // Yours when authored (the zone's marker), even if it equals the derived value, or when it differs.
+                    const authoredFloorArea = selection?.type === 'zone' && getZoneById(selection.id)?._floorAreaUserOverride === true;
+                    const isCustom = derivedValue > 0 && (authoredFloorArea || Math.abs(currentValue - derivedValue) > 0.005);
+                    const useDrawnFloorArea = () => {
+                      zoneFloorAreaInput.setValue(derivedValue);
+                      setZoneFieldsTouched((prev) => (
+                        prev.floorArea ? { ...prev, floorArea: false } : prev
+                      ));
+                      if (selection?.type === 'zone') {
+                        updateZone(selection.id, {
+                          floorArea: derivedValue,
+                          _floorAreaUserOverride: false,
+                        });
+                      }
+                    };
 
                     return (
                       <>
+                <div className="element-label">
+                  {renderFieldLabelWithComparisonIndicator(
+                    'Floor Area (m²):',
+                    'Zone',
+                    zoneComparisonFieldIndicators.floorArea,
+                    'floorArea',
+                    <DerivedSource
+                      derived={derivedValue > 0 ? derivedValue : null}
+                      current={currentValue}
+                      overridden={isCustom}
+                      note={<SourceNote>from the floors drawn</SourceNote>}
+                      unit="m²"
+                      fieldLabel="Floor area"
+                      onUse={useDrawnFloorArea}
+                    />,
+                  )}
+                </div>
+                <div className="element-input" ref={registerBaseFieldRefs(['floorArea', 'floor_area'])}>
                         <div
                           style={{
                             display: 'flex',
@@ -4734,7 +4761,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           }}
                         >
                           <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%', minWidth: 0 }}>
-                            <div className={isCustom ? 'custom-value' : ''} style={{ flex: 1, minWidth: 0 }}>
+                            <div className={isCustom || derivedValue <= 0 ? '' : 'field-value--source'} style={{ flex: 1, minWidth: 0 }}>
                               <StandardInput
                                 {...decimalInputProps(zoneFloorAreaInput)}
                                 unit={fieldUnit('floorArea', 'Zone')}
@@ -4770,31 +4797,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                                 placeholder={derivedValue > 0 ? String(derivedValue) : 'From geometry'}
                               />
                             </div>
-                            {isCustom ? (
-                              <ResetFieldButton
-                                onClick={() => {
-                                  zoneFloorAreaInput.setValue(derivedValue);
-                                  setZoneFieldsTouched((prev) => (
-                                    prev.floorArea ? { ...prev, floorArea: false } : prev
-                                  ));
-                                  if (selection?.type === 'zone') {
-                                    updateZone(selection.id, {
-                                      floorArea: derivedValue,
-                                      _floorAreaUserOverride: false,
-                                    });
-                                  }
-                                }}
-                                align="inline"
-                                title={`Reset to ${derivedValue} m²${derived.areaSource ? ` (${derived.areaSource})` : ''}`}
-                                ariaLabel="Reset Floor Area"
-                                label="Reset"
-                              />
-                            ) : null}
                           </div>
                         {derived.contributingElements.length > 0 ? (
                           <div
+                            className="field-source-note"
                             style={{
-                              ...INLINE_FIELD_NOTE_STYLE,
                               lineHeight: 1.45,
                               width: '100%',
                               minWidth: 0,
@@ -4805,7 +4812,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                             }}
                           >
                             <span style={{ flexShrink: 0, opacity: 0.92 }}>
-                              {isCustom ? `Default: ${derivedValue} m² from` : 'From'}
+                              From
                             </span>
                             <div
                               role="list"
@@ -4847,17 +4854,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                             </div>
                           </div>
                         ) : derivedValue <= 0 ? (
-                          <div style={{ ...INLINE_FIELD_NOTE_STYLE, width: '100%' }}>
+                          <div className="field-source-note" style={{ width: '100%' }}>
                             No floor geometry for treated floor area: add a ground floor, a horizontal element
                             with Surface set to Floor, or an internal floor on an upper storey.
                           </div>
                         ) : null}
                         </div>
                         <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('floorArea', zoneFloorArea)} issue={getFieldValidationIssue('floorArea', zoneFloorArea) || undefined} />
+                </div>
                       </>
                     );
                   })()}
-                </div>
                   </>
                 )}
                 {showFhsPrimaryZoneNote ? (
@@ -4866,7 +4873,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       FHS Area Split
                     </div>
                     <div className="element-input">
-                      <div style={INLINE_FIELD_NOTE_STYLE}>
+                      <div className="field-source-note">
                         FHS area split is edited on the first zone only. Additional zones export as
                         {' '}<strong>livingroom_area = 0</strong> and{' '}
                         <strong>restofdwelling_area = zone floor area</strong> before FHS single-zone consolidation.
@@ -4874,22 +4881,46 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     </div>
                   </>
                 ) : null}
-                <div className="element-label">
-                  {renderFieldLabel('Height (m):', 'Zone', 'height')}
-                </div>
-                <div className="element-input" ref={registerBaseFieldRefs('height')}>
-                  {(() => {
+                {(() => {
                     const allElementsH = Object.values(elementsById) as import('../geometry/types').Element[];
                     const derivedH = selection?.type === 'zone'
                       ? calculateDerivedHeight(selection.id, allElementsH, floors)
                       : 0;
                     const currentH = Number(zoneHeight) || 0;
-                    const isCustomH = derivedH > 0 && Math.abs(currentH - derivedH) > 0.005;
+                    const authoredHeight = selection?.type === 'zone' && getZoneById(selection.id)?._heightUserOverride === true;
+                    const isCustomH = derivedH > 0 && (authoredHeight || Math.abs(currentH - derivedH) > 0.005);
+                    const useStoreyHeight = () => {
+                      zoneHeightInput.setValue(derivedH);
+                      setZoneFieldsTouched((prev) => (
+                        prev.height ? { ...prev, height: false } : prev
+                      ));
+                      if (selection?.type === 'zone') {
+                        updateZone(selection.id, { height: derivedH, _heightUserOverride: false });
+                      }
+                    };
 
                     return (
                       <>
+                <div className="element-label">
+                  {renderFieldLabel(
+                    'Height (m):',
+                    'Zone',
+                    'height',
+                    <DerivedSource
+                      derived={derivedH > 0 ? derivedH : null}
+                      current={currentH}
+                      overridden={isCustomH}
+                      note={<SourceNote>from the storey heights</SourceNote>}
+                      useLabel="Use the storey heights"
+                      unit="m"
+                      fieldLabel="Height"
+                      onUse={useStoreyHeight}
+                    />,
+                  )}
+                </div>
+                <div className="element-input" ref={registerBaseFieldRefs('height')}>
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end' }}>
-                          <div className={isCustomH ? 'custom-value' : ''} style={{ flex: 1 }}>
+                          <div className={isCustomH || derivedH <= 0 ? '' : 'field-value--source'} style={{ flex: 1 }}>
                             <StandardInput
                               {...decimalInputProps(zoneHeightInput)}
                               unit={fieldUnit('height', 'Zone')}
@@ -4923,50 +4954,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                               placeholder={derivedH > 0 ? String(derivedH) : 'From walls'}
                             />
                           </div>
-                          {isCustomH ? (
-                            <ResetFieldButton
-                              onClick={() => {
-                                zoneHeightInput.setValue(derivedH);
-                                setZoneFieldsTouched((prev) => (
-                                  prev.height ? { ...prev, height: false } : prev
-                                ));
-                                if (selection?.type === 'zone') {
-                                  updateZone(selection.id, { height: derivedH, _heightUserOverride: false });
-                                }
-                              }}
-                              align="inline"
-                              title={`Reset to ${derivedH} m (from storey heights)`}
-                              ariaLabel="Reset Zone Height"
-                              label="Reset"
-                            />
-                          ) : null}
                         </div>
-                        {derivedH > 0 ? (
-                          <div style={INLINE_FIELD_NOTE_STYLE}>
-                            {isCustomH
-                              ? `Default: ${derivedH} m · from storey heights`
-                              : 'From storey heights'}
-                          </div>
-                        ) : null}
                         <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('height', zoneHeight)} issue={getFieldValidationIssue('height', zoneHeight) || undefined} />
+                </div>
                       </>
                     );
                   })()}
-                </div>
                 <div className="element-label">
-                  {renderFieldLabelWithComparisonIndicator('Volume (m³):', 'Zone', zoneComparisonFieldIndicators.volume, 'volume')}
+                  {renderFieldLabelWithComparisonIndicator('Volume (m³):', 'Zone', zoneComparisonFieldIndicators.volume, 'volume', <SourceNote>floor area × height</SourceNote>)}
                 </div>
                 <div className="element-input" ref={registerBaseFieldRef('volume')}>
-                  <StandardInput
-                    type="number"
-                    value={formatToTwoDecimals(zoneVolume)}
-                    unit={fieldUnit('volume', 'Zone')}
-                    readOnly
-                    variant="ghost"
-                    size="md"
-                    placeholder="Auto-calculated from floor area × effective height"
-                  />
-                  <div style={INLINE_FIELD_NOTE_STYLE}>Floor area × height. To reach a specific volume, change Height.</div>
+                  {/* Set by floor area and height: to reach a volume, change the height. */}
+                  <Readout value={zoneVolume && zoneVolume > 0 ? formatToTwoDecimals(zoneVolume) : ''} unit={fieldUnit('volume', 'Zone')} label="Volume" />
                 </div>
                 {!constructionBands && (targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
                 <div className="element-label">

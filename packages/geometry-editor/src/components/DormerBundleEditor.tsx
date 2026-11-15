@@ -170,13 +170,6 @@ import { StandardInput } from './StandardInput';
  * MvhrDuctTerminalManager.tsx's header for the same precedent (dozens of
  * still-inline callers elsewhere in ElementCreator.tsx keep the canonical
  * copy there). */
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
-
 export interface DormerBundleEditorApi {
   /** Bridged onto ElementFormRenderCtx.renderDormerBundleEditor; see this
    * file's header for the zero-arg seam decision. */
@@ -229,7 +222,7 @@ export function useDormerBundleEditor(args: {
   setSelection: (selection: ElementFormSelection) => void;
   elementType: ElementType;
   fieldUnit: (propertyKey: string, targetElementType?: string) => string | undefined;
-  renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string) => ReactNode;
+  renderFieldLabel: (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string, source?: ReactNode) => ReactNode;
 }): DormerBundleEditorApi {
   const {
     selection,
@@ -706,7 +699,7 @@ export function useDormerBundleEditor(args: {
           only={(parent) => parent.type === 'BuildingElementOpaque' && typeof parent.pitch === 'number' && parent.pitch > 0 && parent.pitch < 90 && (!getDormerBundleInfo(parent) || getDormerBundleInfo(parent)?.bundle_id !== (selection.type === 'element' ? getDormerBundleInfo(elementsById[selection.id])?.bundle_id : undefined))}
           selfId={selection.type === 'element' ? selection.id : undefined}
         />
-        <div style={INLINE_FIELD_NOTE_STYLE}>
+        <div className="field-source-note">
           Changes regenerate the dormer roof, cheek walls, window, and roof cutout instantly.
         </div>
       </div>

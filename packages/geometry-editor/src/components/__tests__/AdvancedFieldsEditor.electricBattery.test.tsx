@@ -203,11 +203,11 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     );
 
     // Reset/unset payload shape: with no defaults configured, any field holding a
-    // meaningful value shows a "Reset to default" button; clicking it calls
+    // meaningful value shows a quiet "Clear" control; clicking it calls
     // handleChange(path, undefined). Record what shape that leaves in extra_json --
     // the key is dropped entirely (explicit `delete`), not left present-with-`undefined`.
     const resetButton = within(fieldRow(container, 'grid_charging_possible')).getByRole('button', {
-      name: 'Reset to default',
+      name: /: (clear|use default)/i,
     });
     fireEvent.click(resetButton);
     await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(3));
@@ -276,7 +276,7 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     });
 
     const resetButton = within(fieldRow(container, 'battery_age')).getByRole('button', {
-      name: 'Reset to default',
+      name: /: (clear|use default)/i,
     });
     fireEvent.click(resetButton);
     await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(3));

@@ -16,7 +16,6 @@
 import React from 'react';
 import { validateValueAgainstPropertyNode } from '../lib/schemaCache';
 import { ResetFieldButton } from './ResetFieldButton';
-import { StatusPill } from './StatusPill';
 import { dereferenceSchemaNodeInRoot } from '../lib/subschemaCache';
 import {
   buildAddWindowOpeningPatch,
@@ -506,9 +505,8 @@ function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: 
   }
   return <GroupAccordion label={label} count={rows.length} openInitially={rows.length <= 3}>
     <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>{copy.hint}</p>
-    {config.systemSampleMode === true && changed && <div style={{ marginBottom: 8 }}>
-      <StatusPill type="custom" />
-      {Array.isArray(baseline) && <ResetFieldButton align="inline" label="Reset test data" onClick={() => applyChange(segments, structuredClone(baseline))} />}
+    {config.systemSampleMode === true && changed && Array.isArray(baseline) && <div style={{ marginBottom: 8 }}>
+      <ResetFieldButton align="note" label="Use default test data" title="Use default test data" ariaLabel={`${label}: use default test data`} onClick={() => applyChange(segments, structuredClone(baseline))} />
     </div>}
     {((!Array.isArray(value) && value != null) || rows.some((row) => !isRecord(row))) ? <p role="alert">{copy.invalid}</p> : <>
       <div style={{ overflowX: 'auto', maxWidth: '100%' }}>

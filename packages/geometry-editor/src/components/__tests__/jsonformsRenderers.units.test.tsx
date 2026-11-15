@@ -545,14 +545,12 @@ describe('TextControl placeholder wiring and blank-like sentinels (ported from t
 
       const input = screen.getByRole('textbox') as HTMLInputElement;
       expect(input.value).toBe(displayed);
-      expect(screen.queryByText('Custom')).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Reset to default' })).not.toBeInTheDocument();
-      expect(input.closest('.standard-input-container')).not.toHaveClass('custom-value');
+      expect(screen.queryByRole('button', { name: /clear/i })).not.toBeInTheDocument();
       cleanup();
     }
 
     // Contrast, so the loop above cannot pass by asserting nothing ever renders: a
-    // genuinely non-empty value on the same field DOES read as a user override.
+    // genuinely non-empty value on the same field DOES read as entered, with a way back to blank.
     renderControl(TextControl, {
       data: [{ type: 'blinds' }],
       path: 'treatment',
@@ -560,11 +558,9 @@ describe('TextControl placeholder wiring and blank-like sentinels (ported from t
       schema: treatmentSchema,
       config: { elementType: 'BuildingElementTransparent' },
     });
-    expect(screen.getByText('Custom')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Reset to default' })).toBeVisible();
-    expect(screen.getByRole('textbox').closest('.standard-input-container')).toHaveClass(
-      'custom-value',
-    );
+    expect(screen.queryByText('Custom')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Treatment: clear' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox').closest('.standard-input-container')).not.toHaveClass('field-value--source');
   });
 });
 
@@ -848,5 +844,58 @@ describe('R4.6b-2: the window-part midpoint presentation follows the same port a
     // schema access, which is why the slice's "UI delta" is invisible on today's data.
     expect(expectUnit('m')).toBeVisible();
     expect(screen.getByLabelText('Window part 1 midpoint in metres above window base')).toBeVisible();
+  });
+});
+
+describe('where a value comes from (one source treatment)', () => {
+  const sourceOf = (container: HTMLElement) => container.querySelector('.field-source-note, .field-source-reset');
+  const inputRow = () => screen.getByRole('textbox').closest('.standard-input-container');
+
+  it('an imported value that differs from its default is entered: white, one "Use default", no Custom chip', () => {
+    const handleChange = vi.fn();
+    const { container } = renderControl(NumberControl, { data: 55, path: 'temp_flow', label: 'Design flow temp', config: { derivedDefaults: { temp_flow: 45 } }, handleChange });
+    expect(screen.queryByText('Custom')).not.toBeInTheDocument();
+    expect(inputRow()).not.toHaveClass('field-value--source');
+    fireEvent.click(screen.getByRole('button', { name: 'Design flow temp: use default, 45 m' }));
+    expect(handleChange).toHaveBeenLastCalledWith('temp_flow', undefined);
+    expect(sourceOf(container)).toHaveTextContent('Use default: 45 m');
+  });
+
+  it('a stated value equal to its default reads as the default, not as entered', () => {
+    renderControl(NumberControl, { data: 45, path: 'temp_flow', config: { derivedDefaults: { temp_flow: 45 } } });
+    expect(inputRow()).toHaveClass('field-value--source');
+    expect(screen.getByRole('button', { name: 'default' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /use default/i })).not.toBeInTheDocument();
+  });
+
+  it('a blank field with a default shows the default placeholder and the "default" link', () => {
+    renderControl(NumberControl, { data: null, path: 'temp_flow', config: { derivedDefaults: { temp_flow: 45 } } });
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', '45');
+    expect(screen.getByRole('button', { name: 'default' })).toBeInTheDocument();
+  });
+
+  it('a stated value with no default keeps a quiet way back to blank', () => {
+    renderControl(NumberControl, { data: 3, path: 'flow', label: 'Min flow rate' });
+    const clear = screen.getByRole('button', { name: 'Min flow rate: clear' });
+    expect(clear).toHaveClass('field-source-reset--quiet');
+  });
+
+  it('ground U-value follows the floor calculation, or offers it back once typed over', () => {
+    const { container } = renderControl(NumberControl, {
+      data: 0.21, path: 'u_value', label: 'U-value',
+      config: { elementType: 'BuildingElementGround', groundUComputedWPerM2K: 0.21 },
+    });
+    expect(sourceOf(container)).toHaveTextContent('from the floor calculation');
+    cleanup();
+    renderControl(NumberControl, {
+      data: 0.3, path: 'u_value', label: 'U-value',
+      config: { elementType: 'BuildingElementGround', groundUComputedWPerM2K: 0.21 },
+    });
+    expect(screen.getByRole('button', { name: /^U-value: use calculation, 0.21/ })).toBeInTheDocument();
+  });
+
+  it('a value from the applied assembly says so', () => {
+    const { container } = renderControl(NumberControl, { data: 0.18, path: 'u_value', config: { assemblySourceValues: { u_value: 0.18 } } });
+    expect(sourceOf(container)).toHaveTextContent('from the assembly');
   });
 });

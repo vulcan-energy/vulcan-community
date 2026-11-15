@@ -55,13 +55,6 @@ import {
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
-
 export interface VentsFormState {
   midHeightAirFlowPathInput: ReturnType<typeof useDecimalInput>;
   areaCm2Input: ReturnType<typeof useDecimalInput>;
@@ -320,8 +313,8 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
             size="md"
           />
           {parentElement && (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Inherited from parent: {parentElement}
+            <div className="field-source-note">
+              from {parentElement}
             </div>
           )}
         </div>
@@ -361,7 +354,7 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
             />
           )}
           {selectedShape !== 'polygon' && (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
+            <div className="field-source-note">
               {pitch === 0
                 ? 'Facing up (horizontal)'
                 : pitch === 90
@@ -372,8 +365,8 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
             </div>
           )}
           {parentElement && (
-            <div style={INLINE_FIELD_NOTE_STYLE}>
-              Inherited from parent: {parentElement}
+            <div className="field-source-note">
+              from {parentElement}
             </div>
           )}
         </div>

@@ -39,6 +39,8 @@ import {
   type ServiceLineFormGroup,
 } from './serviceLine';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
+import { ResetFieldButton } from '../ResetFieldButton';
+import { SourceNote } from '../FieldSource';
 
 /** Compact ψ for button labels (e.g. 0.05, 1, −0.09). TBL-only — moved from
  * ElementCreator.tsx with its only caller below. */
@@ -245,60 +247,38 @@ export const thermalBridgeLinearFormModule: ElementFormModule<ThermalBridgeLinea
                     workspacePsi !== undefined ||
                     pApportionedPsi !== undefined) ? (
                     <>
-                      {defaultTablePsi !== undefined && currentPsiNumber !== defaultTablePsi && (
-                        <button
-                          type="button"
+                      {defaultTablePsi !== undefined && (currentPsiNumber === defaultTablePsi ? (
+                        <SourceNote>Table 3.7 default</SourceNote>
+                      ) : (
+                        <ResetFieldButton
+                          align="note"
                           onClick={() => applyPsi(defaultTablePsi)}
-                          className="btn btn-ghost"
-                          style={{
-                            padding: '0 6px',
-                            fontSize: '11px',
-                            height: '24px',
-                            minHeight: '24px',
-                            lineHeight: '1',
-                          }}
-                          title={`Default Table 3.7 value for ${junctionType}`}
-                        >
-                          Use default ({formatPsiButtonLabel(defaultTablePsi)})
-                        </button>
-                        )}
+                          title={`Table 3.7 default for ${junctionType}`}
+                          ariaLabel={`Linear thermal transmittance: use default, ${formatPsiButtonLabel(defaultTablePsi)}`}
+                          label={`Use default: ${formatPsiButtonLabel(defaultTablePsi)}`}
+                        />
+                      ))}
                       {workspacePsi !== undefined &&
                         (junctionPsiDefaultsPath || '').trim() !== '' &&
                         !junctionPsiDefaultsLoading &&
                         Math.abs(currentPsiNumber - workspacePsi) > 1e-9 && (
-                          <button
-                            type="button"
+                          <ResetFieldButton
+                            align="note"
                             onClick={() => applyPsi(workspacePsi)}
-                            className="btn btn-ghost"
-                            style={{
-                              padding: '0 6px',
-                              fontSize: '11px',
-                              height: '24px',
-                              minHeight: '24px',
-                              lineHeight: '1',
-                            }}
                             title={`Workspace table for ${junctionType}`}
-                          >
-                            Use workspace ({formatPsiButtonLabel(workspacePsi)})
-                          </button>
+                            ariaLabel={`Linear thermal transmittance: use workspace, ${formatPsiButtonLabel(workspacePsi)}`}
+                            label={`Use workspace: ${formatPsiButtonLabel(workspacePsi)}`}
+                          />
                         )}
                       {pApportionedPsi !== undefined &&
                         Math.abs(currentPsiNumber - pApportionedPsi) > 1e-9 && (
-                          <button
-                            type="button"
+                          <ResetFieldButton
+                            align="note"
                             onClick={() => applyPsi(pApportionedPsi)}
-                            className="btn btn-ghost"
-                            style={{
-                              padding: '0 6px',
-                              fontSize: '11px',
-                              height: '24px',
-                              minHeight: '24px',
-                              lineHeight: '1',
-                            }}
                             title="P1–P3: half the tabulated ψ for party wall or adjacent conditioned (party UI), using the linked line from the suggest tool"
-                          >
-                            Use P-line (½ party) ({formatPsiButtonLabel(pApportionedPsi)})
-                          </button>
+                            ariaLabel={`Linear thermal transmittance: use half the party value, ${formatPsiButtonLabel(pApportionedPsi)}`}
+                            label={`Use ½ party: ${formatPsiButtonLabel(pApportionedPsi)}`}
+                          />
                         )}
                     </>
                   ) : null;

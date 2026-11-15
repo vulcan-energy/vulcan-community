@@ -74,6 +74,7 @@
 
 import type { ReactNode } from 'react';
 import { isInternalFloorElement } from '../../lib/zoneDerivation';
+import { ParentSourceNote, Readout } from '../FieldSource';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
 import {
@@ -81,12 +82,12 @@ import {
   EXPOSED_SURFACE_PITCH_OPTIONS,
   SURFACE_PITCH_PLACEHOLDER,
   horizontalPolygonSurfaceSelectValue,
-  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import type { ElementFormRenderCtx } from './types';
 
-// INLINE_FIELD_NOTE_STYLE: RESOLVED in slice-6 STAGE 6 — now imported from
+
+// INLINE_FIELD_NOTE_STYLE (now the field-source-note class): RESOLVED in slice-6 STAGE 6 — now imported from
 // formPrimitives.ts above instead of duplicated locally; see that file's own
 // comment.
 
@@ -128,10 +129,17 @@ export function renderWallPitchField(
     elementsById,
     horizontalPolygonControlPitch,
   } = ctx;
+  // A hosted opaque element takes its host's pitch: HEM does not let it differ, so it reads as text.
+  const inherited = opts.disabledWhenParented && !!parentElement;
 
   return (
     <>
-      {renderFieldLabel(selectedShape === 'polygon' ? 'Surface:' : 'Pitch (degrees):', elementType, 'pitch')}
+      {renderFieldLabel(
+        selectedShape === 'polygon' ? 'Surface:' : 'Pitch (degrees):',
+        elementType,
+        'pitch',
+        inherited ? <ParentSourceNote parentName={parentElement} ctx={ctx} /> : undefined,
+      )}
       <div
         className="element-input"
         style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
@@ -141,7 +149,7 @@ export function renderWallPitchField(
           selectedElement,
           Object.values(elementsById).filter((element) => element.zoneId === selectedElement.zoneId),
         ) ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             Internal floor. Counts as treated floor area.
           </div>
         ) : selectedShape === 'polygon' ? (
@@ -164,6 +172,8 @@ export function renderWallPitchField(
             size="md"
             disabled={opts.disabledWhenParented ? !!parentElement : undefined}
           />
+        ) : inherited ? (
+          <Readout value={pitchDraftInput.inputValue} unit={fieldUnit('pitch')} label="Pitch" />
         ) : (
           <StandardInput
             type="text"
@@ -172,13 +182,12 @@ export function renderWallPitchField(
             unit={fieldUnit('pitch')}
             onChange={pitchDraftInput.handleInputChange}
             onBlur={pitchDraftInput.handleBlur}
-            readOnly={opts.disabledWhenParented ? !!parentElement : undefined}
             variant="ghost"
             size="md"
           />
         )}
         {selectedShape !== 'polygon' && (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             {pitch === 0
               ? 'Facing up (horizontal)'
               : pitch === 90
@@ -186,11 +195,6 @@ export function renderWallPitchField(
                 : pitch === 180
                   ? 'Facing down (horizontal)'
                   : 'Angled surface'}
-          </div>
-        )}
-        {opts.disabledWhenParented && parentElement && (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
-            Inherited from parent: {parentElement}
           </div>
         )}
       </div>

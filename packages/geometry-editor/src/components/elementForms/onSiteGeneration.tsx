@@ -37,7 +37,7 @@ import {
 } from '../../lib/pvPanelFootprint';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
-import { ResetFieldButton } from '../ResetFieldButton';
+import { DerivedSource, SourceNote } from '../FieldSource';
 import { StandardDropdown } from '../StandardDropdown';
 import { dereferenceSchemaNodeInRoot } from '../../lib/subschemaCache';
 import { readRecord } from '../../lib/jsonTypes';
@@ -49,13 +49,6 @@ import {
   useIntegerInput,
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
-
-const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
 
 function roundToInt(value: number): number {
   return Math.round(value ?? 0);
@@ -571,25 +564,21 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                 className="element-input"
                 style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
               >
-                <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-                  <div className={isDivergent ? 'custom-value' : ''} style={{ flex: 1 }}>
-                    {inputJsx}
-                  </div>
-                  {isDivergent && hasHostValue ? (
-                    <ResetFieldButton
-                      onClick={() => onReset(derivedValue as number)}
-                      align="inline"
-                      title={`Reset to ${derivedValue}${unitSuffix} (from ${hostName ?? 'host roof'})`}
-                      ariaLabel="Reset to host value"
-                      label="Reset"
-                    />
-                  ) : null}
+                <div className={hasHostValue && !isDivergent ? 'field-value--source' : ''} style={{ display: 'flex', gap: '4px', alignItems: 'center', width: '100%' }}>
+                  {inputJsx}
                 </div>
                 {hasHostValue ? (
-                  <div style={INLINE_FIELD_NOTE_STYLE}>
-                    {isDivergent
-                      ? `Default: ${derivedValue}${unitSuffix} · from ${hostName ?? 'host roof'}`
-                      : `From ${hostName ?? 'host roof'}`}
+                  <div>
+                    <DerivedSource
+                      derived={derivedValue}
+                      current={currentValue}
+                      tolerance={epsilon}
+                      note={<SourceNote>from {hostName ?? 'the roof'}</SourceNote>}
+                      useLabel={`Use ${hostName ?? 'the roof'}`}
+                      unit={unitSuffix.trim() || undefined}
+                      fieldLabel={fieldKey === 'base_height' ? 'Base height' : fieldKey === 'pitch' ? 'Pitch' : 'Orientation'}
+                      onUse={onReset}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -696,7 +685,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('width', onSiteWidthInput.value)} issue={getFieldValidationIssue('width', onSiteWidthInput.value) || undefined} />
         </div>
         {selectedPvDimensionNotes?.width ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             {selectedPvDimensionNotes.width}
           </div>
         ) : null}
@@ -715,7 +704,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('height', onSiteHeightInput.value)} issue={getFieldValidationIssue('height', onSiteHeightInput.value) || undefined} />
         </div>
         {selectedPvDimensionNotes?.height ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             {selectedPvDimensionNotes.height}
           </div>
         ) : null}

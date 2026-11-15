@@ -881,7 +881,8 @@ const describeDistribution = (distribution: PropertyDistribution | null) => {
     };
   }
 
-  const entryToString = (entry: { label: string; count: number }) => `${entry.label} (${entry.count})`;
+  // A blank value takes the default (or nothing, when HEM has none): "not stated", as in the single editor.
+  const entryToString = (entry: { label: string; count: number }) => `${entry.label === '-' ? 'not stated' : entry.label} (${entry.count})`;
   const sortedEntries = [...distribution.entries].sort((a, b) => {
     if (a.label === '-' && b.label !== '-') return 1;
     if (b.label === '-' && a.label !== '-') return -1;
@@ -897,16 +898,16 @@ const describeDistribution = (distribution: PropertyDistribution | null) => {
   if (onlyEntry) {
     return {
       kind: onlyEntry.label === '-' ? 'empty' as const : 'all' as const,
-      text: onlyEntry.label === '-' ? 'No current value' : `Current: ${entryToString(onlyEntry)}`,
+      text: onlyEntry.label === '-' ? 'Not stated' : `Current: ${entryToString(onlyEntry)}`,
       title: `Current values (${distribution.totalEligible} eligible): ${entryToString(onlyEntry)}`,
       inputValue: onlyEntry.label === '-' ? '' : onlyEntry.label,
-      placeholder: onlyEntry.label === '-' ? 'No current value' : ''
+      placeholder: onlyEntry.label === '-' ? 'Not stated' : ''
     };
   }
 
   return {
     kind: 'mixed' as const,
-    text: `Current: ${previewText}${hasMore ? ', …' : ''}`,
+    text: `Mixed: ${previewText}${hasMore ? ', …' : ''}`,
     title: `Current values (${distribution.totalEligible} eligible): ${sortedEntries.map(entryToString).join(', ')}`,
     inputValue: '',
     placeholder: `Mixed: ${previewText}${hasMore ? ', …' : ''}`
@@ -2377,7 +2378,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       summary.kind === 'mixed'
         ? summary.text
         : summary.kind === 'empty'
-          ? 'No current value'
+          ? 'Not stated'
           : summary.inputValue || 'Set value...';
 
     return (
@@ -2431,7 +2432,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       summary.kind === 'mixed'
         ? summary.text
         : summary.kind === 'empty'
-          ? 'No current value'
+          ? 'Not stated'
           : 'Set value...';
     return (
       <div className="batch-row multi-select-row">
@@ -2515,7 +2516,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       summary.kind === 'mixed'
         ? summary.text
         : summary.kind === 'empty'
-          ? 'No current value'
+          ? 'Not stated'
           : 'Set value...';
     return (
       <div className="batch-row multi-select-row">

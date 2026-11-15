@@ -69,7 +69,7 @@
 // precondition-grep result.
 //
 // readFiniteNumber, parseLiveDecimalInput, formatToTwoDecimals,
-// INLINE_FIELD_NOTE_STYLE: RESOLVED in slice-6 STAGE 6 — these tiny pure
+// INLINE_FIELD_NOTE_STYLE (now the field-source-note class): RESOLVED in slice-6 STAGE 6 — these tiny pure
 // helpers/constants used to be duplicated locally (not exported from
 // ElementCreator.tsx; importing them would have created an
 // orchestrator<->module import cycle) because they had other callers left
@@ -128,6 +128,7 @@ import {
 import { groundFloorTypeSupportsViewerElevation } from '../../lib/groundFloorSubtype';
 import type { BuildingElementGround, Element } from '../../geometry/types';
 import { ResetFieldButton } from '../ResetFieldButton';
+import { Readout, SourceNote } from '../FieldSource';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
@@ -139,7 +140,6 @@ import {
   readFiniteNumber,
   parseLiveDecimalInput,
   formatToTwoDecimals,
-  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
@@ -155,7 +155,7 @@ type GroundFloorType =
   | 'Unheated_basement';
 
 // readFiniteNumber/parseLiveDecimalInput/formatToTwoDecimals/
-// INLINE_FIELD_NOTE_STYLE: RESOLVED in slice-6 STAGE 6 — all four are now
+// INLINE_FIELD_NOTE_STYLE (now the field-source-note class): RESOLVED in slice-6 STAGE 6 — all four are now
 // imported from formPrimitives.ts (imported above) instead of duplicated
 // locally; see that file's own comment for the full writeup.
 
@@ -465,16 +465,15 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     const excluded = groundPerimeterDetails.excludedRuns
       .slice(0, 2)
       .map((run) => `${run.label}${run.reason ? ` (${run.reason})` : ''} ${formatConditionalDecimals(run.lengthM)} m`);
-    const excludedText = excluded.length > 0 ? ` Excluded: ${excluded.join(', ')}.` : '';
+    const excludedText = excluded.length > 0 ? ` Left out: ${excluded.join(', ')}.` : '';
     if (hasReliableGroundExposedPerimeter(groundPerimeterDetails)) {
-      const sourceText = exposed.length > 0 ? ` from ${exposed.join(', ')}${exposedSuffix}` : '';
-      return `${groundPerimeterManual ? 'Manual override.' : 'Auto exposed perimeter:'} ${formatConditionalDecimals(groundPerimeterDetails.valueM)} m${sourceText}.${excludedText}`;
+      return exposed.length > 0 ? `From ${exposed.join(', ')}${exposedSuffix}.${excludedText}` : excludedText.trim() || null;
     }
     if (groundPerimeterDetails.linkedLineCount > 0 && excluded.length > 0) {
       return `No external exposed wall runs on this floor outline.${excludedText}`;
     }
     return `No exposed wall runs found on this floor outline. Drawn outline is ${formatConditionalDecimals(groundPerimeterDetails.shapePerimeterM)} m.`;
-  }, [selectedGroundElement, groundPerimeterDetails, groundPerimeterManual]);
+  }, [selectedGroundElement, groundPerimeterDetails]);
 
   const resetGroundPerimeterToAuto = useCallback(() => {
     const details = groundPerimeterDetails;
@@ -697,37 +696,27 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       setSelection,
     } = ctx;
 
+    const thicknessFollowsWalls =
+      groundWallThicknessAutofill.valueM != null &&
+      liveThicknessWallsValue != null &&
+      Math.abs(liveThicknessWallsValue - groundWallThicknessAutofill.valueM) <= 1e-5;
+
     return (
       <>
-        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
+        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
         <div className="element-input" ref={registerBaseFieldRef('area')}>
-          <StandardInput
-            type="text"
-            inputMode="numeric"
-            value={formatToTwoDecimals(derivedGroundEffectiveArea)}
-            unit={fieldUnit('area')}
-            readOnly
-            variant="ghost"
-            size="md"
-          />
+          <Readout value={formatToTwoDecimals(derivedGroundEffectiveArea)} unit={fieldUnit('area')} label="Area" />
         </div>
-        {renderFieldLabel('Total Area (m²):', elementType)}
-        <div className="element-input" ref={registerBaseFieldRefs(['totalArea', 'total_area'])}>
-          <StandardInput
-            {...decimalInputProps(totalAreaInput)}
-            unit={fieldUnit('total_area')}
-            step="0.01"
-            min="0"
-            variant="ghost"
-            size="md"
-            className="flex-1"
-          />
-          {groundTotalAreaManual ? (
+        {renderFieldLabel(
+          'Total Area (m²):',
+          elementType,
+          undefined,
+          groundTotalAreaManual ? (
             <ResetFieldButton
-              align="inline"
-              title={`Use the automatically derived floor total (${formatConditionalDecimals(autoDerivedTotalArea)} m²)`}
-              ariaLabel="Use automatically derived total area"
-              label="Use auto"
+              align="note"
+              title={`Use the drawing: ${formatConditionalDecimals(autoDerivedTotalArea)} m²`}
+              ariaLabel={`Total area: use the drawing, ${formatConditionalDecimals(autoDerivedTotalArea)} m²`}
+              label={`Use the drawing: ${formatConditionalDecimals(autoDerivedTotalArea)} m²`}
               onClick={() => {
                 const current = ctx.selection?.type === 'element' ? ctx.getElementById(ctx.selection.id) : undefined;
                 if (!current || current.type !== 'BuildingElementGround') return;
@@ -737,15 +726,41 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
                 } as Partial<Element>);
               }}
             />
-          ) : null}
+          ) : autoDerivedTotalArea > 0 ? <SourceNote>from the floors drawn</SourceNote> : undefined,
+        )}
+        <div className="element-input" ref={registerBaseFieldRefs(['totalArea', 'total_area'])}>
+          <StandardInput
+            {...decimalInputProps(totalAreaInput)}
+            unit={fieldUnit('total_area')}
+            step="0.01"
+            min="0"
+            variant="ghost"
+            size="md"
+            className={groundTotalAreaManual ? 'flex-1' : 'flex-1 field-value--source'}
+          />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', totalAreaInput.value)} issue={getFieldValidationIssue('totalArea', totalAreaInput.value) || undefined} />
         </div>
-        <div style={{ color: groundTotalAreaWarning ? 'var(--text-warning)' : 'var(--text-muted)', fontSize: 12 }}>
-          {groundTotalAreaWarning
-            ? `Warning: entered total differs from the automatic floor total of ${formatConditionalDecimals(autoDerivedTotalArea)} m².`
-            : `Automatic floor total: ${formatConditionalDecimals(autoDerivedTotalArea)} m².`}
-        </div>
-        {renderFieldLabel('Perimeter (m):', elementType)}
+        {groundTotalAreaWarning ? (
+          <div className="field-source-note" style={{ color: 'var(--text-warning)' }}>
+            Differs from the {formatConditionalDecimals(autoDerivedTotalArea)} m² of floors drawn.
+          </div>
+        ) : null}
+        {renderFieldLabel(
+          'Perimeter (m):',
+          elementType,
+          undefined,
+          hasReliableGroundExposedPerimeter(groundPerimeterDetails) ? (
+            groundPerimeterManual ? (
+              <ResetFieldButton
+                align="note"
+                title={`Use the drawing: ${formatConditionalDecimals(groundPerimeterDetails?.valueM ?? 0)} m`}
+                ariaLabel={`Perimeter: use the drawing, ${formatConditionalDecimals(groundPerimeterDetails?.valueM ?? 0)} m`}
+                label={`Use the drawing: ${formatConditionalDecimals(groundPerimeterDetails?.valueM ?? 0)} m`}
+                onClick={resetGroundPerimeterToAuto}
+              />
+            ) : <SourceNote>from the exposed walls</SourceNote>
+          ) : undefined,
+        )}
         <div className="element-input" ref={registerBaseFieldRefs('perimeter')}>
           <StandardInput
             {...decimalInputProps(perimeterInput)}
@@ -754,21 +769,12 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
             min="0"
             variant="ghost"
             size="md"
-            className="flex-1"
+            className={!groundPerimeterManual && hasReliableGroundExposedPerimeter(groundPerimeterDetails) ? 'flex-1 field-value--source' : 'flex-1'}
           />
-          {groundPerimeterManual && hasReliableGroundExposedPerimeter(groundPerimeterDetails) ? (
-            <ResetFieldButton
-              align="inline"
-              title="Set perimeter to the exposed wall-linked perimeter"
-              ariaLabel="Use exposed perimeter"
-              label="Use exposed"
-              onClick={resetGroundPerimeterToAuto}
-            />
-          ) : null}
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('perimeter', derivedGroundPerimeter)} issue={getFieldValidationIssue('perimeter', derivedGroundPerimeter) || undefined} />
         </div>
         {groundPerimeterBreakdownText ? (
-          <div style={INLINE_FIELD_NOTE_STYLE}>
+          <div className="field-source-note">
             {groundPerimeterBreakdownText}
           </div>
         ) : null}
@@ -785,7 +791,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
                 size="md"
               />
             </div>
-            <div style={INLINE_FIELD_NOTE_STYLE}>
+            <div className="field-source-note">
               Ground wall area is derived as line length x height.
             </div>
           </>
@@ -827,7 +833,22 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
         </div>
           </>
         )}
-        {renderFieldLabel('Wall thickness (m):', elementType)}
+        {renderFieldLabel(
+          'Wall thickness (m):',
+          elementType,
+          undefined,
+          groundWallThicknessAutofill.valueM == null ? undefined : thicknessFollowsWalls ? (
+            <SourceNote>from the wall assemblies</SourceNote>
+          ) : (
+            <ResetFieldButton
+              align="note"
+              title={`Use the wall assemblies: ${groundWallThicknessAutofill.valueM} m`}
+              ariaLabel={`Wall thickness: use the wall assemblies, ${groundWallThicknessAutofill.valueM} m`}
+              label={`Use the wall assemblies: ${groundWallThicknessAutofill.valueM} m`}
+              onClick={resyncGroundThicknessWallsFromAssemblies}
+            />
+          ),
+        )}
         <div
           className="element-input"
           ref={registerBaseFieldRefs(['thicknessWalls', 'thickness_walls'])}
@@ -838,33 +859,15 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
             gap: 4,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', width: '100%', minWidth: 0 }}>
-            <StandardInput
-              {...decimalInputProps(thicknessWallsInput)}
-              unit={fieldUnit('thickness_walls')}
-              step="0.01"
-              min="0"
-              variant="ghost"
-              size="md"
-              className={
-                groundWallThicknessAutofill.valueM != null ||
-                groundWallThicknessAutofill.candidateCount > 0
-                  ? 'flex-1'
-                  : undefined
-              }
-            />
-            {groundWallThicknessAutofill.valueM != null &&
-            (liveThicknessWallsValue == null ||
-              Math.abs(liveThicknessWallsValue - groundWallThicknessAutofill.valueM) > 1e-5) ? (
-              <ResetFieldButton
-                align="inline"
-                title="Set thickness to the area-weighted assembly solid thickness from adjacent walls on this storey"
-                ariaLabel="Use Assembly wall thickness"
-                label="Use Assembly"
-                onClick={resyncGroundThicknessWallsFromAssemblies}
-              />
-            ) : null}
-          </div>
+          <StandardInput
+            {...decimalInputProps(thicknessWallsInput)}
+            unit={fieldUnit('thickness_walls')}
+            step="0.01"
+            min="0"
+            variant="ghost"
+            size="md"
+            className={thicknessFollowsWalls ? 'field-value--source' : undefined}
+          />
           {groundWallThicknessAutofill.sources.length > 0 ? (
               <div
                 style={{
@@ -876,7 +879,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
                   wordBreak: 'break-word',
                 }}
               >
-                From assemblies:{' '}
+                From{' '}
                 {Array.from(
                   groundWallThicknessAutofill.sources.reduce((groups, source) => {
                     const key = source.thicknessM.toFixed(2);
@@ -916,11 +919,11 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
               </div>
             ) : groundWallThicknessAutofill.candidateCount > 0 ? (
               <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.35 }}>
-                Adjacent walls found on this storey, but none have an applied wall assembly thickness.
+                No wall on this storey has an assembly with a thickness, so enter it.
               </div>
             ) : (
               <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.35 }}>
-                No adjacent wall assembly thickness available on this storey.
+                No wall on this storey has an assembly with a thickness, so enter it.
               </div>
             )}
         </div>

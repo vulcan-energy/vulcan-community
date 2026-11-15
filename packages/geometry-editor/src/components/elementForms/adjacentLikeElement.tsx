@@ -157,7 +157,6 @@ import {
   useDecimalInput,
   readFiniteNumber,
   formatToTwoDecimals,
-  INLINE_FIELD_NOTE_STYLE,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { roundToTwoDecimals } from '../../geometry/constants';
@@ -165,7 +164,7 @@ import { deriveWallProperties } from '../../stores/geometryStore';
 import { getElementGrossArea, isAdjacentLikeElement } from '../../lib/elementArea';
 import { isAdjacentConditionedInternalFloorDoubled } from '../../lib/polygonSync';
 import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS, type PartyWallFabricField } from '../../lib/assemblyMaterialFabric';
-import { ResetFieldButton } from '../ResetFieldButton';
+import { DerivedSource, Readout, SourceNote, isOverridden } from '../FieldSource';
 import { StandardDropdown } from '../StandardDropdown';
 import { StandardInput } from '../StandardInput';
 import type { Element } from '../../geometry/types';
@@ -177,7 +176,7 @@ import type {
   ElementFormStateCtx,
 } from './types';
 
-// readFiniteNumber/formatToTwoDecimals/INLINE_FIELD_NOTE_STYLE: RESOLVED in
+// readFiniteNumber/formatToTwoDecimals/INLINE_FIELD_NOTE_STYLE (now the field-source-note class): RESOLVED in
 // slice-6 STAGE 6 — now imported from formPrimitives.ts above instead of
 // duplicated locally; see that file's own comment.
 
@@ -439,43 +438,44 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
             includeWallShape: true,
           })
         )}
-        {renderFieldLabel('Base Height:', elementType, '_base_height')}
+        {renderFieldLabel(
+          'Base Height:',
+          elementType,
+          '_base_height',
+          <DerivedSource
+            derived={derivedBaseHeight > 0 ? derivedBaseHeight : null}
+            current={state.adjacentViewerBaseHeightInput.value}
+            tolerance={0.01}
+            note={<SourceNote>from the floors below</SourceNote>}
+            useLabel="Use the floors below"
+            unit="m"
+            fieldLabel="Base height"
+            onUse={(value) => {
+              state.adjacentViewerBaseHeightInput.setValue(value);
+              commitExistingElementDraft({
+                _base_height: value,
+                base_height: undefined,
+              } as Partial<Element>);
+            }}
+          />,
+        )}
         <div
           className="element-input"
           style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
           ref={registerBaseFieldRefs('_base_height')}
         >
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', width: '100%' }}>
-            <StandardInput
-              {...decimalInputProps(state.adjacentViewerBaseHeightInput)}
-              unit={fieldUnit('_base_height')}
-              step="0.01"
-              min="0"
-              variant="ghost"
-              size="md"
-              className="flex-1"
-              placeholder={derivedBaseHeight > 0 ? String(derivedBaseHeight) : undefined}
-            />
-            {derivedBaseHeight > 0 &&
-              typeof state.adjacentViewerBaseHeightInput.value === 'number' &&
-              Math.abs(state.adjacentViewerBaseHeightInput.value - derivedBaseHeight) > 0.01 && (
-                <ResetFieldButton
-                  onClick={() => {
-                    state.adjacentViewerBaseHeightInput.setValue(derivedBaseHeight);
-                    commitExistingElementDraft({
-                      _base_height: derivedBaseHeight,
-                      base_height: undefined,
-                    } as Partial<Element>);
-                  }}
-                  align="inline"
-                  title="Use cumulative slab height for this storey (default 3D placement)"
-                  ariaLabel="Reset base height to slab"
-                  label="Reset"
-                />
-              )}
-          </div>
-          <div style={INLINE_FIELD_NOTE_STYLE}>
-            Optional. Absolute metres above ground for the 3D view only
+          <StandardInput
+            {...decimalInputProps(state.adjacentViewerBaseHeightInput)}
+            unit={fieldUnit('_base_height')}
+            step="0.01"
+            min="0"
+            variant="ghost"
+            size="md"
+            className={derivedBaseHeight > 0 && !isOverridden(derivedBaseHeight, state.adjacentViewerBaseHeightInput.value, 0.01) ? 'flex-1 field-value--source' : 'flex-1'}
+            placeholder={derivedBaseHeight > 0 ? String(derivedBaseHeight) : undefined}
+          />
+          <div className="field-source-note">
+            Used for the 3D view only
           </div>
         </div>
         {(() => {
@@ -502,24 +502,16 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
             !isVulcanUiPartyFloorElement(selectedElement);
           return (
             <>
-              {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area')}
+              {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
               <div
                 className="element-input"
                 style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
                 ref={registerBaseFieldRef('area')}
               >
-                <StandardInput
-                  type="text"
-                  inputMode="numeric"
-                  value={formatToTwoDecimals(shownArea)}
-                  unit={fieldUnit('area')}
-                  readOnly
-                  variant="ghost"
-                  size="md"
-                />
+                <Readout value={formatToTwoDecimals(shownArea)} unit={fieldUnit('area')} label="Area" />
                 {showInternalSurfaceDoubling && (
-                  <div style={INLINE_FIELD_NOTE_STYLE}>
-                    Doubled to account for both sides of the internal element
+                  <div className="field-source-note">
+                    Doubled: both sides of the internal element
                   </div>
                 )}
               </div>

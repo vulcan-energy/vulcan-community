@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { StandardInput } from './StandardInput';
-import { ResetFieldButton } from './ResetFieldButton';
+import { DerivedSource, SourceNote } from './FieldSource';
 import { parseDimensionOverride } from '../lib/globalSettingsValidation';
 
 export type DerivedNumberFieldProps = {
@@ -28,16 +28,22 @@ export type DerivedNumberFieldProps = {
   unit?: string;
   /** Below this difference an entered value counts as "same as derived" and clears the override. */
   matchTolerance?: number;
+  /** @deprecated No auto tag any more: the source note replaced it. Accepted so callers compile. */
   autoTagMarginLeft?: number;
+  /** Note while the value follows its source. Default "from the drawing". */
+  sourceNote?: React.ReactNode;
+  /** Reset wording once overridden, before the value. Default "Use the drawing". */
+  useLabel?: string;
 };
 
 /**
  * A compliance number that is normally derived from the geometry but can be overridden.
  *
  * Ground floor area and building length/width each hand-rolled this: the same value fallback,
- * the same "typing the derived value returns the field to auto" rule, the same
- * `(manual override)` / `(auto)` tag, and the same conditional reset button. Roughly 60 lines
- * apiece, free to drift on any one of those rules.
+ * the same "typing the derived value returns the field to auto" rule, and the same conditional
+ * reset. It follows the one source treatment (`FieldSource.tsx`): while the value follows the
+ * drawing it reads grey with "from the drawing"; once overridden it is white with
+ * "↺ Use the drawing: X".
  *
  * Parsing is delegated to `parseDimensionOverride`, so the policy that anything non-finite or
  * negative returns the field to auto - rather than being clamped or stored as 0 - stays in one
@@ -59,12 +65,12 @@ export function DerivedNumberField({
   placeholderWhenUnavailable = '',
   helperTextWhenDerived,
   helperTextWhenUnavailable,
-  resetTitle,
   resetAriaLabel,
   step = '0.01',
   unit,
   matchTolerance = 1e-4,
-  autoTagMarginLeft,
+  sourceNote,
+  useLabel = 'Use the drawing',
   'aria-describedby': ariaDescribedBy,
 }: DerivedNumberFieldProps) {
   const hasDerived = derivedValue > 0;
@@ -86,50 +92,41 @@ export function DerivedNumberField({
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--spacing-xs)' }}>
-      <StandardInput
-        type="number"
-        aria-describedby={ariaDescribedBy}
-        label={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            {label}
-            {hasDerived && (
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 400,
-                  ...(autoTagMarginLeft === undefined ? {} : { marginLeft: autoTagMarginLeft }),
-                  color: isManual ? 'var(--text-warning)' : 'var(--text-muted)',
-                }}
-              >
-                {isManual ? '(manual override)' : '(auto)'}
-              </span>
-            )}
-            {labelAccessory}
-          </div>
-        }
-        value={isManual ? String(manualValue) : hasDerived ? String(derivedValue) : ''}
-        unit={unit}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder={hasDerived ? String(derivedValue) : placeholderWhenUnavailable}
-        min="0"
-        step={step}
-        variant="ghost"
-        size="md"
-        helperText={hasDerived ? helperTextWhenDerived : helperTextWhenUnavailable}
-      />
-      {isManual && hasDerived && (
-        <ResetFieldButton
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onChange(undefined);
-          }}
-          title={resetTitle}
-          ariaLabel={resetAriaLabel}
-          align="input-row"
-        />
-      )}
-    </div>
+    <StandardInput
+      type="number"
+      aria-describedby={ariaDescribedBy}
+      label={
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          {label}
+          {labelAccessory}
+        </div>
+      }
+      source={
+        hasDerived ? (
+          <DerivedSource
+            derived={derivedValue}
+            current={isManual ? manualValue : undefined}
+            overridden={isManual}
+            tolerance={matchTolerance}
+            note={sourceNote ?? <SourceNote>from the drawing</SourceNote>}
+            useLabel={useLabel}
+            unit={unit}
+            fieldLabel={typeof label === 'string' ? label : undefined}
+            ariaLabel={resetAriaLabel}
+            onUse={() => onChange(undefined)}
+          />
+        ) : null
+      }
+      value={isManual ? String(manualValue) : hasDerived ? String(derivedValue) : ''}
+      unit={unit}
+      onChange={(e) => handleChange(e.target.value)}
+      placeholder={hasDerived ? String(derivedValue) : placeholderWhenUnavailable}
+      min="0"
+      step={step}
+      variant="ghost"
+      size="md"
+      className={!isManual && hasDerived ? 'field-value--source' : ''}
+      helperText={hasDerived ? helperTextWhenDerived : helperTextWhenUnavailable}
+    />
   );
 }

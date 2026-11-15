@@ -1596,7 +1596,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
 
     const resetButton = within(fieldRow(container, 'solar_absorption_coeff')).getByRole('button', {
-      name: 'Reset to default',
+      name: /: (clear|use default)/i,
     });
     fireEvent.click(resetButton);
     await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -1828,7 +1828,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     );
 
     const resetButton = within(fieldRow(container, 'design_outdoor_air_flow_rate')).getByRole('button', {
-      name: 'Reset to default',
+      name: /: (clear|use default)/i,
     });
     fireEvent.click(resetButton);
     await waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -2987,7 +2987,7 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
     // here is unchanged by that fix. It now runs as the THIRD consecutive interaction,
     // against the twice-rewritten array rather than the fixture (hence `'Beta 2'`).
     const resetButton = within(fieldRowByLabel(container, 'value', 'Item 0')).getByRole('button', {
-      name: 'Reset to default',
+      name: /: (clear|use default)/i,
     });
     fireEvent.click(resetButton);
     const lastCall = onDataChange.mock.calls[onDataChange.mock.calls.length - 1][0] as {
@@ -3060,7 +3060,7 @@ describe('DirectSpecFields (R4.5): interprets web\'s explicit uischema-spec tree
       ['0', '1', '2'].map((key) => (within(fieldRow(container, key)).getByRole('textbox') as HTMLInputElement).value),
     ).toEqual(['10', '20', '30']);
 
-    fireEvent.click(within(fieldRow(container, '0')).getByRole('button', { name: 'Reset to default' }));
+    fireEvent.click(within(fieldRow(container, '0')).getByRole('button', { name: /: (clear|use default)/i }));
 
     const next = onDataChange.mock.calls[onDataChange.mock.calls.length - 1][0] as {
       sec: { list: unknown };

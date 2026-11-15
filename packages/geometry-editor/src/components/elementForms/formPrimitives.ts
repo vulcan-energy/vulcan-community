@@ -7,7 +7,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
-import type { CSSProperties } from 'react';
 import { useNumericDraftInput } from '../numericDraftInput';
 
 // Custom hook for decimal input handling with proper typing support.
@@ -221,16 +220,4 @@ export const formatToTwoDecimals = (value: number | string | undefined): string 
   return Number.isFinite(num) ? num.toFixed(2) : '0.00';
 };
 
-/** Shared style for the small secondary-text note rendered under a field.
- * Was duplicated in ElementCreator.tsx, buildingElementGround.tsx,
- * adjacentLikeElement.tsx, buildingElementOpaque.tsx,
- * buildingElementTransparent.tsx, and wallPitchField.tsx (also, outside the
- * wall family and out of this stage's scope, in mechanicalVentilation.tsx,
- * onSiteGeneration.tsx, and vents.tsx — left as-is; centralizing those isn't
- * a wall-family concern). */
-export const INLINE_FIELD_NOTE_STYLE: CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-secondary)',
-  lineHeight: 1.35,
-  minWidth: 0,
-};
+// The small note under a field is the `field-source-note` class (FieldSource.css).
