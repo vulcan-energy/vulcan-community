@@ -159,7 +159,9 @@ export interface IoSlice {
   /**
    * Internal (Undo/Redo): make `csvContent` the document without resetting history,
    * the saved baseline or the viewport; surviving element and zone ids, the selection and the
-   * shared-model identity (`modelId`, `modelVersion`) stay.
+   * shared-model identity (`modelId`, `modelVersion`) stay. It runs as a document load and adds no
+   * undo step: a caller outside undo/redo seeds history or follows with a user write, or a later
+   * system write folds into the step before the replace.
    */
   replaceDocumentFromCsv: (
     csvContent: string,

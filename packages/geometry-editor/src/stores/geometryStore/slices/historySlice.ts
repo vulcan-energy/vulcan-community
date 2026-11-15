@@ -75,7 +75,10 @@ export interface HistorySlice {
    * schedules for later are not covered.
    */
   writeAs: <T>(intent: WriteIntent, write: () => T) => T;
-  /** The intent of the write in progress: `user` outside `writeAs` and document loads. */
+  /**
+   * The intent of the write in progress: `user` outside `writeAs` and document loads. A `preset`
+   * write is the user's gesture and reports `user`.
+   */
   writeIntent: () => WriteIntent;
   /**
    * Runs a document load or replace (open, undo, redo, a shared-model update) as a `derived`
