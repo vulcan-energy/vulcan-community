@@ -33,7 +33,8 @@ export function collectHeatSourceWetNameLabelsFromProject(elementsById: Record<s
     for (const key of Object.keys(hsw as Record<string, unknown>)) {
       if (!key || out[key]) continue;
       const elementName = typeof el.name === 'string' ? el.name.trim() : '';
-      out[key] = elementName && elementName !== key ? `${elementName} (${key})` : key;
+      // The element's name is the one the user gave; the key inside it is internal.
+      out[key] = elementName || key;
     }
   }
   return out;

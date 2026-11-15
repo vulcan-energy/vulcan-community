@@ -162,6 +162,7 @@ function contentHashDefaultsShortHash(path: string): string | undefined {
 }
 
 /** An EPC defaults file as words: "input/defaults/defaults_template_epc.json" -> "Defaults template EPC". */
+const EPC_FILE_PATTERN = /epc/i;
 function epcDefaultsFileLabel(path: string): string {
   const words = (path.split('/').pop() ?? path).replace(/\.json$/, '').replace(/_/g, ' ').replace(/\bepc\b/gi, 'EPC');
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -982,7 +983,7 @@ export function GlobalSettingsModal({
     // An EPC model lists only EPC defaults: the file in use, shared-model copies and EPC templates.
     let filtered = availableDefaults.filter((path) =>
       `${path} ${defaultsFileLabel(path)}`.toLowerCase().includes(query)
-      && (!epcTarget || path === effective || !!contentHashDefaultsShortHash(path) || /epc/i.test(path))
+      && (!epcTarget || path === effective || !!contentHashDefaultsShortHash(path) || EPC_FILE_PATTERN.test(path))
     );
     if (
       effective &&

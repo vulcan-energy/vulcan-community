@@ -29,6 +29,7 @@ import {
   type WindowOpeningRow,
   type WindowOpeningSource,
 } from '../lib/windowOpenings';
+import { useTargetRules } from '../hooks/useTargetRules';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { Element } from '../geometry/types';
 import { resolveSchemaPointer } from '../lib/schemaRefResolver';
@@ -538,6 +539,8 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
     state.selection?.type === 'element' ? state.getElementById(state.selection.id) : undefined
   ));
   const updateElement = useGeometryStore((state) => state.updateElement);
+  // On a target with construction bands the window form puts this button beside the glazing sections.
+  const { constructionBands } = useTargetRules();
   const element = selected?.type === 'BuildingElementTransparent' ? selected : undefined;
   const source: WindowOpeningSource = element
     ? element as unknown as WindowOpeningSource
@@ -582,7 +585,7 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
     : null;
   return <div style={{ fontSize: 12 }}>
     {status && <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>{args.label}: {status}</p>}
-    {element && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add openable part</button>}
+    {element && !constructionBands && <button type="button" className="btn btn-nav btn-small" onClick={() => commit(buildAddWindowOpeningPatch(source))}>Add openable part</button>}
   </div>;
 }
 
@@ -853,6 +856,8 @@ function renderControlForProperty(args: {
   }
 }
 
+const NO_ENGINE_FIELDS: ReadonlySet<string> = new Set();
+
 export function DirectAdvancedFields({
   schema,
   data,
@@ -961,29 +966,37 @@ export function DirectAdvancedFields({
     }
   }
 
+  const engineKeys = (config as { collapsedEngineFields?: ReadonlySet<string> }).collapsedEngineFields ?? NO_ENGINE_FIELDS;
+  const engineEntries = flatEntries.filter(({ key }) => engineKeys.has(key));
+  const renderFlatEntry = ({ key, resolved }: { key: string; resolved: Record<string, unknown> }) =>
+    renderControlForProperty({
+      // R4.3b: flat mode's segments are always a single-element array.
+      segments: [key],
+      resolved,
+      value: data[key],
+      label: labelForProperty(key, resolved, elementType),
+      scope: `#/properties/${key}`,
+      schema,
+      config,
+      elementType,
+      required: requiredList.includes(key),
+      replicateRequiredError: false,
+      applyChange,
+    });
+
   return (
     <div data-testid="direct-advanced-fields">
       {layout
         ? renderLayoutNode(layout, 'root')
-        : flatEntries.map(({ key, resolved }) =>
-            renderControlForProperty({
-              // R4.3b: flat mode's segments are always a single-element array — this
-              // is what keeps the whole component dot-safe uniformly across both
-              // modes, even though a flat-schema property key is never a raw user
-              // name in practice.
-              segments: [key],
-              resolved,
-              value: data[key],
-              label: labelForProperty(key, resolved, elementType),
-              scope: `#/properties/${key}`,
-              schema,
-              config,
-              elementType,
-              required: requiredList.includes(key),
-              replicateRequiredError: false,
-              applyChange,
-            }),
+        : <>
+          {flatEntries.map((entry) => (engineKeys.has(entry.key) ? null : renderFlatEntry(entry)))}
+          {engineEntries.length > 0 && (
+            // Open while the user has stated one of these; otherwise the DESNZ-defined values stay out of the way.
+            <GroupAccordion label="Advanced" openInitially={engineEntries.some(({ key }) => data[key] !== undefined && data[key] !== null && data[key] !== '')}>
+              {engineEntries.map(renderFlatEntry)}
+            </GroupAccordion>
           )}
+        </>}
     </div>
   );
 }

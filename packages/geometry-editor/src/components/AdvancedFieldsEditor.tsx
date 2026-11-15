@@ -121,6 +121,7 @@ const EXTRA_JSON_UI_KEY_SET = new Set<string>(EXTRA_JSON_UI_KEYS);
 
 const EMPTY_ADVANCED_FIELDS: Record<string, unknown> = Object.freeze({});
 const MVHR_FIXED_ENERGY_SUPPLY = 'mains elec' as const;
+const COLLAPSED_ENGINE_FIELDS: ReadonlySet<string> = new Set(['areal_heat_capacity', 'mass_distribution_class', 'solar_absorption_coeff']);
 const PARTY_WALL_HALF_CONSTRUCTION_NOTE =
   'Enter dwelling-side half-construction values: U from the half build-up, half areal heat capacity, and the matching mass class. If using construction R, enter half R. Set cavity treatment separately.';
 const INTERNAL_HALF_CONSTRUCTION_NOTE =
@@ -515,6 +516,8 @@ export function applyEcodesignControlClassEnum(
           const childRecord = child as Record<string, unknown>;
           const childWithoutEnum = { ...childRecord };
           delete childWithoutEnum.enum;
+          // EPC states the class as a nullable reference: the nullable wrapper would hide the worded options.
+          delete childWithoutEnum.anyOf;
           nextProperties[key] = {
             ...childWithoutEnum,
             type: 'integer',
@@ -1140,35 +1143,22 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const selectedExternalDetailKey =
     constructionDetails?.selectedCandidateKey(advancedFieldsData) ?? '';
 
-  // MVHR on HEM keeps its fixed supply. With one electricity supply in the model (EPC), an electric-only
-  // system, fan or PV array without a supply takes it.
-  const suppliedExtraJson = useMemo(() => {
-    const record = advancedFieldsRecord as Record<string, unknown>;
-    const only = electricSupplyNames.length === 1 ? electricSupplyNames[0] : undefined;
-    const fill = (node: unknown): unknown => {
-      if (Array.isArray(node)) return node.map(fill);
-      if (!node || typeof node !== 'object') return node;
-      const entry = node as Record<string, unknown>;
-      const out: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(entry)) out[key] = fill(value);
-      if (ELECTRIC_ONLY_TYPES.has(String(entry.type)) && entry.EnergySupply === undefined) out.EnergySupply = only;
-      return out;
-    };
-    if (shouldRenderMechanicalVentilationFixedEnergySupply) {
-      return record.EnergySupply === MVHR_FIXED_ENERGY_SUPPLY ? null : { ...record, EnergySupply: MVHR_FIXED_ENERGY_SUPPLY };
-    }
-    if (!only || !hemDatabaseProducts) return null;
-    if (elementType === 'MechanicalVentilation' || elementType === 'OnSiteGeneration') {
-      return record.EnergySupply === undefined ? { ...record, EnergySupply: only } : null;
-    }
-    if (elementType !== 'System') return null;
-    const filled = fill(record) as Record<string, unknown>;
-    return JSON.stringify(filled) === JSON.stringify(record) ? null : filled;
-  }, [advancedFieldsRecord, electricSupplyNames, shouldRenderMechanicalVentilationFixedEnergySupply, hemDatabaseProducts, elementType]);
   useEffect(() => {
-    if (!suppliedExtraJson) return;
-    onChange({ ...currentData, extra_json: suppliedExtraJson });
-  }, [suppliedExtraJson, currentData, onChange]);
+    if (!shouldRenderMechanicalVentilationFixedEnergySupply) return;
+    if ((advancedFieldsRecord as Record<string, unknown>).EnergySupply === MVHR_FIXED_ENERGY_SUPPLY) return;
+    onChange({
+      ...currentData,
+      extra_json: {
+        ...(advancedFieldsRecord as Record<string, unknown>),
+        EnergySupply: MVHR_FIXED_ENERGY_SUPPLY,
+      },
+    });
+  }, [
+    advancedFieldsRecord,
+    currentData,
+    onChange,
+    shouldRenderMechanicalVentilationFixedEnergySupply,
+  ]);
 
   const projectHeatSourceWetNames = useMemo(
     () => collectHeatSourceWetNamesFromProject(elementsById),
@@ -1872,10 +1862,11 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
 
   // A system whose product is chosen by default shows that product as the Product Id placeholder.
   const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
+  const selectedName = useGeometryStore((state) => (state.selection?.type === 'element' ? state.elementsById[state.selection.id]?.name : undefined));
   const defaultProductField = useMemo(() => {
-    const own = (productSlots ?? []).filter((slot) => slot.row === (currentData as { name?: string } | undefined)?.name);
+    const own = (productSlots ?? []).filter((slot) => slot.row === selectedName);
     return own.length === 1 && own[0].source === 'default' && own[0].product_id != null ? { product_id: own[0].label ?? own[0].product_id } : {};
-  }, [productSlots, currentData]);
+  }, [productSlots, selectedName]);
 
   const advancedFieldsConfig = useMemo<Record<string, unknown>>(
     () =>
@@ -1923,6 +1914,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         $defs: subschema?.$defs || getActiveRootSchema()?.$defs,
         systemSampleMode: systemSampleBaselineAvailable,
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
+        // An existing building takes these from the DESNZ-defined construction tables: keep them out of the way.
+        collapsedEngineFields: existingBuilding && hemDatabaseProducts && elementType !== 'System' ? COLLAPSED_ENGINE_FIELDS : undefined,
         derivedDefaults: elementType === 'System' ? { ...systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding), ...defaultProductField } : undefined,
       }),
     [
@@ -1951,6 +1944,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       systemSampleBaselineExtraJson,
       systemDefaults,
       defaultProductField,
+      hemDatabaseProducts,
       advancedFieldsData,
       existingBuilding,
       getActiveRootSchema,

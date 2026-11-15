@@ -966,7 +966,7 @@ function sweepRenderedRows(): {
  */
 const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/BuildingElementOpaque [every subtype]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0 | - | - | tip',
@@ -979,7 +979,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'window_part_list | Window Part List | other:DIV | - | - | - | no-tip',
   ],
   'core/BuildingElementGround [- Exposed_floor Heated_basement ceiling door fancoil floor radiator roof ufh wall]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
@@ -987,7 +987,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementGround [Slab_no_edge_insulation]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
@@ -995,14 +995,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/BuildingElementGround [Slab_edge_insulation]': [
     'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | - | - | - | tip',
   ],
   'core/BuildingElementGround [Suspended_floor]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
@@ -1014,7 +1014,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'shield_fact_location | Shield Fact Location | select | - | - | - | tip',
   ],
   'core/BuildingElementGround [Unheated_basement]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0 | - | - | tip',
@@ -1025,20 +1025,20 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementAdjacentConditionedSpace [every subtype]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0 | - | - | tip',
     'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementPartyWall [every subtype]': [
-    'areal_heat_capacity | Areal Heat Capacity | textbox | 0 | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'core/MechanicalVentilationDuctwork [every subtype]': [
@@ -1056,7 +1056,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
     'internal_diameter_mm | Internal Diameter | textbox | 0 | - | - | tip',
     'pipe_contents | Pipe Contents | select | - | - | - | tip',
-    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
+    'surface_reflectivity | Reflective pipe surface | checkbox | - | - | - | tip',
   ],
   'core/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
     'c | c | textbox | 0 | - | - | tip',
@@ -1223,7 +1223,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'colour | Colour | select | - | - | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementTransparent [every subtype]': [
@@ -1237,7 +1237,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Slab_edge_insulation]': [
@@ -1245,14 +1245,14 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Suspended_floor]': [
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'height_upper_surface | Height Upper Surface | textbox | 0 | 100 | - | tip',
     'thermal_transm_walls | Thermal Transm Walls | textbox | 0 | 100 | - | tip',
@@ -1264,7 +1264,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | - | - | - | tip',
   ],
@@ -1272,7 +1272,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Psi Wall Floor Junc | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Thermal Resistance Floor Construction | textbox | 0.000001 | 50 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resist_walls_base | Thermal Resist Walls Base | textbox | - | - | - | tip',
     'thermal_transm_envi_base | Thermal Transm Envi Base | textbox | - | - | - | tip',
@@ -1282,18 +1282,18 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'fhs/BuildingElementAdjacentConditionedSpace [every subtype]': [
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementAdjacentUnconditionedSpace_Simple [every subtype]': [
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resistance_unconditioned_space | Thermal Resistance Unconditioned Space | textbox | 0 | 3 | - | tip',
   ],
   'fhs/BuildingElementPartyWall [every subtype]': [
-    'areal_heat_capacity | Areal Heat Capacity | select | - | - | - | tip',
+    'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/MechanicalVentilationDuctwork [every subtype]': [
@@ -1309,7 +1309,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'external_diameter_mm | External Diameter | textbox | 5 | 50 | - | tip',
     'insulation_thermal_conductivity | Insulation Thermal Conductivity | textbox | 0 | - | - | tip',
     'insulation_thickness_mm | Insulation Thickness | textbox | 0 | - | - | tip',
-    'surface_reflectivity | Surface Reflectivity | checkbox | - | - | - | tip',
+    'surface_reflectivity | Reflective pipe surface | checkbox | - | - | - | tip',
     'pipe_contents | Pipe Contents | select | - | - | - | tip',
   ],
   'fhs/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
@@ -1523,7 +1523,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         onChange,
       },
       [
-        row('areal_heat_capacity', 'Areal Heat Capacity', TEXT('0', '0')),
+        row('areal_heat_capacity', 'Heat capacity per area', TEXT('0', '0')),
         row('mass_distribution_class', 'Mass distribution', SELECT),
         // R4.6a CHARACTERIZATION CHANGE (both rows): was TEXT(null) -- a bare
         // TextControl with no numeric attributes at all. Core declares both of these
@@ -1616,7 +1616,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('thermal_resistance_construction', 'Construction thermal resistance', TEXT('0.01')),
         row('u_value', 'U-Value', TEXT('0.01')),
         row('colour', 'Colour', SELECT),
-        row('areal_heat_capacity', 'Areal Heat Capacity', SELECT),
+        row('areal_heat_capacity', 'Heat capacity per area', SELECT),
         row('mass_distribution_class', 'Mass distribution', SELECT),
       ],
     );

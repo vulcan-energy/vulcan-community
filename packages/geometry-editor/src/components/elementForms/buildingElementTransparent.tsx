@@ -191,6 +191,7 @@ import { isExistingBuilding } from '../../lib/windowOpenings';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import {
+  buildAddWindowOpeningPatch,
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   windowOpeningRepairMessages,
@@ -465,6 +466,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     prevDerivedWindowMaxOpenAreaRef,
   };
 }
+
+const SECTION_BUTTONS_STYLE = { display: 'flex', gap: 8, flexWrap: 'wrap' } as const;
 
 export const buildingElementTransparentFormModule: ElementFormModule<BuildingElementTransparentFormState> = {
   type: 'BuildingElementTransparent',
@@ -851,9 +854,16 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                       )}
                     </div>
                   ))}
+                  <div style={SECTION_BUTTONS_STYLE}>
                   <button type="button" className="btn btn-small btn-secondary" onClick={() => save([...sections, { windowType: '' }])}>
                     Add glazing section
                   </button>
+                  {state.windowPartsPhysical && (
+                    <button type="button" className="btn btn-small btn-secondary" onClick={() => commitExistingElementDraft(buildAddWindowOpeningPatch(selectedElement as unknown as WindowOpeningSource) as Partial<Element>)}>
+                      Add openable part
+                    </button>
+                  )}
+                  </div>
                 </div>
               );
             })()}

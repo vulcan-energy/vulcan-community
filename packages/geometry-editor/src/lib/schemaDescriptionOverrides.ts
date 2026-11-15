@@ -1356,9 +1356,16 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'string',
   },
   'surface_reflectivity': {
-    description: 'Whether the pipework surface is reflective (boolean). Reflective surfaces reduce radiative heat transfer.',
+    label: 'Reflective pipe surface',
+    description: 'Tick if the outside surface of the pipe is reflective, for example foil-faced insulation. A reflective surface loses less heat by radiation.',
     type: 'boolean',
   },
+  'high_loss_environment': {
+    label: 'High heat loss location',
+    description: 'Tick if the unit is in a place that loses a lot of heat.',
+    type: 'boolean',
+  },
+  'areal_heat_capacity': { label: 'Heat capacity per area' },
   'pipework_type': {
     description: 'Pipework classification: "primary" (main supply pipework) or "distribution" (distribution pipework). Used to organize pipework in the JSON structure.',
     type: 'string',
