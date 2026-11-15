@@ -17,7 +17,7 @@
 // dependency arrays only because the lint rule cannot see a ref is stable
 // through an argument.
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, type MutableRefObject, type ReactNode } from 'react';
+import React, { useCallback, useEffect, useMemo, type MutableRefObject, type ReactNode } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { normalizeHorizontalAdjacentPlanPitch } from '../../geometry/adjacentPlanPitch';
 import type {
@@ -86,7 +86,6 @@ export function useWallFamilyFormState({
   wallShared,
   transparentMidHeightInput,
   getElementById,
-  updateElement,
   geometryStore,
   allElements,
   floors,
@@ -102,7 +101,6 @@ export function useWallFamilyFormState({
   wallShared: WallSharedFormGroup;
   transparentMidHeightInput: NumericDraftInputBinding;
   getElementById: (id: string) => Element | undefined;
-  updateElement: (id: string, updates: Partial<Element>, skipAutoSave?: boolean) => void;
   geometryStore: GeometryStoreApi;
   allElements: Element[];
   floors: Floor[];
@@ -166,27 +164,14 @@ export function useWallFamilyFormState({
     if (!isAdjacentLikeElement(selectedElement) || getElementShape(selectedElement) !== 'polygon') {
       return wallShared.pitch;
     }
-    const p = (selectedElement as { pitch?: number }).pitch;
+    // 90° is the wall/line default; a flat horizontal polygon reads 0 or 180, as parse and export
+    // normalise it. Shown, not written: selecting never writes.
+    const p = normalizeHorizontalAdjacentPlanPitch((selectedElement as { pitch?: number }).pitch, selectedElement.coordinates);
     if (typeof p === 'number' && Number.isFinite(p)) {
       return Math.round(p);
     }
     return wallShared.pitch;
   }, [selection.type, selectedElement, wallShared.pitch]);
-
-  // 90° is the wall/line default; a flat horizontal polygon must be 0 or 180. Heal to match parse/export.
-  useLayoutEffect(() => {
-    if (selection.type !== 'element' || !selection.id) return;
-    const el = getElementById(selection.id);
-    if (!el || !isAdjacentLikeElement(el)) return;
-    if (getElementShape(el) !== 'polygon') return;
-    const p = (el as { pitch?: number }).pitch;
-    if (typeof p !== 'number' || !Number.isFinite(p)) return;
-    const coords = (el as { coordinates?: Array<{ x: number; y: number; z: number }> }).coordinates;
-    const healed = normalizeHorizontalAdjacentPlanPitch(p, coords);
-    if (healed !== undefined && healed !== p) {
-      updateElement(el.id, { pitch: healed });
-    }
-  }, [selection.id, selection.type, getElementById, updateElement, selectedElement]);
 
   const derivedPolygonArea = useMemo((): number => {
     if (!selectedElement?.coordinates || selectedElement.coordinates.length < 3) return 0;

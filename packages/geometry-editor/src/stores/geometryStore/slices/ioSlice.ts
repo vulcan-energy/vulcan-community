@@ -49,6 +49,11 @@ import {
 } from '../../../lib/openingSegmentOutward';
 import { getParentOrientation360 } from '../../../lib/parentOrientation';
 import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
+import {
+  acceptsSuspendedShieldLocation,
+  fillSuspendedFloorDefaults,
+  missingSuspendedShieldLocations,
+} from '../../../lib/groundSuspendedFabricSync';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -1799,9 +1804,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     return csvContent;
   },
 
-  loadFromCSV: (csvContent, loadOptions) => applyCsvDocument(csvContent, loadOptions),
+  loadFromCSV: (csvContent, loadOptions) => get().asDocumentLoad(() => applyCsvDocument(csvContent, loadOptions)),
   replaceDocumentFromCsv: (csvContent, { currentFloorId, floors }) => {
-    applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId, floors });
+    get().asDocumentLoad(() => applyCsvDocument(csvContent, { keepUnchangedDefaults: true }, { currentFloorId, floors }));
   },
   };
 
@@ -2385,6 +2390,23 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const after = get().elementsById[id]?.name;
       return before && after && before !== after ? [[before, after] as const] : [];
     }));
+    // Blank suspended-floor defaults are filled as part of the load, before an open's baseline and
+    // for a restore too: the model opens clean and the export carries them (the U-value reads a
+    // missing one as 0).
+    const suspendedDefaults: Record<string, Partial<Element>> = {};
+    fillSuspendedFloorDefaults(
+      get().elementsById,
+      (id, patch) => { suspendedDefaults[id] = patch; },
+      acceptsSuspendedShieldLocation(options.schemaPort),
+    );
+    if (Object.keys(suspendedDefaults).length > 0) {
+      set((current) => ({
+        elementsById: {
+          ...current.elementsById,
+          ...Object.fromEntries(Object.entries(suspendedDefaults).map(([id, patch]) => [id, { ...current.elementsById[id], ...patch } as Element])),
+        },
+      }));
+    }
     if (replace) {
       // Selection survives by id: reuseKnownIds kept the ids of surviving elements and zones.
       set((current) => {
@@ -2464,8 +2486,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const fill = state.loadAwaitsDefaults && state.defaultsJson && !state.defaultsLoading
       ? absentMetadataRowFill({ ...state, complianceSettings: settings, elements: Object.values(state.elementsById) }, state.defaultsJson, rules, root)
       : undefined;
-    if (!fill && settings === state.complianceSettings) return;
+    const shieldLocations = missingSuspendedShieldLocations(state.elementsById, acceptsSuspendedShieldLocation(options.schemaPort));
+    const hasShieldLocations = Object.keys(shieldLocations).length > 0;
+    if (!fill && settings === state.complianceSettings && !hasShieldLocations) return;
     set({
+      ...(hasShieldLocations ? { elementsById: { ...state.elementsById, ...shieldLocations } } : {}),
       complianceSettings: fill ? { ...settings, ...fill.patch } : settings,
       ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
     });

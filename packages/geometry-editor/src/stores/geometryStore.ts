@@ -209,6 +209,9 @@ import {
 import {
   applyGroundThicknessWallsManualTracking,
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
+  acceptsSuspendedShieldLocation,
+  followGroundFabricOnEdit,
+  type GroundFabricFollower,
 } from '../lib/groundSuspendedFabricSync';
 import {
   SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS,
@@ -1622,6 +1625,9 @@ export interface GeometryState extends
   removeElement: (id: string) => void;
   duplicateElement: (id: string) => void;
   duplicateElements: (ids: string[]) => void;
+  /** See `GroundFabricFollower`: installed per store by `createGeometryStore`. */
+  asDocumentLoad: GroundFabricFollower['asDocumentLoad'];
+  withCopySources: GroundFabricFollower['withCopySources'];
 
   // Recompute orientations after global compass offset changes
   recomputeOrientationsForGlobalOffset: (previousOffset: number, nextOffset: number) => void;
@@ -2551,7 +2557,9 @@ const applyCoordinateDerivedElementFields = (
     const d = deriveGroundProperties(element);
     (element as any).area = d.area;
     const manualTotalArea = element[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] === true;
-    if (!preserveExplicitGroundTotalArea && !manualTotalArea) {
+    // Own footprint only when the outline moved: an edit to anything else keeps a shared
+    // (multi-zone) total, which the updateElement block derives from every ground on the storey.
+    if (coordsChanged && !preserveExplicitGroundTotalArea && !manualTotalArea) {
       (element as any).total_area = d.total_area;
     }
     const currentPerimeter = (element as { perimeter?: unknown }).perimeter;
@@ -7097,7 +7105,15 @@ const createGeometryState = (
     }, 0);
   },
 
-  duplicateElement: (id) => set((state) => {
+  asDocumentLoad: () => {
+    throw new Error('asDocumentLoad is installed by createGeometryStore');
+  },
+  withCopySources: () => {
+    throw new Error('withCopySources is installed by createGeometryStore');
+  },
+  duplicateElement: (id) => {
+    const copySources = new Map<string, string>();
+    get().withCopySources(copySources, () => set((state) => {
     const src = state.elementsById[id];
     if (!src) return state;
 
@@ -7120,6 +7136,7 @@ const createGeometryState = (
       : { dx: 0.5, dy: 0.5 };
 
     const newId = generateId();
+    copySources.set(newId, src.id);
     const translatedCoords = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
     const dup: Element = {
       ...(src as Element),
@@ -7168,10 +7185,13 @@ const createGeometryState = (
     }, 0);
 
     return { elementsById: newById, elementIds: newIds } as any;
-  }),
+  }));
+  },
 
   // Duplicate a group of elements preserving internal parent references
-  duplicateElements: (ids: string[]) => set((state) => {
+  duplicateElements: (ids: string[]) => {
+    const copySources = new Map<string, string>();
+    get().withCopySources(copySources, () => set((state) => {
     if (!ids || ids.length === 0) return state;
 
     const requestedSourceEls: Element[] = ids
@@ -7230,6 +7250,7 @@ const createGeometryState = (
     // Second pass: clone with translated coords and remap parent if inside group
     const cloned: Element[] = sourceEls.map(src => {
       const newId = oldToNewId.get(src.id)!;
+      copySources.set(newId, src.id);
       const newName = oldIdToNewName.get(src.id)!;
       const { dx, dy } = offsetOf(src);
       const translated = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
@@ -7259,7 +7280,8 @@ const createGeometryState = (
     }, 0);
 
     return { elementsById: newById, elementIds: newIds } as any;
-  }),
+  }));
+  },
 
   // Recompute orientation-dependent elements when global offset changes.
   // Walls/windows derive from geometry, while other elements with explicit
@@ -7819,6 +7841,12 @@ export const createGeometryStore = (
       return withPrecomputedDefaultsLookup(state, update, options.schemaPort ?? unavailableGeometrySchemaPort);
     }, replace as false);
   }) as typeof store.setState;
+  const schemaPort = options.schemaPort ?? unavailableGeometrySchemaPort;
+  const follower = followGroundFabricOnEdit(store, {
+    constructionBands: (state) => targetRules(schemaPort, state.complianceSettings).constructionBands,
+    acceptsShieldLocation: () => acceptsSuspendedShieldLocation(schemaPort),
+  });
+  rawSetState({ asDocumentLoad: follower.asDocumentLoad, withCopySources: follower.withCopySources });
   return store;
 };
 
