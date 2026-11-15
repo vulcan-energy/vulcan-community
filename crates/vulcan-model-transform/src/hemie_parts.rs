@@ -268,10 +268,7 @@ pub(super) fn part_floor<'e>(
                 ctx.errors.push(error("FLOOR", e.path(), format!("Floor '{}' is over an unheated space but does not state which. Choose its unheated space type: corridor, garage, roof void or stairwell.", e.name)));
                 return None;
             };
-            // DESNZ-defined: a floor over a garage is Light, 175,000 J/m².K, with no override.
-            let garage = [("areal_heat_capacity", json!(175_000.0))];
-            let extra: &[(&str, Value)] = if space == "garage" { &garage } else { &[] };
-            let key = ctx.construction("above_internal_unconditioned_area_floor", &[e], extra);
+            let key = ctx.construction("above_internal_unconditioned_area_floor", &[e], &[]);
             Some(ctx.with_age_band(
                 &[e],
                 json!({"floor_type": "not next to ground (unconditioned)", "adjacent_space": space, "construction": key}),
@@ -500,14 +497,14 @@ mod tests {
     }
 
     #[test]
-    fn a_floor_over_a_garage_is_light_and_others_take_hemies_value() {
+    fn a_floor_over_an_unheated_space_takes_hemies_heat_capacity() {
         let floor = |space: &str| {
             format!(
                 "Over,Z,BuildingElementAdjacentUnconditionedSpace_Simple,48,180,,,,,\"{}\",\"{{\"\"adjacent_space_type\"\":\"\"{space}\"\",\"\"areal_heat_capacity\"\":50000}}\"",
                 coords(0, &BOX)
             )
         };
-        for (space, capacity) in [("garage", Some(175_000.0)), ("corridor", None)] {
+        for (space, capacity) in [("garage", None), ("corridor", None)] {
             let text = csv(
                 SETTINGS,
                 &box_walls(&BOX, &[0]),

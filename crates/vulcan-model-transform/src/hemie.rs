@@ -2125,24 +2125,6 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
-    // DESNZ-defined: the wind sheltering level of a suspended floor follows the shield class,
-    // stated or else from the terrain class.
-    let shield = full_ventilation["shield_class"].as_str().or(
-        match full_ventilation["terrain_class"].as_str() {
-            Some("OpenField" | "OpenWater") => Some("Open"),
-            Some("Suburban") => Some("Normal"),
-            Some("Urban") => Some("Shielded"),
-            _ => None,
-        },
-    );
-    if let Some(level) = match shield {
-        Some("Open") => Some("Exposed"),
-        Some("Normal") => Some("Average"),
-        Some("Shielded") => Some("Sheltered"),
-        _ => None,
-    } {
-        geometry.insert("wind_sheltering_level".into(), json!(level));
-    }
     // DESNZ-defined: the base height, or else HEMIE's estimate from the base storey. The
     // estimate is given as the height because the pinned Orchestrator drops a Geometry's
     // base_storey_of_dwelling before HEMIE reads it.
@@ -4164,29 +4146,6 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         };
         assert_eq!(capacity("external_door"), [json!(50_000.0)]);
         assert_eq!(capacity("window"), [json!(20_000.0)]);
-    }
-
-    #[test]
-    fn the_wind_sheltering_level_follows_the_shield_class_or_the_terrain() {
-        for (terrain, shield, level) in [
-            ("Suburban", None, "Average"),
-            ("Urban", None, "Sheltered"),
-            ("OpenWater", None, "Exposed"),
-            ("Urban", Some("Open"), "Exposed"),
-            ("OpenField", Some("Shielded"), "Sheltered"),
-        ] {
-            let mut model = full_input();
-            model["InfiltrationVentilation"]["terrain_class"] = json!(terrain);
-            if let Some(shield) = shield {
-                model["InfiltrationVentilation"]["shield_class"] = json!(shield);
-            }
-            let (model, errors, _) = run_on(&house(gable_roof()), model);
-            assert!(errors.is_empty(), "{errors:#?}");
-            assert_eq!(
-                model["Zone"]["wind_sheltering_level"], level,
-                "{terrain} {shield:?}"
-            );
-        }
     }
 
     #[test]

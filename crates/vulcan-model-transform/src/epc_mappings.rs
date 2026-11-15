@@ -369,10 +369,10 @@ pub(crate) fn mvhr_ductwork(
         .iter()
         .map(|d| d.get("cross_section_shape").cloned())
         .collect());
-    // DESNZ-defined size bands: a rectangular duct's perimeter or a circular duct's external
-    // diameter, in mm, as a representative size. Each drawn duct takes its nearest band (the
-    // larger one at a tie), and the ductwork the band with the greatest length (the larger
-    // one at a tie).
+    // DESNZ-defined: the size bands, a rectangular duct's perimeter or a circular duct's
+    // external diameter in mm, as a representative size.
+    // Ours: each drawn duct takes its nearest band (the larger one at a tie), and the ductwork
+    // the band with the greatest length (the larger one at a tie).
     let mut band_lengths = [0.0; 3];
     let mut banded = false;
     for d in &ducts {
@@ -847,7 +847,7 @@ pub(crate) fn apply_desnz_defaults(
                 (false, _) => {
                     // A blank value, so the schema adds no second error for it.
                     system.remove(field);
-                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", if kind.is_empty() { "buffer tank" } else { kind })));
+                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", match kind { "" => "buffer tank", "StorageTank" => "storage tank", "SmartHotWaterTank" => "smart hot water tank", _ => kind })));
                 }
             }
         }
@@ -1998,6 +1998,15 @@ mod tests {
                 .filter(|p| p.ends_with("/location"))
                 .collect();
             assert_eq!(found.len(), errors_expected, "{errors:#?}");
+            if !existing {
+                assert!(errors.iter().any(|e| e.message == "'hw' (storage tank) needs its location. A new build states it: there is no default."), "{errors:#?}");
+                assert!(
+                    errors
+                        .iter()
+                        .any(|e| e.message.starts_with("'smart' (smart hot water tank)")),
+                    "{errors:#?}"
+                );
+            }
             assert!(model["HotWaterSource"]["hw"].get("location").is_none());
         }
     }
