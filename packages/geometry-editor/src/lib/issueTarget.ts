@@ -47,7 +47,8 @@ export function resolveIssueTarget(
     return {
       section: s[0],
       elementId: matches.length === 1 ? matches[0]!.id : undefined,
-      fieldKey: matches.length === 1 ? s[2] : undefined,
+      // An existing building's panel fields sit under panels/<n> (/OnSiteGeneration/PV/panels/0/mounting_type).
+      fieldKey: matches.length !== 1 ? undefined : s[2] === 'panels' && s[4] ? s[4] : s[2],
       ownerKey: JSON.stringify(s.slice(0, 2)),
     };
   }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { GeometryDocumentHostPort } from '../../../../geometry-document/src';
@@ -113,7 +113,21 @@ describe('FilenameBar validation readiness', () => {
           buildErrorItems={[{ source: 'build', severity: 'warning', message: 'Opening the model updated 1 value.' }]} />
       </GeometryStoreProvider>,
     );
-    expect(screen.getByRole('button', { name: 'Build Error (2)' })).toHaveClass('status-chip--error');
+    // The notice is not an error: it is counted apart.
+    fireEvent.click(screen.getByRole('button', { name: 'Build Error (1)' }));
+    expect(screen.getByText('1 error · 1 notice')).toBeInTheDocument();
+  });
+
+  it('shows a long notice\'s first line, with the rest under Details', () => {
+    render(
+      <GeometryStoreProvider store={createGeometryStore()}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null}
+          buildErrorItems={[{ source: 'build', severity: 'warning', message: 'Opening the model updated 2 values. Save to keep them.\nWall 1 area 1 → 2; Wall 2 area 3 → 4.' }]} />
+      </GeometryStoreProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Notice (1)' }));
+    expect(screen.getByText('Opening the model updated 2 values. Save to keep them.')).toBeInTheDocument();
+    expect(screen.getByText(/Wall 1 area 1 → 2/).closest('details')).not.toBeNull();
   });
 
   it.each([true, undefined])('renders no readiness chip for a %s verdict', (verdict) => {

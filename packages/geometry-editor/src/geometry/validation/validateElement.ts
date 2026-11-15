@@ -144,6 +144,19 @@ import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
 // per-type validators that move into separate files in subsequent refactors.
 
+
+const plainLabel = (label: string) => label.replace(/\b([A-Z])([a-z]+)/g, (_, first: string, rest: string) => first.toLowerCase() + rest);
+/**
+ * "Leakage When Stopped" -> "Enter the leakage when stopped"; a yes/no field ("Is Unheated Pitched Roof")
+ * -> "Choose yes or no for unheated pitched roof". Capitalised words go lower case; acronyms (PV, FHS) stay.
+ */
+const enterFieldMessage = (label: string, yesNo = false): string =>
+  yesNo ? `Choose yes or no for ${plainLabel(label.replace(/^Is /, ''))}` : `Enter the ${plainLabel(label)}`;
+const isYesNoField = (fieldSchema: unknown): boolean => {
+  const property = fieldSchema as { type?: unknown; anyOf?: Array<{ type?: unknown }> } | undefined;
+  return property?.type === 'boolean' || !!property?.anyOf?.some((branch) => branch.type === 'boolean');
+};
+
 export const geoIssue = (message: string, fieldKey?: string): ValidationIssue =>
   ({ message, source: 'geometry', fieldKey });
 export const schemaIssue = (message: string, fieldKey?: string): ValidationIssue =>
@@ -1121,6 +1134,11 @@ export const validateElementCore = (
   element: Element,
   context: ValidationContext,
 ): ValidationResult => {
+  // A type the target excludes (lighting on an existing building) shows no inputs and the run
+  // leaves it out, so it has nothing to check.
+  if (targetRules(context.schemaPort, context.complianceSettings ?? {}).excludedElementTypes[element.type]) {
+    return { hasIssues: false, issues: [], hasWarnings: false, warnings: [], hasMissingElements: false, missingElements: [] };
+  }
   // Optional debug instrumentation (off by default).
   // Enable in DevTools:
   //   window.__VULCAN_VALIDATE_DEBUG__ = { enabled: true, logEvery: 200 }
@@ -2016,7 +2034,7 @@ export const validateElementCore = (
       // The converter leaves out a row with a blank angle or distance (E027).
       for (const [field, label] of [['start_angle', 'Start Angle'], ['end_angle', 'End Angle'], ['distance', 'Distance']] as const) {
         if (unused && field === 'distance') continue;
-        if (!Number.isFinite(contextElement[field])) issues.push(geo(`${label} is required`, field));
+        if (!Number.isFinite(contextElement[field])) issues.push(geo(enterFieldMessage(label), field));
       }
       // Distance is derived from geometry - calculate it rather than checking stored value
       if (contextElement.parent_element && elementsById) {
@@ -2197,7 +2215,8 @@ export const validateElementCore = (
             context.globalOrientationOffset,
           );
           const epsAng = 0.5;
-          const epsBh = 0.01;
+          // A base height entered to one decimal (6.3 for 6.32 m) is the same height.
+          const epsBh = 0.05;
           if (
             typeof onSiteElement.pitch === 'number' &&
             typeof derived.pitch === 'number' &&
@@ -2495,9 +2514,7 @@ export const validateElementCore = (
             }, schemaPort);
             const unit = fieldUnitForAdornment(presentation);
             const displayName = unit ? `${presentation.label} (${unit})` : presentation.label;
-            const message = complianceValidationEnabled
-              ? `FHS: ${displayName} required`
-              : `${displayName} required`;
+            const message = `${complianceValidationEnabled ? 'FHS: ' : ''}${enterFieldMessage(displayName, isYesNoField(schemaProperties[field]))}`;
             issues.push(issueFactory(message, field));
           }
         }

@@ -235,7 +235,7 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
         .find(|w| w.path == path)
         .expect("warning");
     assert_eq!(warning.code, "W_TARGET_INPUT");
-    assert!(warning.message.starts_with("HEM 1.0.0a8: The opening height used for ventilation (1.5 m) differs from the window's mid-height (1.65 m), both above the ventilation-zone base."), "{}", warning.message);
+    assert!(warning.message.starts_with("The opening height used for ventilation (1.5 m) differs from the window's mid-height (1.65 m), both above the ventilation-zone base."), "{}", warning.message);
 }
 
 #[test]

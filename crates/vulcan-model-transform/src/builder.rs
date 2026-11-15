@@ -3176,7 +3176,8 @@ impl JSONBuilder {
                             crate::finalization::SchemaOmission {
                                 code: w.code,
                                 path: w.path,
-                                message: format!("HEM {}: {}", self.hem_core_version, w.message),
+                                // A user note says what to check, with no engine-version prefix.
+                                message: w.message,
                             }
                         }));
 
