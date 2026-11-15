@@ -47,7 +47,7 @@ South Wall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,0,FALSE,FALSE,,"0,0,0|4
 
 Window Elements,,,,,,,,,,,,,,,
 Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
-Window 1,Living,BuildingElementTransparent,1.6125,90,1.25,1.29,180,0.9,South Wall,0.125,0.645,1.545,1.782,"1.000,0.000,0.900|2.250,0.000,0.900","{}"
+Window 1,Living,BuildingElementTransparent,1.6125,90,1.25,1.29,180,0.905,South Wall,0.125,0.645,1.234,1.782,"1.000,0.000,0.905|2.250,0.000,0.905","{}"
 
 Thermal Bridging Elements,,,,,,,,,
 Name,Zone,Type,heat_transfer_coeff,length,linear_thermal_transmittance,parent_element,coords,extra_json
@@ -65,7 +65,7 @@ PV 1,OnSiteGeneration,PhotovoltaicSystem,35,180,0,3.375,1.6125,1.0125,,"{}"
     const byName = (name: string) => Object.values(reopened.getState().elementsById).find((element) => element.name === name) as any;
 
     expect(byName('Window 1')).toMatchObject({
-      frame_area_fraction: 0.125, free_area_height: 0.645, max_window_open_area: 1.782,
+      base_height: 0.905, frame_area_fraction: 0.125, free_area_height: 0.645, mid_height: 1.234, max_window_open_area: 1.782,
     });
     expect(byName('Corner')).toMatchObject({ length: 8.345, linear_thermal_transmittance: 0.045 });
     expect(byName('Point')).toMatchObject({ heat_transfer_coeff: 0.004 });

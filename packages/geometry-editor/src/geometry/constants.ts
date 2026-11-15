@@ -7,6 +7,9 @@ export const roundToTwoDecimals = (value: number): number => {
   return Math.round(value * 100) / 100;
 };
 
+/** Removes float noise from a sum or difference (1.2340000000000002), keeping any authored precision. */
+export const roundFloatNoise = (value: number): number => Math.round(value * 1e9) / 1e9;
+
 /** Use where 2dp would zero small positives (e.g. suspended floor vent rate ~0.0015 m²/m). */
 export const roundToFourDecimals = (value: number): number => {
   return Math.round(value * 10000) / 10000;

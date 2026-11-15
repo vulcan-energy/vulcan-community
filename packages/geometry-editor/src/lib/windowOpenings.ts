@@ -6,6 +6,7 @@ import type {
   GeometrySchemaPort,
 } from '../../../geometry-editor-host/src/schemaPort';
 import type { WindowShading } from '../geometry/types';
+import { roundFloatNoise } from '../geometry/constants';
 import { unwrapNullableSchema } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 
@@ -378,7 +379,7 @@ export function shiftPhysicalPartsWithBaseHeight(
 export function shiftPhysicalPartHeight<T extends Record<string, unknown>>(part: T, delta: number): T {
   const midHeight = finite(part.mid_height);
   if (midHeight === undefined) return part;
-  return { ...part, mid_height: Math.round((midHeight + delta) * 1e9) / 1e9 };
+  return { ...part, mid_height: roundFloatNoise(midHeight + delta) };
 }
 
 // Close shading of a window on an existing-building EPC: one category per kind, stated on the

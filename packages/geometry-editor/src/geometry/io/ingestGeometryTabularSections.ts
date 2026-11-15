@@ -112,13 +112,12 @@ function num(d: Record<string, string>, column: string, cell = V(d, column)): nu
 
 /**
  * base_height of an opaque or transparent row. For a profiled wall the cell is the lowest edge
- * (see exportedBaseHeightForWallFace); the offset is removed from the exact cell before the
- * usual 2 dp rounding, so the foot comes back as it was saved.
+ * (see exportedBaseHeightForWallFace); removing the offset gives back the foot as it was saved.
  */
 function wallFootCell(d: Record<string, string>, extraJson: unknown): number | undefined {
   const cell = V(d, 'base_height');
   if (cell === '' || !NUMBER_CELL.test(cell)) return num(d, 'base_height');
-  return roundToTwoDecimals(wallFootFromExportedBaseHeight(Number(cell), extraJson)!);
+  return wallFootFromExportedBaseHeight(Number(cell), extraJson);
 }
 
 function reqNum(d: Record<string, string>, column: string, cell?: string): number {
