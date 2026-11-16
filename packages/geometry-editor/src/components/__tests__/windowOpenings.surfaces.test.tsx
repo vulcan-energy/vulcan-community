@@ -322,6 +322,64 @@ describe('main-form window opening inputs', () => {
     return store;
   }
 
+  describe('Part that opens', () => {
+    const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed');
+    const follows = { mid_height: 1.5, free_area_height: 0.3, max_window_open_area: 0.3 };
+
+    it('reads Whole on a file without the key, and opening the window writes nothing', () => {
+      const element = windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows);
+      const store = renderForm(element);
+      expect(pressed('Whole')).toBe('true');
+      expect(stored(store)).toEqual(element);
+    });
+
+    it('single opening: Top moves a following mid height to head − free height ÷ 2, Whole moves it back', () => {
+      const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows));
+      fireEvent.click(screen.getByRole('button', { name: 'Top' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.85, extra_json: { _vulcan_ui_opening_part: 'top', window_part_list: [{ mid_height_air_flow_path: 1.85 }] } });
+      expect(screen.getByText('top − free height ÷ 2')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Whole' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.5, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.5 }] } });
+      expect(stored(store).extra_json).not.toHaveProperty('_vulcan_ui_opening_part');
+    });
+
+    it('one-row part list: Bottom writes the one opening with its mid height at sill + free height ÷ 2', () => {
+      const store = renderForm(windowElement({ window_part_list: [follows] },
+        { free_area_height: undefined, mid_height: undefined, max_window_open_area: undefined }));
+      fireEvent.click(screen.getByRole('button', { name: 'Bottom' }));
+      expect(stored(store)).toMatchObject({ ...follows, mid_height: 1.15,
+        extra_json: { _vulcan_ui_opening_part: 'bottom', window_part_list: [{ mid_height_air_flow_path: 1.15 }] } });
+    });
+
+    it('keeps a typed mid height and offers the part\'s value instead', () => {
+      const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }] }, { free_area_height: 0.3 }));
+      fireEvent.click(screen.getByRole('button', { name: 'Top' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.65, extra_json: { _vulcan_ui_opening_part: 'top' } });
+      expect(screen.getByRole('button', { name: /Mid height: use top − free height ÷ 2, 1\.85 m/ })).toBeInTheDocument();
+    });
+
+    it('a7: a list that follows the mid height moves with it; one that does not stays', () => {
+      // The full schema with an a7 window part list: parts are airflow divisions, not openings.
+      const a7: GeometrySchemaPort = {
+        ...canonicalGeometrySchemaPort,
+        getElementSubschema: (mode, type, subtype) => (type === 'BuildingElementTransparent'
+          ? listSchema(legacyItems) : canonicalGeometrySchemaPort.getElementSubschema(mode, type, subtype)),
+      } as GeometrySchemaPort;
+      const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows), a7);
+      fireEvent.click(screen.getByRole('button', { name: 'Top' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.85, extra_json: { _vulcan_ui_opening_part: 'top', window_part_list: [{ mid_height_air_flow_path: 1.85 }] } });
+      cleanup();
+      const own = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.2 }] }, follows), a7);
+      fireEvent.click(screen.getByRole('button', { name: 'Bottom' }));
+      expect(stored(own)).toMatchObject({ mid_height: 1.15, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.2 }] } });
+    });
+
+    it('is not offered for several parts: each has its own mid height', () => {
+      renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
+      expect(screen.queryByRole('group', { name: 'Part that opens' })).toBeNull();
+    });
+  });
+
   it('shows the three inputs when the schema moved them into the parts', () => {
     renderForm(windowElement());
     for (const name of [/^Free area height/, /^Mid height/, /^Open area/]) {

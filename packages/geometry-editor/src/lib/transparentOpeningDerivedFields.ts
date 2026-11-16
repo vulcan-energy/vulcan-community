@@ -8,6 +8,7 @@ import {
   calculateDerivedWindowMidHeight,
 } from './zoneDerivation';
 import { lineFaceEnvelope } from './profileLineFace';
+import { windowOpeningPart, type WindowOpeningSource } from './windowOpenings';
 
 const DERIVED_VALUE_EPSILON = 0.005;
 
@@ -99,6 +100,8 @@ function deriveWindowMidHeight(
     // A shaped window's equivalent rectangle starts at its lowest bottom point (as export does).
     deriveBaseHeightForMidHeight(element, patch, effectiveFloors) + lineFaceEnvelope(element).bottom,
     patchedNumber(element, patch, 'height'),
+    windowOpeningPart(element as unknown as WindowOpeningSource),
+    patchedNumber(element, patch, 'free_area_height'),
   );
 }
 
@@ -146,7 +149,8 @@ export function buildTransparentOpeningNumericPatch(
   const previousDerived = deriveTransparentOpeningDerivedValues(element, {}, { effectiveFloors });
   const nextDerived = deriveTransparentOpeningDerivedValues(element, patch, { effectiveFloors });
 
-  const midInputsChanged = hasOwn(directPatch, 'base_height') || hasOwn(directPatch, 'height');
+  const midInputsChanged = hasOwn(directPatch, 'base_height') || hasOwn(directPatch, 'height')
+    || (hasOwn(directPatch, 'free_area_height') && windowOpeningPart(element as unknown as WindowOpeningSource) !== 'whole');
   if (midInputsChanged && !hasOwn(directPatch, 'mid_height')) {
     const currentMidHeight = finiteNumberOrNull(element.mid_height);
     if (

@@ -155,6 +155,30 @@ export function classifyWindowOpenings(row: WindowOpeningSource): WindowOpenings
   return { kind: 'repair', reason: 'unsupported_list', partIssues: [] };
 }
 
+/** Which part of a single-opening window opens. Editor-only: the converter drops `_` keys. */
+export type WindowOpeningPart = 'whole' | 'top' | 'bottom';
+export const WINDOW_OPENING_PART_KEY = '_vulcan_ui_opening_part';
+
+/** True when the window has one opening: no list, or a list of one entry. */
+export function windowHasSingleOpening(row: WindowOpeningSource): boolean {
+  const parts = sourceField(row, 'window_part_list');
+  return parts === undefined || (Array.isArray(parts) && parts.length === 1);
+}
+
+/** The window's stated part. A window without the key, or with several openings, opens whole. */
+export function windowOpeningPart(row: WindowOpeningSource): WindowOpeningPart {
+  const stated = isRecord(row.extra_json) ? row.extra_json[WINDOW_OPENING_PART_KEY] : undefined;
+  return (stated === 'top' || stated === 'bottom') && windowHasSingleOpening(row) ? stated : 'whole';
+}
+
+/** `extra_json` stating the part; Whole removes the key, so the window is as it was. */
+export function withWindowOpeningPart(row: WindowOpeningSource, part: WindowOpeningPart): Record<string, unknown> {
+  const extra = isRecord(row.extra_json) ? { ...row.extra_json } : {};
+  if (part === 'whole') delete extra[WINDOW_OPENING_PART_KEY];
+  else extra[WINDOW_OPENING_PART_KEY] = part;
+  return extra;
+}
+
 /** One sentence per problem, for a form message or a validation issue. */
 export function windowOpeningRepairMessages(openings: Extract<WindowOpenings, { kind: 'repair' }>): string[] {
   return openings.reason === 'incomplete_parts' ? openings.partIssues : [REPAIR_MESSAGES[openings.reason]];
@@ -325,7 +349,7 @@ export function buildAddWindowOpeningPatch(row: WindowOpeningSource, openingKeys
       : Array.isArray(parts) && parts.length === 1 && hasOnlyPartFields(parts[0]) ? partRow(parts[0]) : {};
   const extra: Record<string, unknown> = { ...(isRecord(row.extra_json) ? row.extra_json : {}) };
   const moved: Record<string, unknown> = {};
-  for (const key of openingKeys) {
+  for (const key of [WINDOW_OPENING_PART_KEY, ...openingKeys]) {
     if (!(key in extra)) continue;
     moved[key] = extra[key];
     delete extra[key];

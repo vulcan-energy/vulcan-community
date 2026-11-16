@@ -14,6 +14,8 @@ import { deriveRoofCutout, effectiveFloorsOf, elementsOf, modelMayHaveRoofCutout
 import { calculatePolygonArea } from './polygonSync';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';
 import { getElementShape } from './shapeUtils';
+import { calculateDerivedWindowMidHeight } from './zoneDerivation';
+import { windowOpeningPart, type WindowOpeningSource } from './windowOpenings';
 import {
   deriveSlopedElementDimensions,
   getSlopedPolygonSurfaceArea,
@@ -353,7 +355,10 @@ export const getOpaqueElementExportGeometry = (
 /** Mid-height in Vulcan's editor coordinates: centre of the equivalent rectangle above ground. */
 export const getTransparentExportMidHeight = (element: BuildingElementTransparent, globalOrientationOffset?: number): number => {
   const { baseHeight, height } = getAreaBasedElementExportGeometry(element, globalOrientationOffset);
-  return roundToTwoDecimals(baseHeight + height / 2);
+  const part = windowOpeningPart(element as unknown as WindowOpeningSource);
+  return part === 'whole'
+    ? roundToTwoDecimals(baseHeight + height / 2)
+    : calculateDerivedWindowMidHeight(baseHeight, height, part, element.free_area_height);
 };
 
 export const getElementGrossArea = (element: Element, globalOrientationOffset?: number): number => {

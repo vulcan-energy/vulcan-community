@@ -6,7 +6,7 @@ import polygonClipping, { type MultiPolygon, type Pair, type Ring } from 'polygo
 import { calculatePolygonArea, isAdjacentConditionedInternalFloorDoubled } from './polygonSync';
 import { roundToTwoDecimals } from '../geometry/constants';
 import { canvasFloorToFhsStorey, fhsStoreyToCanvasFloor } from './storeySemantics';
-import { shiftPhysicalPartHeight } from './windowOpenings';
+import { shiftPhysicalPartHeight, type WindowOpeningPart } from './windowOpenings';
 import { getHemieBundle } from './hemieBundles';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue, physicalZUsesFloorId } from './elementCanvasFloor';
 
@@ -1159,14 +1159,26 @@ function metreZPatchForFloorStackChange(
 }
 
 /**
- * Suggested mid-height for a window opening (vertical centre of the ventilated opening).
+ * Suggested mid-height for a window opening: the centre of its free area. HEM spreads a window's
+ * airflow divisions over the free area height centred on this height (BS EN 16798-7 Eq. 55,
+ * `WindowPart::calculate_height_for_delta_p_w_div_path`), so a top or bottom opener's centre is
+ * half its free height in from the head or the sill. A blank free height is the whole window.
  * Vulcan's editor model uses absolute elevation above ground; CSV export converts this to
  * HEM's ventilation-zone-relative convention.
  */
-export function calculateDerivedWindowMidHeight(baseHeightM: number, openingHeightM: number): number {
+export function calculateDerivedWindowMidHeight(
+  baseHeightM: number,
+  openingHeightM: number,
+  part: WindowOpeningPart = 'whole',
+  freeAreaHeightM?: number,
+): number {
   if (!Number.isFinite(baseHeightM) || !Number.isFinite(openingHeightM)) return 0;
   if (openingHeightM <= 0) return 0;
-  return roundToTwoDecimals(baseHeightM + openingHeightM / 2);
+  if (part === 'whole') return roundToTwoDecimals(baseHeightM + openingHeightM / 2);
+  const free = typeof freeAreaHeightM === 'number' && Number.isFinite(freeAreaHeightM) && freeAreaHeightM > 0
+    ? Math.min(freeAreaHeightM, openingHeightM)
+    : openingHeightM;
+  return roundToTwoDecimals(part === 'top' ? baseHeightM + openingHeightM - free / 2 : baseHeightM + free / 2);
 }
 
 /**
