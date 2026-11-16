@@ -55,6 +55,13 @@ jobs:
           components: rust-src
           targets: wasm32-unknown-unknown
 
+      # rustup gives every rust-src file the install time as its mtime, and -Z build-std
+      # tracks std like a path dependency, by mtime. Left alone, std looks newer than
+      # any cached build, so std and every crate above it rebuild and the cache below
+      # saves nothing. Any fixed time older than the cache will do.
+      - name: Give rust-src a fixed mtime
+        run: find "$(rustc +${{ steps.toolchain.outputs.name }} --print sysroot)/lib/rustlib/src" -exec touch -h -d '2000-01-01T00:00:00Z' {} +
+
       # Pull requests restore the registry and compiled dependencies. Scheduled and
       # manual runs only look the cache up, so the weekly check still builds every
       # dependency from scratch; they save it when it is missing, which seeds the
