@@ -156,11 +156,17 @@ export function hemieLeftoverKeys(element: Element): string[] {
   return HEMIE_ELEMENT_KEYS.filter((key) => extra[key] !== undefined && extra[key] !== null && extra[key] !== '');
 }
 
-const UNITS: Readonly<Record<string, string>> = { glazing_gap: 'mm', insulation_thickness: 'mm', areal_heat_capacity: 'J/m²·K', basement_air_volume: 'm³' };
+const UNITS: Readonly<Record<string, string>> = {
+  glazing_gap: 'mm', insulation_thickness: 'mm', areal_heat_capacity: 'J/m²·K', basement_air_volume: 'm³',
+  power_limit_battery_import: 'kW',
+};
 /** A flat roof's insulation location, as the converter takes it: at the joists is a cold roof, above them a warm roof. */
 const FLAT_ROOF_LOCATIONS: Readonly<Record<string, string>> = { at_joists: 'At joists (cold roof)', above_joists: 'Above joists (warm roof)' };
 /** The wording of a field whose key does not read plainly. */
-const FIELD_LABELS: Readonly<Record<string, string>> = { areal_heat_capacity: 'Heat capacity per area' };
+const FIELD_LABELS: Readonly<Record<string, string>> = {
+  areal_heat_capacity: 'Heat capacity per area',
+  power_limit_battery_import: 'Grid import limit for charging',
+};
 const words = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, ' ');
 
 /** "External wall": a construction type as people read it. */

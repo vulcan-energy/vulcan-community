@@ -2442,14 +2442,15 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
     };
     let mut extra = Vec::new();
     if construction_type == "edge_insulated_ground_attached_floor" {
-        match edge_insulation(g) {
+        match edge_insulation(ctx, g) {
             Some(edge) => extra.push(("edge_insulation", edge)),
             None if ctx
                 .settings
                 .construction(construction_type)
                 .contains_key("edge_insulation") => {}
             // DESNZ-defined: edge insulation known to be present with no details takes the
-            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool). The editor
+            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool; EPC guidance 03,
+            // Table 3.5.2.3, and HEMIE's EdgeInsulationVertical defaults). The editor
             // shows these as the fields' placeholders.
             None => extra.push(("edge_insulation", json!({"vertical": {}}))),
         }
@@ -2480,8 +2481,9 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
 }
 
 /// Derived from the model: the floor's edge insulation items (horizontal width, vertical depth,
-/// each with its thermal resistance) in the existing-building form; None when it states none.
-fn edge_insulation(g: &El) -> Option<Value> {
+/// each with its thermal resistance, or its thickness, material and thermal conductivity) in the
+/// existing-building form, as stated; None when it states none.
+fn edge_insulation(ctx: &mut Ctx, g: &El) -> Option<Value> {
     let mut edge = Map::new();
     for item in g.get("edge_insulation")?.as_array()? {
         let kind = item["type"].as_str().unwrap_or_default();
@@ -2494,8 +2496,17 @@ fn edge_insulation(g: &El) -> Option<Value> {
         if let Some(r) = item["edge_thermal_resistance"].as_f64() {
             value.insert("thermal_resistance".into(), json!(r));
         }
-        if let Some(v) = item[size].as_f64() {
-            value.insert(size.into(), json!(v));
+        for field in [size, "thickness", "thermal_conductivity"] {
+            if let Some(v) = item[field].as_f64() {
+                value.insert(field.into(), json!(v));
+            }
+        }
+        if let Some(material) = item["material"].as_str() {
+            // HEMIE takes a material's conductivity from its own table, which has none for XPS.
+            if material == "XPS" && !value.contains_key("thermal_conductivity") {
+                ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' has XPS {kind} edge insulation, which HEM:EPC has no default thermal conductivity for. State its thermal conductivity.", g.name)));
+            }
+            value.insert("material".into(), json!(material));
         }
         if matches!(kind, "horizontal" | "vertical") {
             edge.insert(kind.into(), Value::Object(value));
@@ -3516,6 +3527,27 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             model["Zone"]["constructions"][key]["edge_insulation"],
             json!({"vertical": {"depth": 0.5, "thermal_resistance": 1.2}, "horizontal": {"width": 1.0, "thermal_resistance": 1.0}})
         );
+        // By thickness and material, with a conductivity where known: sent as stated.
+        let stated = r#""{""edge_insulation"":[{""type"":""vertical"",""thickness"":0.05,""material"":""EPS""},{""type"":""horizontal"",""width"":0.6,""thickness"":0.03,""material"":""PIR"",""thermal_conductivity"":0.022}]}""#;
+        let (model, errors, _) = run(&csv(SETTINGS, &exposed, &edge(stated)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let key = model["Zone"]["building_parts"]["Main"]["floor"]["construction"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            model["Zone"]["constructions"][key]["edge_insulation"],
+            json!({"vertical": {"thickness": 0.05, "material": "EPS"}, "horizontal": {"width": 0.6, "thickness": 0.03, "material": "PIR", "thermal_conductivity": 0.022}})
+        );
+        // HEMIE has no conductivity for XPS, so it must be stated.
+        let xps = r#""{""edge_insulation"":[{""type"":""vertical"",""material"":""XPS""}]}""#;
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge(xps)));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("Ground floor 'Floor' has XPS vertical edge insulation"));
+        let with_conductivity = xps.replace(r#""XPS""#, r#""XPS"",""thermal_conductivity"":0.034"#);
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge(&with_conductivity)));
+        assert!(errors.is_empty(), "{errors:#?}");
     }
 
     #[test]

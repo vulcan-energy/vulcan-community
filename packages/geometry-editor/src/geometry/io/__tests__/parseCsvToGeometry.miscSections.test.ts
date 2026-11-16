@@ -661,6 +661,38 @@ Radiator,Living,WetEmitter,radiator,,1,0.75,"1.000,2.000,0.000","{}"
     expect(elements.find((e) => e.name === 'Radiator')).toMatchObject({ _base_height: 0.75 });
   });
 
+  it('keeps an existing building\'s edge insulation by thickness and a battery\'s grid import limit through save and load', () => {
+    const csv = `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0.0,,,,,,,,,,,,,
+IsExistingBuilding,TRUE,,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Ground Elements,,,,,,,,,,,,,
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,base_height,parent_element,coords,extra_json
+Slab,Living,BuildingElementGround,25,5,0.2,20,Slab_edge_insulation,,,0,,"0,0,0|5,0,0|5,5,0|0,5,0","{""edge_insulation"":[{""type"":""horizontal"",""width"":0.6,""thickness"":0.03,""material"":""PIR""},{""type"":""vertical"",""thickness"":0.05,""material"":""XPS"",""thermal_conductivity"":0.034}]}"
+
+Systems,,,,,,,,,,,,,
+Name,Zone,system_type,coords,extra_json
+Battery,Living,ElectricBattery,"1,1,0","{""power_limit_battery_import"":7.2}"
+`.trim();
+    const store = createGeometryStore();
+    store.getState().loadFromCSV(csv);
+    const reopened = createGeometryStore();
+    reopened.getState().loadFromCSV(store.getState().generateCSV());
+    const byName = (name: string) => Object.values(reopened.getState().elementsById).find((element) => element.name === name);
+    expect(byName('Slab')?.extra_json).toMatchObject({
+      edge_insulation: [
+        { type: 'horizontal', width: 0.6, thickness: 0.03, material: 'PIR' },
+        { type: 'vertical', thickness: 0.05, material: 'XPS', thermal_conductivity: 0.034 },
+      ],
+    });
+    expect(byName('Battery')?.extra_json).toMatchObject({ power_limit_battery_import: 7.2 });
+  });
+
   it('maps ground base_height only for slab and suspended floor placement, not basements', () => {
     const csv = `
 Metadata,,,,,,,,,,,,,

@@ -13,6 +13,7 @@ import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import { elementSchemaTakesField } from '../../lib/schemaCache';
+import { hemieFieldLabel } from '../../lib/hemieFabric';
 import { decimalInputProps, readExtraJsonRecord, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
@@ -27,7 +28,7 @@ export interface ElectricBatteryFormState {
   gridInputs: boolean;
   /** The target's battery schema takes capacity and efficiency; a HEM Database product states its own. */
   ratingInputs: boolean;
-  /** The selected battery's `extra_json`, where age, grid charging and grid export are stored. */
+  /** The selected battery's `extra_json`, where age, grid charging, grid export and the supply's grid import limit are stored. */
   extra: Record<string, unknown>;
   commitExtra: (key: string, value: unknown) => void;
 }
@@ -121,6 +122,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
       age: renderFieldLabel('Battery Age (years):', elementType, 'battery_age'),
       charging: renderFieldLabel('Grid Charging Possible:', elementType, 'grid_charging_possible'),
       exporting: renderFieldLabel('Grid Exporting Possible:', elementType, 'grid_exporting_possible'),
+      importLimit: renderFieldLabel(hemieFieldLabel('power_limit_battery_import'), elementType, 'power_limit_battery_import'),
     } : null;
     return (
       <>
@@ -210,6 +212,24 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
                 placeholder="No (default)"
                 variant="ghost"
                 size="md"
+              />
+            </div>
+            {gridLabels.importLimit}
+            <div className="element-input" ref={registerBaseFieldRefs('power_limit_battery_import')}>
+              <StandardInput
+                type="number"
+                value={typeof extra.power_limit_battery_import === 'number' ? String(extra.power_limit_battery_import) : ''}
+                onChange={(event) => {
+                  const value = event.target.value.trim();
+                  commitExtra('power_limit_battery_import', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
+                }}
+                // DESNZ-defined (EPC guidance 11, Table 11.8.2b); the target applies it when blank.
+                placeholder="18.4 (default)"
+                min="0"
+                step="any"
+                variant="ghost"
+                size="md"
+                className="flex-1"
               />
             </div>
           </>
