@@ -2264,7 +2264,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     }
     // DESNZ-defined: the base height, or else HEMIE's estimate from the base storey. The
     // estimate is given as the height because the pinned Orchestrator drops a Geometry's
-    // base_storey_of_dwelling before HEMIE reads it.
+    // base_storey_of_dwelling before HEMIE reads it (assumption pending DESNZ E55: if the
+    // Orchestrator keeps it, send the base storey instead).
     match (
         full_ventilation
             .get("ventilation_zone_base_height")
