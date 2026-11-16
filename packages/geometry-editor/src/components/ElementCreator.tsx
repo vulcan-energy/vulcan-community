@@ -130,7 +130,7 @@ import { inferThermalMethod, thermalMethodElementType, thermalMethods, thermalMe
 import { ThermalMethodControl } from './ThermalMethodControl';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
 import { isExistingBuilding } from '../lib/windowOpenings';
-import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands, hemieMoreKeys, hemieMoreLabels, hemieOutsideSurface, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieConstructionSetting, hemieConstructionType, hemieHeatCapacityBands, hemieMoreKeys, hemieMoreLabels, hemieOutsideSurface, parseHemieConstruction, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -4132,15 +4132,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   ) : null;
   const hostElementFieldsForMethod = thermalMethod ? renderHostElementFields(thermalMethod) : null;
   const hostElementFieldsPlain = thermalMethod ? null : renderHostElementFields();
-  // Under More: the details and outside surface, open when the element states one.
-  const hostMoreFields = thermalMethod && thermalConstructionType ? {
+  // Under More: the details and outside surface, open when the element states one. Under a
+  // U-value or calculation the details do not apply (`bandOnlyFields`); a roof shows the beams
+  // its insulation location reads. Nothing to show, no More.
+  const thermalExtra = readExtraJsonRecord(thermalElement?.extra_json);
+  const hostMoreLabels = thermalMethod && thermalConstructionType ? hemieMoreLabels(thermalConstructionType, thermalMethod === 'band',
+    thermalExtra.insulation_location ?? parseHemieConstruction(modelSettings.hemieSettings?.[hemieConstructionSetting(thermalConstructionType)])?.insulation_location) : [];
+  const hostMoreFields = thermalMethod && thermalConstructionType && hostMoreLabels.length ? {
     fields: renderHostElementFields(thermalMethod, 'more'),
-    // Under a U-value or calculation the details do not apply (`bandOnlyFields`).
-    labels: hemieMoreLabels(thermalConstructionType, thermalMethod === 'band'),
-    stated: hemieMoreKeys(thermalConstructionType).some((key) => {
-      const value = readExtraJsonRecord(thermalElement?.extra_json)[key];
-      return value !== undefined && value !== null && value !== '';
-    }),
+    labels: hostMoreLabels,
+    stated: hemieMoreKeys(thermalConstructionType).some((key) => thermalExtra[key] !== undefined && thermalExtra[key] !== null && thermalExtra[key] !== ''),
   } : undefined;
   const thermalMethodControl = thermalMethod && thermalMethodOptions.length > 1 ? (
     <ThermalMethodControl methods={thermalMethodOptions} value={thermalMethod} onChange={switchThermalMethod} />

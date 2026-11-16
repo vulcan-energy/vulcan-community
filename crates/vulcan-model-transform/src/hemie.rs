@@ -58,8 +58,8 @@ const RETIRED_SETTINGS: [(&str, &str); 3] = [
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
     ("HEMIE_infiltration_properties", "An existing building needs an air test. Remove the row and enter the air test result in Global Settings."),
 ];
-/// HEMIE's roof detail inputs (EPC 03 Tables 3.6.1.3 and 3.6.2.3; `roof_construction.py`): the
-/// ceiling, the joists and the insulation's conductivity.
+/// HEMIE's roof detail inputs (DESNZ-defined; `roof_construction.py`): the ceiling, the joists
+/// and the insulation's conductivity.
 const ROOF_DETAILS: [&str; 5] = [
     "ceiling_thickness",
     "ceiling_thermal_conductivity",
@@ -67,14 +67,14 @@ const ROOF_DETAILS: [&str; 5] = [
     "percentage_area_of_timber_joists",
     "insulation_thermal_conductivity",
 ];
-/// An unheated pitched roof's further details (EPC 03 Table 3.6.2.3; `roof_construction.py`).
+/// An unheated pitched roof's further details (DESNZ-defined; `roof_construction.py`).
 const LOFT_DETAILS: [&str; 4] = [
     "roof_characteristics",
     "rafter_depth",
     "percentage_area_of_timber_rafters",
     "air_gap_thermal_resistance",
 ];
-/// A heated pitched roof's details (EPC 03 Table 3.6.3.3; `HeatedPitchedRoofConstruction`).
+/// A heated pitched roof's details (DESNZ-defined; `HeatedPitchedRoofConstruction`).
 const HEATED_ROOF_DETAILS: [&str; 5] = [
     "internal_finish_thickness",
     "internal_finish_thermal_conductivity",
@@ -82,13 +82,13 @@ const HEATED_ROOF_DETAILS: [&str; 5] = [
     "percentage_area_of_timber_rafters",
     "insulation_thermal_conductivity",
 ];
-/// A floor's insulation details (EPC 03 Tables 3.5.1.3 to 3.5.4.2; `AbstractFloorConstruction`).
+/// A floor's insulation details (DESNZ-defined; `AbstractFloorConstruction`).
 const FLOOR_DETAILS: [&str; 3] = [
     "insulation_thickness",
     "insulation_type",
     "insulation_thermal_conductivity",
 ];
-/// The outside surface by material and finish (EPC 03 3.11.2.2 option 2): HEMIE takes both together.
+/// The outside surface by material and finish (DESNZ-defined): HEMIE takes both together.
 const SURFACE: [&str; 2] = ["surface_material", "finish"];
 
 /// Construction fields an element may state for itself, over the model's construction setting,
@@ -816,22 +816,28 @@ impl Ctx<'_> {
         let mut c = self.settings.construction(construction_type);
         c.insert("construction_type".into(), json!(construction_type));
         let first = elements[0];
-        // DESNZ-defined (EPC 03 Table 3.11.2.2): an outside surface is described one way, by
-        // its coefficient, its material and finish, or its colour. Elements that describe their
-        // own replace the setting's description, which HEMIE would otherwise rank over theirs.
-        const OUTSIDE_SURFACE: [(&str, &str); 4] = [
-            ("colour", "colour"),
-            ("surface_material", "surface_material"),
-            ("finish", "finish"),
-            ("solar_absorption_coeff", "solar_absorption_coefficient"),
-        ];
-        if takes_outside_surface(construction_type)
-            && elements
-                .iter()
-                .any(|e| OUTSIDE_SURFACE.iter().any(|(key, _)| e.get(key).is_some()))
+        // DESNZ-defined: an outside surface is described one way, by its coefficient, its
+        // material and finish, or its colour. Elements that describe their own replace the
+        // setting's description, which HEMIE would otherwise rank over theirs.
+        let surface = outside_surface(construction_type);
+        for e in elements {
+            if SURFACE.iter().any(|key| e.get(key).is_some())
+                && !surface.iter().any(|(key, _)| *key == SURFACE[0])
+            {
+                let fix = if surface.is_empty() {
+                    "Remove them"
+                } else {
+                    "Describe its outside surface by its colour or solar absorption coefficient"
+                };
+                self.errors.push(error("CONSTRUCTION", e.path(), format!("'{}' states a surface material or finish, which the existing-building EPC does not take for a {}. {fix}.", e.name, construction_type.replace('_', " "))));
+            }
+        }
+        if elements
+            .iter()
+            .any(|e| surface.iter().any(|(key, _)| e.get(key).is_some()))
         {
-            for (_, field) in OUTSIDE_SURFACE {
-                c.remove(field);
+            for (_, field) in surface {
+                c.remove(*field);
             }
         }
         for key in element_override_keys(construction_type) {
@@ -865,7 +871,7 @@ impl Ctx<'_> {
                 )),
             }
         }
-        if takes_outside_surface(construction_type) {
+        if !surface.is_empty() {
             match self.agreed(elements, "colour") {
                 Some(colour)
                     if ["Light", "Intermediate", "Dark"]
@@ -1032,7 +1038,20 @@ impl Ctx<'_> {
             } else {
                 "surface material"
             };
-            self.errors.push(error("CONSTRUCTION", first.path(), format!("{names} {verb} only part of the outside surface: give its {missing} too, or describe the surface by its colour.")));
+            let fix = format!("give its {missing} too, or describe the surface by its colour");
+            if elements
+                .iter()
+                .any(|e| SURFACE.iter().any(|key| e.get(key).is_some()))
+            {
+                self.errors.push(error(
+                    "CONSTRUCTION",
+                    first.path(),
+                    format!("{names} {verb} only part of the outside surface: {fix}."),
+                ));
+            } else {
+                // The half-stated pair is the fabric default's.
+                self.errors.push(error("CONSTRUCTION", format!("/Metadata/{SETTING}construction_{construction_type}"), format!("The {} fabric default states only part of the outside surface: {fix}, in Global Settings > Defaults > Fabric.", construction_type.replace('_', " "))));
+            }
         }
         self.require(construction_type, &mut c);
         let key = self.constructions.add(c);
@@ -1235,17 +1254,22 @@ fn heat_capacity_rule(construction_type: &str) -> HeatCapacity {
     }
 }
 
-/// HEMIE construction types with an outside surface: they take a colour and a solar absorption
-/// coefficient.
-fn takes_outside_surface(construction_type: &str) -> bool {
-    matches!(
-        construction_type,
-        "external_wall"
-            | "park_home_wall"
-            | "external_door"
-            | "above_external_area_floor"
-            | "park_home_floor"
-    ) || construction_type.ends_with("_roof")
+/// The outside surface fields a HEMIE construction type takes, as (element key, construction
+/// field): a colour and a solar absorption coefficient, and on most a surface material and its
+/// finish; none without an outside surface.
+fn outside_surface(construction_type: &str) -> &'static [(&'static str, &'static str)] {
+    const ALL: [(&str, &str); 4] = [
+        ("colour", "colour"),
+        ("solar_absorption_coeff", "solar_absorption_coefficient"),
+        (SURFACE[0], SURFACE[0]),
+        (SURFACE[1], SURFACE[1]),
+    ];
+    match construction_type {
+        "above_external_area_floor" | "park_home_floor" | "thatched_roof" => &ALL[..2],
+        "external_wall" | "park_home_wall" | "external_door" => &ALL,
+        t if t.ends_with("_roof") => &ALL,
+        _ => &[],
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4716,6 +4740,60 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 && e.message
                     .contains("only part of the outside surface: give its finish too")),
             "{errors:#?}"
+        );
+        // On the fabric default, the error names the row.
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        let settings = SETTINGS.replace(
+            r#"{""wall_construction_type"":""cavity""}"#,
+            r#"{""wall_construction_type"":""cavity"",""finish"":""Light buff""}"#,
+        );
+        let (_, errors, _) = run(&csv(&settings, &exposed, &ground(&BOX)));
+        assert!(
+            errors.iter().any(|e| e.path == "/Metadata/HEMIE_construction_external_wall"
+                && e.message.starts_with(
+                    "The external wall fabric default states only part of the outside surface: give its surface material too"
+                )),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_thatched_roofs_material_and_finish_stop_naming_the_plane_and_keep_the_colour() {
+        // A thatched roof takes no surface material: its planes' material and finish used to
+        // be dropped, with the setting's colour cleared.
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"thatched\"\":true,\"\"surface_material\"\":\"\"Slate\"\",\"\"finish\"\":\"\"Dense, dark slate\"\"}}\""))
+            .collect();
+        let text = house(roof).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_construction_thatched_roof,\"{\"\"colour\"\":\"\"Dark\"\"}\"",
+        );
+        let (_, errors, _) = run(&text);
+        for plane in ["Roof S", "Roof N"] {
+            assert!(
+                errors.iter().any(|e| e.path.ends_with(&format!("/{plane}"))
+                    && e.message.contains("states a surface material or finish, which the existing-building EPC does not take for a thatched roof")),
+                "{errors:#?}"
+            );
+        }
+        // A colour of its own is taken over the setting's.
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"thatched\"\":true,\"\"colour\"\":\"\"Light\"\"}}\""))
+            .collect();
+        let (model, errors, _) = run(&house(roof).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_construction_thatched_roof,\"{\"\"solar_absorption_coefficient\"\":0.5}\"",
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let roof = &model["Zone"]["building_parts"]["Main"]["roof"];
+        let construction = &model["Zone"]["constructions"][roof["construction"].as_str().unwrap()];
+        assert_eq!(construction["colour"], "Light");
+        assert!(
+            construction.get("solar_absorption_coefficient").is_none(),
+            "{construction:#?}"
         );
     }
 

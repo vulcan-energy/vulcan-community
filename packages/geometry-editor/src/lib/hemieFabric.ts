@@ -94,38 +94,58 @@ export function hemieHeatCapacityBands(constructionType: string | undefined): re
   return BANDED.has(constructionType) ? HEAT_CAPACITY_BANDS : NUMBER_ONLY.has(constructionType) ? [] : undefined;
 }
 
-/** EPC 03 Table 3.6.2.3 (`RoofCharacteristics.TILED_WITH_FELT` in HEMIE `roof_construction.py`). */
-const DEFAULT_ROOF_CHARACTERISTICS = 'Sheeted/tiled with felt/boards under tiles, but no cladding';
-/**
- * What HEMIE takes for a construction field left blank, as a placeholder; undefined when it has
- * no default (all DESNZ-defined). The heat capacities are the converter's (`require` in `hemie.rs`).
- */
-const DEFAULT_PLACEHOLDERS: Readonly<Record<string, string>> = {
-  // EPC 03 Tables 3.6.1.3, 3.6.2.3 and 3.6.3.3 (HEMIE-TN-026 in `roof_construction.py`).
-  ceiling_thickness: '12.5 (default)',
-  internal_finish_thickness: '12.5 (default)',
-  ceiling_thermal_conductivity: 'Plasterboard (default)',
-  internal_finish_thermal_conductivity: 'Plasterboard (default)',
-  joist_depth: 'By age band (default)',
-  rafter_depth: 'By age band (default)',
-  percentage_area_of_timber_joists: '13 (default)',
-  percentage_area_of_timber_rafters: '13 (default)',
-  roof_characteristics: `${DEFAULT_ROOF_CHARACTERISTICS} (default)`,
-  // HEMIE `roof.py` `air_space_resistance`: from the cold roof characteristics.
-  air_gap_thermal_resistance: 'By roof characteristics (default)',
-  // EPC 03 Tables 3.5.1.3 to 3.5.4.2 and 3.6.1.3 to 3.6.3.3 (mineral wool).
-  insulation_thermal_conductivity: 'Mineral wool (default)',
-  // EPC 03 Tables 3.5.1.3 to 3.5.4.2.
-  insulation_type: 'As built (default)',
-  // EPC 03 Table 3.11.2.3.
-  colour: 'Intermediate (default)',
-};
+// DESNZ-defined: what HEMIE takes for a blank insulation thickness, by age band A to M (mm).
+const ROOF_THICKNESS = {
+  cold: [100, 100, 100, 100, 100, 100, 100, 150, 170, 270, 270, 270, 300],
+  warm: [0, 0, 0, 0, 19, 74, 146, 164, 164, 285, 285, 317, 375],
+  // A heated pitched roof takes the flat roof's.
+  flat: [0, 0, 0, 0, 12, 50, 100, 125, 125, 175, 175, 238, 285],
+} as const;
+const FLOOR_THICKNESS = [0, 0, 0, 0, 0, 0, 0, 0, 25, 75, 100, 100, 140] as const;
+/** DESNZ-defined: a blank joist or rafter depth, by age band (mm). */
+const beamDepth = (band: number) => (band < 7 ? 100 : 150);
+/** The roof insulation locations HEMIE reads as a cold roof (at the joists); the others make it warm. */
+const COLD_LOCATIONS = new Set(['at_joists', 'at_joists_and_rafters', 'unknown']);
+const NO_INSULATION = new Set(['mini_flat_roof', 'mini_pitched_roof', 'thatched_roof']);
 
-/** The placeholder of a construction field HEMIE or the converter fills when blank: "12.5 (default)". */
-export function hemieDefaultPlaceholder(constructionType: string, field: string): string | undefined {
-  if (field !== 'areal_heat_capacity') return DEFAULT_PLACEHOLDERS[field];
-  if (constructionType.endsWith('_door')) return '50,000 (default)';
-  return constructionType === 'window' ? '20,000 (default)' : undefined;
+/**
+ * What HEMIE or the converter takes for a construction field left blank, as a placeholder, where
+ * the schema states no default (`ConstructionFieldInput` shows the schema's); undefined otherwise.
+ * The age band and insulation location give the numbers the band's tables hold; without them the
+ * placeholder names the rule. The heat capacities are the converter's (`require` in `hemie.rs`).
+ */
+export function hemieDefaultPlaceholder(constructionType: string, field: string, at: { band?: unknown; location?: unknown } = {}): string | undefined {
+  const band = 'ABCDEFGHIJKLM'.indexOf(typeof at.band === 'string' && at.band.length === 1 ? at.band : '-');
+  const byBand = (values: (band: number) => number) => (band < 0 ? 'By age band (default)' : `${values(band)} (default)`);
+  // A flat or unheated pitched roof with no insulation location has no insulation.
+  const located = !['flat_roof', 'unheated_pitched_roof'].includes(constructionType) || (typeof at.location === 'string' && at.location !== '');
+  switch (field) {
+    case 'areal_heat_capacity':
+      if (constructionType.endsWith('_door')) return '50,000 (default)';
+      return constructionType === 'window' ? '20,000 (default)' : undefined;
+    case 'insulation_thickness':
+      if (NO_INSULATION.has(constructionType) || !located) return 'None (default)';
+      if (constructionType.endsWith('_floor')) return byBand((b) => FLOOR_THICKNESS[b]);
+      if (constructionType === 'unheated_pitched_roof') {
+        return byBand((b) => ROOF_THICKNESS[COLD_LOCATIONS.has(String(at.location)) ? 'cold' : 'warm'][b]);
+      }
+      return constructionType.endsWith('_roof') ? byBand((b) => ROOF_THICKNESS.flat[b]) : undefined;
+    case 'joist_depth':
+    case 'rafter_depth':
+      return byBand(beamDepth);
+    case 'ceiling_thermal_conductivity':
+    case 'internal_finish_thermal_conductivity':
+      return 'Plasterboard (default)';
+    case 'percentage_area_of_timber_joists':
+    case 'percentage_area_of_timber_rafters':
+      return '13 (default)';
+    case 'air_gap_thermal_resistance':
+      return 'By roof characteristics (default)';
+    case 'insulation_type':
+      return 'As built (default)';
+    default:
+      return undefined;
+  }
 }
 
 /** The door element flag that marks the front door; one door only. */
@@ -163,6 +183,7 @@ export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[
   park_home_floor: [],
   park_home_flat_roof: [],
   park_home_pitched_roof: [],
+  thatched_roof: ['insulation_thickness'],
 };
 
 // The details HEMIE takes (`element_override_keys` in `hemie.rs`; keep the two in step).
@@ -171,7 +192,7 @@ const LOFT_DETAILS = [...ROOF_DETAILS, 'rafter_depth', 'percentage_area_of_timbe
 const FLOOR_DETAILS = ['insulation_type', 'insulation_thermal_conductivity'];
 /**
  * The construction details that only refine the U-value worked out from the age band, by
- * construction type (EPC 03 3.5 and 3.6, option 2): each has a DESNZ default, so they go under More.
+ * construction type (DESNZ-defined): each has a default, so they go under More.
  */
 export const HEMIE_DETAIL_FIELDS: Readonly<Record<string, readonly string[]>> = {
   flat_roof: ROOF_DETAILS,
@@ -191,7 +212,7 @@ export const HEMIE_DETAIL_FIELDS: Readonly<Record<string, readonly string[]>> = 
 };
 
 /**
- * How an outside surface is described (EPC 03 Table 3.11.2.2): by its colour (the simple
+ * How an outside surface is described (DESNZ-defined): by its colour (the simple
  * default), its material and finish, or a documented solar absorption coefficient. HEMIE ranks
  * the coefficient first, then the material and finish, then the colour.
  */
@@ -219,14 +240,14 @@ const PARK_HOME_WALL_FINISHES = {
 /**
  * The schema enum of each surface material's finishes, by construction type: HEMIE's
  * `*_SURFACE_MATERIAL_TO_FINISH` (`hemie/models/constructions`), which checks a finish against its
- * material (EPC 03 Table 3.11.2.5). The schema states the pairing only in HEMIE's code.
+ * material (DESNZ-defined). The schema states the pairing only in HEMIE's code.
  */
 const SURFACE_FINISHES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   external_wall: WALL_FINISHES, external_door: DOOR_FINISHES, park_home_wall: PARK_HOME_WALL_FINISHES,
   flat_roof: ROOF_FINISHES, unheated_pitched_roof: ROOF_FINISHES, heated_pitched_roof: ROOF_FINISHES,
   mini_flat_roof: ROOF_FINISHES, mini_pitched_roof: ROOF_FINISHES, park_home_flat_roof: ROOF_FINISHES, park_home_pitched_roof: ROOF_FINISHES,
 };
-/** Construction types with an outside surface (`takes_outside_surface` in `hemie.rs`), as the editor offers them. */
+/** Construction types with an outside surface (`outside_surface` in `hemie.rs`), as the editor offers them. */
 const OUTSIDE_SURFACE_TYPES = new Set([...Object.keys(SURFACE_FINISHES), 'above_external_area_floor', 'park_home_floor', 'thatched_roof']);
 
 /** The ways a construction type's outside surface can be described; undefined when it has none. */
@@ -254,10 +275,32 @@ export function statedOutsideSurfaceMethod(values: Readonly<Record<string, unkno
   return (['coefficient', 'material', 'colour'] as const).find((method) => keys[method].some((key) => values[key] !== undefined && values[key] !== null && values[key] !== ''));
 }
 
-/** "ceiling thickness", "outside surface": what an element's More holds for its construction type, for the group's hint. */
-export function hemieMoreLabels(constructionType: string, details: boolean): string[] {
+const JOISTS = ['joist_depth', 'percentage_area_of_timber_joists'];
+const RAFTERS = ['rafter_depth', 'percentage_area_of_timber_rafters'];
+/**
+ * The details a roof or floor shows for its insulation location, as HEMIE reads them (`roof.py`):
+ * a cold roof (at the joists, or unknown) its joists, a warm pitched roof its rafters, a warm flat
+ * roof neither; a roof with no location has no insulation, so no beams.
+ */
+export function hemieDetailFields(constructionType: string, location: unknown): readonly string[] {
+  const details = HEMIE_DETAIL_FIELDS[constructionType] ?? [];
+  const flat = constructionType === 'flat_roof' || constructionType === 'mini_flat_roof';
+  if (!flat && constructionType !== 'unheated_pitched_roof' && constructionType !== 'mini_pitched_roof') return details;
+  const where = typeof location === 'string' && location !== '' ? location : undefined;
+  const beams = !where ? [] : COLD_LOCATIONS.has(where) ? JOISTS : flat ? [] : RAFTERS;
+  return details.filter((key) => ![...JOISTS, ...RAFTERS].includes(key) || beams.includes(key));
+}
+
+/** The details a location hides that are stated in `values`, to clear when the location changes. */
+export function hemieHiddenDetails(constructionType: string, location: unknown, values: Readonly<Record<string, unknown>>): string[] {
+  const shown = hemieDetailFields(constructionType, location);
+  return (HEMIE_DETAIL_FIELDS[constructionType] ?? []).filter((key) => !shown.includes(key) && values[key] !== undefined);
+}
+
+/** "ceiling thickness", "outside surface": what an element's More holds, for the group's hint. */
+export function hemieMoreLabels(constructionType: string, details: boolean, location: unknown): string[] {
   const label = (field: string) => { const text = hemieFieldLabel(field).replace(/ \(.*\)$/, ''); return text.charAt(0).toLowerCase() + text.slice(1); };
-  return [...(details ? HEMIE_DETAIL_FIELDS[constructionType] ?? [] : []).map(label), ...(hemieOutsideSurface(constructionType) ? ['outside surface'] : [])];
+  return [...(details ? hemieDetailFields(constructionType, location) : []).map(label), ...(hemieOutsideSurface(constructionType) ? ['outside surface'] : [])];
 }
 
 /** The element fields under its editor's More: the details and the outside surface. */
@@ -418,7 +461,7 @@ function isRoomInRoofCeiling(element: Element, elements: readonly Element[]): bo
 }
 
 /** Roof constructions the converter builds once per building part, from all of the part's planes. */
-const SHARED_ROOF_TYPES: ReadonlySet<string> = new Set(['flat_roof', 'unheated_pitched_roof', 'heated_pitched_roof',
+const SHARED_ROOF_TYPES: ReadonlySet<string> = new Set(['flat_roof', 'unheated_pitched_roof', 'thatched_roof', 'heated_pitched_roof',
   'mini_flat_roof', 'mini_pitched_roof', 'park_home_flat_roof', 'park_home_pitched_roof']);
 
 const planCentroid = (element: Element) => {
@@ -432,7 +475,9 @@ const planCentroid = (element: Element) => {
  * values differ (`Ctx::agreed` in `hemie.rs`). Empty for any other element.
  */
 export function sharedRoofPlanes(element: Element, elements: readonly Element[], buildType?: string): Element[] {
-  const type = planePitch(element) === undefined ? undefined : hemieConstructionType(element, elements, buildType);
+  // A thatched plane is a loft plane that states it is thatched: the planes must agree.
+  const roofType = (plane: Element) => hemieConstructionType(plane, elements, buildType)?.replace('thatched_roof', 'unheated_pitched_roof');
+  const type = planePitch(element) === undefined ? undefined : roofType(element);
   if (!type || !SHARED_ROOF_TYPES.has(type)) return [];
   // ponytail: the building part is the ground floor under the plane's centre, where the converter
   // uses the storey outlines; a plane over no ground floor matches others over none. Match the
@@ -446,7 +491,7 @@ export function sharedRoofPlanes(element: Element, elements: readonly Element[],
   // Over no ground floor the part is not known here: claim no sharing rather than a false one.
   if (own < 0) return [];
   return elements.filter((other) => other.id !== element.id && !other.isPlaceholder && planePitch(other) !== undefined
-    && hemieConstructionType(other, elements, buildType) === type && part(other) === own);
+    && roofType(other) === type && part(other) === own);
 }
 
 /** The build type that gives the main walls, ground floor and roof the park home constructions. */
@@ -461,7 +506,7 @@ export function statedBuildType(settings: { build_type?: string; unreadMetadataR
  * The construction type the converter gives an element, as `hemie.rs` maps it (wall lines by
  * element type, roof planes by pitch, a bay's roof, a room in the roof's flat ceiling, ground
  * floors by floor type, floors over an unheated space, party floors and ceilings, windows, doors
- * by their wall; on a park home, its main walls, ground floor and roof); undefined for an element
+ * by their wall, a thatched loft's planes; on a park home, its main walls, ground floor and roof); undefined for an element
  * it takes no construction from.
  */
 export function hemieConstructionType(element: Element, elements: readonly Element[] = [], buildType?: string): string | undefined {
@@ -474,6 +519,7 @@ export function hemieConstructionType(element: Element, elements: readonly Eleme
     case 'flat_roof':
       return 'park_home_flat_roof';
     case 'unheated_pitched_roof':
+    case 'thatched_roof':
       return isRoomInRoofCeiling(element, elements) ? type : 'park_home_pitched_roof';
     default:
       return element.type === 'BuildingElementGround' ? 'park_home_floor' : type;
@@ -507,7 +553,8 @@ function hemieBaseConstructionType(element: Element, elements: readonly Element[
       if (isBayRoof(element)) return pitch === 0 ? 'mini_flat_roof' : 'mini_pitched_roof';
       if (pitch === 0) return isRoomInRoofCeiling(element, elements) ? 'unheated_pitched_roof' : 'flat_roof';
       if (pitch > 90) return 'above_external_area_floor';
-      if (pitch < 90) return hemieElementValue(element, 'is_unheated_pitched_roof') === true ? 'unheated_pitched_roof' : 'heated_pitched_roof';
+      if (pitch < 90 && hemieElementValue(element, 'is_unheated_pitched_roof') !== true) return 'heated_pitched_roof';
+      if (pitch < 90) return hemieElementValue(element, 'thatched') === true ? 'thatched_roof' : 'unheated_pitched_roof';
       return undefined;
     default:
       return undefined;
@@ -531,13 +578,9 @@ export type HemieFabric = Readonly<{
   band?: string;
   /** An opening's host wall's own age band, which HEMIE gives the opening over the Defaults'. */
   hostBand?: string;
-  /** The offered construction fields with a value, each the element's own or the Defaults'. */
-  values: Readonly<Record<string, unknown>>;
-  /** The element states a U-value or construction resistance, which the converter takes as documented. */
-  entered: boolean;
 }>;
 
-/** An element's fabric under construction bands; undefined when the converter takes none. */
+/** An element's construction type and age band under construction bands; undefined when the converter takes none. */
 export function hemieFabric(
   element: Element,
   settings: Readonly<Record<string, string>> | undefined,
@@ -546,12 +589,6 @@ export function hemieFabric(
 ): HemieFabric | undefined {
   const constructionType = hemieConstructionType(element, elements, buildType);
   if (!constructionType) return undefined;
-  const model = parseHemieConstruction(settings?.[hemieConstructionSetting(constructionType)]) ?? {};
-  const values: Record<string, unknown> = {};
-  for (const key of hemieConstructionKeys(constructionType)) {
-    const value = hemieElementValue(element, key) ?? model[key];
-    if (value !== undefined && value !== null && value !== '') values[key] = value;
-  }
   const opening = element.type === 'BuildingElementTransparent' || constructionType.endsWith('_door');
   const host = opening ? hostWall(element, elements) : undefined;
   const hostBand = host ? hemieElementValue(host, 'age_band') : undefined;
@@ -560,7 +597,5 @@ export function hemieFabric(
     constructionType,
     ...(band ? { band: String(band) } : {}),
     hostBand: hostBand === undefined ? undefined : String(hostBand),
-    values,
-    entered: hemieElementValue(element, 'u_value') !== undefined || hemieElementValue(element, 'thermal_resistance_construction') !== undefined,
   };
 }
