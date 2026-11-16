@@ -12,6 +12,8 @@ repository's Chicago TMY3 weather, windows always closed):
   loop      only the envelope coefficients 0; the interzone cracks and closed door keep their values, so
             the three zones form one sealed group with stack-driven exchange between them.
   fan       the loop model with a continuous zone exhaust fan in EAST_ZONE.
+  datum     the loop model with WEST_ZONE's AirflowNetwork:MultiZone:Zone object moved after NORTH_ZONE's, so AFN node 1
+            (the node whose pressure level the patch fixes) is EAST_ZONE instead of WEST_ZONE.
 
 Closed forms checked:
   1. Envelope: every link to outdoors carries exactly 0 kg/s in both directions at every timestep, and
@@ -22,6 +24,10 @@ Closed forms checked:
      temperatures equal the no-airflow reference within 1e-4 K.
   4. Fan: a fan that drives net air out of a sealed group has no solution; the run must stop with the
      patch's fatal error.
+  5. Datum: the node whose level is fixed is arbitrary, so the datum model's interzone link flows equal the
+     loop model's within the solver's absolute convergence tolerance at every timestep. The fixed node stays at
+     its starting pressure, 0 Pa to rounding, for the whole year in each run (WEST_ZONE in loop, EAST_ZONE in
+     datum), which shows the datum moved.
 """
 import argparse
 import csv
@@ -32,6 +38,7 @@ from pathlib import Path
 
 ABSOLUTE_TOLERANCE_KG_S = 1e-6  # the input's AirflowNetwork:SimulationControl absolute convergence tolerance
 TEMPERATURE_TOLERANCE_K = 1e-4
+DATUM_PRESSURE_PA = 1e-9  # the fixed node's pressure stays 0 to rounding (observed |p| < 1e-15 Pa)
 EXTERIOR_LINKS = ['SURFACE_1', 'WINDOW11', 'WINDOW12', 'SURFACE_2', 'SURFACE_8', 'SURFACE_9', 'SURFACE_14', 'SURFACE_15',
                   'WINDOW2', 'SURFACE_16']
 # Node 1 is the surface's zone, node 2 its partner's (testfiles/AirflowNetwork3zVent.idf).
@@ -77,7 +84,7 @@ def derive(source):
         edited.append((cls, name, text))
     outputs = ''.join(f'Output:Variable,*,{v},timestep;\n' for v in [
         'AFN Linkage Node 1 to Node 2 Mass Flow Rate', 'AFN Linkage Node 2 to Node 1 Mass Flow Rate', 'AFN Zone Infiltration Volume',
-        'AFN Zone Ventilation Volume']) + 'OutputControl:Files,Yes;\n'
+        'AFN Zone Ventilation Volume', 'AFN Node Total Pressure']) + 'OutputControl:Files,Yes;\n'
 
     def join(rows, extra=''):
         return ''.join(text for _, _, text in rows) + tail + outputs + extra
@@ -102,7 +109,10 @@ def derive(source):
         'ZoneHVAC:EquipmentList,East Equipment,SequentialLoad,Fan:ZoneExhaust,Sealed Exhaust Fan,1,1,,;',
         'ZoneHVAC:EquipmentConnections,EAST_ZONE,East Equipment,,Sealed Exhaust Inlet,East Zone Air Node,East Return Node;',
         'AirflowNetwork:MultiZone:Component:ZoneExhaustFan,Sealed Exhaust Fan,0,0.667;', '']))
-    return {'isolated': isolated, 'reference': reference, 'loop': loop, 'fan': fan}
+    west = next(i for i, row in enumerate(edited) if row[0] == 'AirflowNetwork:MultiZone:Zone' and row[1] == 'WEST_ZONE')
+    north = next(i for i, row in enumerate(edited) if row[0] == 'AirflowNetwork:MultiZone:Zone' and row[1] == 'NORTH_ZONE')
+    datum = join(edited[:west] + edited[west + 1:north + 1] + [edited[west]] + edited[north + 1:])
+    return {'isolated': isolated, 'reference': reference, 'loop': loop, 'fan': fan, 'datum': datum}
 
 
 def run(exe, weather, idf_text, out):
@@ -147,7 +157,7 @@ def main():
     if failures:
         raise SystemExit('; '.join(failures))
 
-    data = {name: table(args.out / name / 'eplusout.csv') for name in ['isolated', 'reference', 'loop']}
+    data = {name: table(args.out / name / 'eplusout.csv') for name in ['isolated', 'reference', 'loop', 'datum']}
     for name in ['isolated', 'loop']:
         steps = len(data[name]['Date/Time'])
         if steps != 8760 * 6:
@@ -189,13 +199,27 @@ def main():
         worst_zone = max(worst_zone, max(abs(value) for value in net))
     if worst_zone > ABSOLUTE_TOLERANCE_KG_S:
         failures.append(f'loop: zone net interzone flow {worst_zone} kg/s exceeds {ABSOLUTE_TOLERANCE_KG_S}')
+    # Datum: another node of the sealed group fixes the pressure level; the flows do not change.
+    worst_datum = 0.0
+    for link in INTERZONE_LINKS:
+        for direction in ['1 to Node 2', '2 to Node 1']:
+            loop_flow = column(data['loop'], link, f'AFN Linkage Node {direction} Mass Flow Rate')
+            datum_flow = column(data['datum'], link, f'AFN Linkage Node {direction} Mass Flow Rate')
+            worst_datum = max(worst_datum, max(abs(a - b) for a, b in zip(loop_flow, datum_flow)))
+    if worst_datum > ABSOLUTE_TOLERANCE_KG_S:
+        failures.append(f'datum: interzone flows differ from loop by {worst_datum} kg/s')
+    fixed = {name: [zone for zone in ZONES if max(map(abs, column(data[name], zone, 'AFN Node Total Pressure'))) < DATUM_PRESSURE_PA]
+             for name in ['loop', 'datum']}
+    if fixed != {'loop': ['WEST_ZONE'], 'datum': ['EAST_ZONE']}:
+        failures.append(f'datum: zones held at 0 Pa {fixed}, expected WEST_ZONE in loop and EAST_ZONE in datum')
     code, err, _ = results['fan']
     if code == 0 or 'has no airflow path to outdoors, and its fans and specified flows do not balance' not in err:
         failures.append('fan: the run did not stop with the sealed-group fatal error')
     if failures:
         raise SystemExit('FAILED: ' + '; '.join(failures))
     print(f'PASS: envelope flows exactly 0 in {8760 * 6} timesteps (isolated, loop); isolated: all {len(links)} links exactly 0, '
-          f'|dT| vs no-airflow reference <= {worst_temperature:.3g} K; loop: zone |net| <= {worst_zone:.3g} kg/s; fan run stopped.')
+          f'|dT| vs no-airflow reference <= {worst_temperature:.3g} K; loop: zone |net| <= {worst_zone:.3g} kg/s; datum: '
+          f'|flow - loop| <= {worst_datum:.3g} kg/s; fan run stopped.')
 
 
 if __name__ == '__main__':

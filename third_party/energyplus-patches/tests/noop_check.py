@@ -7,7 +7,8 @@ usage: noop_check.py --baseline EXE --patched EXE --cases FILE [FILE ...] --out 
 Each cases file has one "id<TAB>input<TAB>weather" line per case (blank lines and # comments ignored).
 --wait is a shell command run before every EnergyPlus run, for hosts that allow one run at a time.
 Every output file must match byte for byte after removing the lines that carry the run's date and
-elapsed time. Run it at every EnergyPlus re-pin, with the engine built with and without
+elapsed time. A case whose input and weather are byte-identical to an earlier case's is listed with
+"sameInputAs" and not run again. Run it at every EnergyPlus re-pin, with the engine built with and without
 0006-afn-zero-leakage.patch, on models that have a path to outdoors.
 """
 import argparse
@@ -51,8 +52,16 @@ def main():
     report = {'baseline': {'path': str(args.baseline), 'sha256': sha(args.baseline)},
               'patched': {'path': str(args.patched), 'sha256': sha(args.patched)}, 'cases': []}
     mismatches = 0
+    seen = {}
     for index, (case_id, case_input, weather) in enumerate(cases, 1):
         record = {'id': case_id, 'inputSha256': sha(case_input), 'weatherSha256': sha(weather)}
+        key = (record['inputSha256'], record['weatherSha256'])
+        if key in seen:
+            record['sameInputAs'] = seen[key]
+            report['cases'].append(record)
+            print(f'[{index}/{len(cases)}] {case_id}: same input as {seen[key]}', flush=True)
+            continue
+        seen[key] = case_id
         outputs = {}
         for label, exe in [('baseline', args.baseline), ('patched', args.patched)]:
             if args.wait:
@@ -79,7 +88,7 @@ def main():
         status = 'identical' if ok else f"DIFFERS {differing} exit {record['baseline']['exit']}"
         print(f'[{index}/{len(cases)}] {case_id}: {status}', flush=True)
         (args.out / 'noop-report.json').write_text(json.dumps(report, indent=1) + '\n')
-    print(f'{len(cases) - mismatches}/{len(cases)} cases byte-identical; report {args.out / "noop-report.json"}')
+    print(f'{len(seen) - mismatches}/{len(seen)} distinct models byte-identical ({len(cases)} cases); report {args.out / "noop-report.json"}')
     sys.exit(1 if mismatches else 0)
 
 

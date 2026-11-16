@@ -63,15 +63,18 @@ python3 tests/sealed_zero_check.py --energyplus PATCHED_ENERGYPLUS \
   --source ENERGYPLUS_CHECKOUT --out FRESH_DIR
 ```
 
-It checks four closed forms: every link to outdoors carries exactly 0 kg/s at every
+It checks five closed forms: every link to outdoors carries exactly 0 kg/s at every
 timestep; with every link at zero the zone temperatures equal EnergyPlus's no-airflow model
 of the same building; three zones joined by interzone leakage keep zero net flow per zone;
-and an unbalanced exhaust fan in a sealed group stops the run. Result on the patched
+the same three zones with a different node fixed (the AFN zone objects reordered) give the
+same flows, while the fixed node moves from WEST_ZONE to EAST_ZONE; and an unbalanced exhaust
+fan in a sealed group stops the run. Result on the patched
 26.1.0 build (macOS arm64):
 
 ```
 PASS: envelope flows exactly 0 in 52560 timesteps (isolated, loop); isolated: all 14 links exactly 0,
-|dT| vs no-airflow reference <= 0 K; loop: zone |net| <= 9.74e-07 kg/s; fan run stopped.
+|dT| vs no-airflow reference <= 0 K; loop: zone |net| <= 9.74e-07 kg/s; datum: |flow - loop| <= 6.18e-07 kg/s;
+fan run stopped.
 ```
 
 Unpatched 26.1.0 rejects the same inputs at schema validation.
