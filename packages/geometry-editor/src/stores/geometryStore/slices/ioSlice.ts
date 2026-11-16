@@ -14,7 +14,9 @@ import {
   calculateSuggestedVentilationHeight,
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
+  calculateDerivedWindowMidHeight,
 } from '../../../lib/zoneDerivation';
+import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from '../../../lib/windowOpenings';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
 import { resolveEffectiveVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
@@ -1287,12 +1289,17 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // in-session until the stored value diverges from that derived counterpart, so use the
           // same value-vs-derived check here rather than always overwriting it on export — that
           // silently discarded custom mid_height values on the very first save.
+          const openingPart = windowOpeningPart(element as unknown as WindowOpeningSource);
+          const openingFreeHeight = windowOpeningFreeHeight(element as unknown as WindowOpeningSource);
           const inSessionDerivedMidHeight =
             typeof element.height === 'number' && Number.isFinite(element.height) && element.height > 0
-              ? roundToTwoDecimals(
+              ? calculateDerivedWindowMidHeight(
                   (typeof element.base_height === 'number' && Number.isFinite(element.base_height)
                     ? element.base_height
-                    : 0) + lineFaceEnvelope(element).bottom + element.height / 2,
+                    : 0) + lineFaceEnvelope(element).bottom,
+                  element.height,
+                  openingPart,
+                  openingFreeHeight,
                 )
               : undefined;
           const midHeightIsCustom =
@@ -1309,7 +1316,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           const exportedMidHeight = typeof element.mid_height !== 'number' || !Number.isFinite(element.mid_height)
             ? undefined
             : !midHeightIsCustom && exportedHeight !== undefined && exportedBaseHeight !== undefined
-              ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
+              ? calculateDerivedWindowMidHeight(exportedBaseHeight - windowHeightOffset, exportedHeight, openingPart, openingFreeHeight)
               : roundFloatNoise(element.mid_height - windowHeightOffset);
           const windowRow = [
             escapeCSV(element.name),

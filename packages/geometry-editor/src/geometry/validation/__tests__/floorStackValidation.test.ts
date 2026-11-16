@@ -87,6 +87,16 @@ describe('canonical floor-stack validation', () => {
     ]));
   });
 
+  it('shows host element warnings as warnings, not issues', () => {
+    const elements = [wall('lower-wall', 'floor-0', 0, 2)];
+    const hostFindings = { elementWarnings: { 'lower-wall': [{ message: 'Stays shut.', fieldKey: 'y', source: 'geometry' as const }] } };
+
+    const result = validateElementCore(elements[0], { ...validationContext(elements), hostFindings });
+
+    expect(result.warnings).toContainEqual(expect.objectContaining({ fieldKey: 'y', message: expect.stringContaining('Stays shut.') }));
+    expect(result.issues.map((i) => i.message)).not.toContainEqual(expect.stringContaining('Stays shut.'));
+  });
+
   it('warns on the affected walls when adjacent storeys overlap', () => {
     const elements = [
       wall('lower-wall', 'floor-0', 0, 5),

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { ReactNode } from 'react';
 import type { Element } from '../../geometry/types';
 import {
   buildAddWindowOpeningPatch,
@@ -9,7 +10,6 @@ import {
   windowOpeningsUseTable,
   type WindowOpeningField,
   type WindowOpeningPatch,
-  type WindowOpeningRow,
   type WindowOpeningSource,
 } from '../../lib/windowOpenings';
 import { WINDOW_SECURITY_RISK_HELPER } from '../../lib/schemaDescriptionOverrides';
@@ -34,12 +34,16 @@ const partValue = (part: unknown, key: WindowOpeningField): number | undefined =
 };
 
 /**
- * a8/a9 openings beyond the first, in the main form: one row of inputs per part, and the button that adds one.
- * One opening stays in the three main-form inputs above; removing down to one part writes it back there.
+ * a8/a9 openings beyond the first, in the main form: one row of inputs per part, then the host's fields for that
+ * part, and the button that adds one. One opening stays in the three main-form inputs above; removing down to one
+ * part writes it back there.
  */
-export function WindowOpeningParts({ source, commit }: Readonly<{
+export function WindowOpeningParts({ source, commit, renderPartFields, openingKeys }: Readonly<{
   source: WindowOpeningSource;
   commit: (patch: WindowOpeningPatch) => void;
+  renderPartFields?: ((partIndex: number) => ReactNode) | null;
+  /** Window keys that describe its one opening: they move onto part 1 when a second part is added. */
+  openingKeys?: readonly string[];
 }>) {
   const openings = classifyWindowOpenings(source);
   // A list this HEM version cannot read is repaired in Advanced Fields ("Convert to a single opening").
@@ -47,7 +51,7 @@ export function WindowOpeningParts({ source, commit }: Readonly<{
   const extra = readExtraJsonRecord(source.extra_json);
   const parts = windowOpeningsUseTable(source) ? extra.window_part_list as readonly unknown[] : null;
   const writeParts = (next: readonly unknown[]) => commit(next.length === 1
-    ? buildRemainingOpeningPatch(source, readExtraJsonRecord(next[0]) as WindowOpeningRow)
+    ? buildRemainingOpeningPatch(source, readExtraJsonRecord(next[0]))
     : { extra_json: { ...extra, window_part_list: next } });
   return <>
     {parts?.map((part, index) => (
@@ -64,7 +68,8 @@ export function WindowOpeningParts({ source, commit }: Readonly<{
           const id = `window-opening-${index}-${key}`;
           return <div key={key} style={{ display: 'contents' }}>
             <label className="element-label" htmlFor={id}>{label}</label>
-            <div className="element-input" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="element-input" style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+              data-host-field-key={`window_part_list.${index}.${key}`}>
               <StandardInput id={id} key={String(value ?? '')} type="text" inputMode="decimal" unit={unit}
                 variant="ghost" size="md" className="flex-1" defaultValue={value ?? ''}
                 aria-invalid={missing || undefined}
@@ -84,11 +89,12 @@ export function WindowOpeningParts({ source, commit }: Readonly<{
             </div>
           </div>;
         })}
+        {renderPartFields?.(index)}
       </div>
     ))}
     <div style={FULL_ROW}>
       <button type="button" className="btn btn-small btn-secondary"
-        onClick={() => commit(parts ? { extra_json: { ...extra, window_part_list: [...parts, {}] } } : buildAddWindowOpeningPatch(source))}>
+        onClick={() => commit(parts ? { extra_json: { ...extra, window_part_list: [...parts, {}] } } : buildAddWindowOpeningPatch(source, openingKeys))}>
         Add openable part
       </button>
     </div>

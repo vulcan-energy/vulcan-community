@@ -154,7 +154,7 @@ fn merge_zone_lighting(
     Ok(into)
 }
 
-fn is_ui_only_extra_json_key(key: &str) -> bool {
+pub(crate) fn is_ui_only_extra_json_key(key: &str) -> bool {
     key.starts_with('_') || NAMED_UI_ONLY_EXTRA_JSON_KEYS.contains(&key)
 }
 

@@ -69,8 +69,11 @@ const legacyHeight = (entry: unknown): number | undefined =>
 export const isPhysicalPart = (entry: unknown): boolean =>
   isRecord(entry) && OPENING_FIELDS.some((key) => key in entry);
 
+/** A part's `_`-prefixed keys are host metadata (how it opens, say); the converter drops them. */
+const isPartMetadataKey = (key: string): boolean => key.startsWith('_');
+
 const hasOnlyPartFields = (entry: unknown): entry is Record<string, unknown> =>
-  isRecord(entry) && Object.keys(entry).every((key) => OPENING_FIELDS.includes(key as WindowOpeningField));
+  isRecord(entry) && Object.keys(entry).every((key) => OPENING_FIELDS.includes(key as WindowOpeningField) || isPartMetadataKey(key));
 
 function isConsistentLegacy(parts: unknown): parts is unknown[] {
   if (!Array.isArray(parts) || parts.length === 0) return false;
@@ -150,6 +153,38 @@ export function classifyWindowOpenings(row: WindowOpeningSource): WindowOpenings
     return { kind: 'repair', reason: 'incomplete_parts', partIssues };
   }
   return { kind: 'repair', reason: 'unsupported_list', partIssues: [] };
+}
+
+/** Which part of a single-opening window opens. Editor-only: the converter drops `_` keys. */
+export type WindowOpeningPart = 'whole' | 'top' | 'bottom';
+export const WINDOW_OPENING_PART_KEY = '_vulcan_ui_opening_part';
+
+/** True when the window has one opening: no list, or a list of one entry. */
+export function windowHasSingleOpening(row: WindowOpeningSource): boolean {
+  const parts = sourceField(row, 'window_part_list');
+  return parts === undefined || (Array.isArray(parts) && parts.length === 1);
+}
+
+/** The window's stated part. A window without the key, or with several openings, opens whole. */
+export function windowOpeningPart(row: WindowOpeningSource): WindowOpeningPart {
+  const stated = isRecord(row.extra_json) ? row.extra_json[WINDOW_OPENING_PART_KEY] : undefined;
+  return (stated === 'top' || stated === 'bottom') && windowHasSingleOpening(row) ? stated : 'whole';
+}
+
+/** The free height the window runs: one physical part's own, else the column. */
+export function windowOpeningFreeHeight(row: WindowOpeningSource): number | undefined {
+  const parts = sourceField(row, 'window_part_list');
+  return Array.isArray(parts) && parts.length === 1 && isPhysicalPart(parts[0])
+    ? finite((parts[0] as Record<string, unknown>).free_area_height)
+    : columnNumber(row, 'free_area_height');
+}
+
+/** `extra_json` stating the part; Whole removes the key, so the window is as it was. */
+export function withWindowOpeningPart(row: WindowOpeningSource, part: WindowOpeningPart): Record<string, unknown> {
+  const extra = isRecord(row.extra_json) ? { ...row.extra_json } : {};
+  if (part === 'whole') delete extra[WINDOW_OPENING_PART_KEY];
+  else extra[WINDOW_OPENING_PART_KEY] = part;
+  return extra;
 }
 
 /** One sentence per problem, for a form message or a validation issue. */
@@ -241,14 +276,18 @@ function buildSingleOpeningPatch(
   return patch;
 }
 
-/** The one opening left when a list goes down to one replaces the window's: a value it leaves blank is cleared. */
+/**
+ * The one opening left when a list goes down to one replaces the window's: a value it leaves blank is cleared.
+ * Its host metadata moves onto the window, where a single opening keeps it.
+ */
 export function buildRemainingOpeningPatch(
   row: WindowOpeningSource,
-  opening: WindowOpeningRow,
+  opening: WindowOpeningRow & Record<string, unknown>,
 ): WindowOpeningPatch {
   const patch: WindowOpeningPatch = {};
   for (const key of OPENING_FIELDS) patch[key] = opening[key] ?? '';
-  patch.extra_json = extraJsonWithHeight(row, opening.mid_height);
+  const metadata = Object.fromEntries(Object.entries(opening).filter(([key]) => isPartMetadataKey(key)));
+  patch.extra_json = { ...extraJsonWithHeight(row, opening.mid_height), ...metadata };
   return patch;
 }
 
@@ -297,8 +336,12 @@ export function buildWindowOpeningFieldPatch(
   return { ...patch, extra_json: extraJsonWithHeight(row, height) };
 }
 
-/** Adds a second opening. A closed window becomes one opening that the main form can complete. */
-export function buildAddWindowOpeningPatch(row: WindowOpeningSource): WindowOpeningPatch {
+/**
+ * Adds a second opening. A closed window becomes one opening that the main form can complete. The window's one
+ * opening becomes part 1 and takes `openingKeys` (host keys that describe that opening) off the window; the new part
+ * starts empty. The reverse of buildRemainingOpeningPatch.
+ */
+export function buildAddWindowOpeningPatch(row: WindowOpeningSource, openingKeys: readonly string[] = []): WindowOpeningPatch {
   const openings = classifyWindowOpenings(row);
   if (openings.kind === 'closed') {
     return {
@@ -312,12 +355,14 @@ export function buildAddWindowOpeningPatch(row: WindowOpeningSource): WindowOpen
     : openings.kind === 'needs_input'
       ? openings.row
       : Array.isArray(parts) && parts.length === 1 && hasOnlyPartFields(parts[0]) ? partRow(parts[0]) : {};
-  return {
-    extra_json: {
-      ...(isRecord(row.extra_json) ? row.extra_json : {}),
-      window_part_list: [first, {}],
-    },
-  };
+  const extra: Record<string, unknown> = { ...(isRecord(row.extra_json) ? row.extra_json : {}) };
+  const moved: Record<string, unknown> = {};
+  for (const key of [WINDOW_OPENING_PART_KEY, ...openingKeys]) {
+    if (!(key in extra)) continue;
+    moved[key] = extra[key];
+    delete extra[key];
+  }
+  return { extra_json: { ...extra, window_part_list: [{ ...first, ...moved }, {}] } };
 }
 
 /** A list that still follows the window's mid height keeps following it. */

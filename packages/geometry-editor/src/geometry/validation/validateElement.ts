@@ -3078,7 +3078,8 @@ export const validateElementCore = (
   const host = context.hostFindings;
   const withHost = withHostFindings(issues, warnings, host?.elements?.[element.id], host?.blockingWarnings);
   const prefixedIssues = withHost.issues.map(withPrefix);
-  const prefixedWarnings = [...withHost.warnings, ...(context.heatingSizingWarnings?.get(element.id) ?? [])].map(withPrefix);
+  const prefixedWarnings = [...withHost.warnings, ...(host?.elementWarnings?.[element.id] ?? []),
+    ...(context.heatingSizingWarnings?.get(element.id) ?? [])].map(withPrefix);
 
   const deduplicateByFieldKey = (items: ValidationIssue[]): ValidationIssue[] => {
     const sourcePriority: Record<ValidationSource, number> = { geometry: 0, schema: 1, fhs: 2, sizing: 3 };

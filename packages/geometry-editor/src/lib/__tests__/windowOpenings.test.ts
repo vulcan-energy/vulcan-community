@@ -20,6 +20,7 @@ import {
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   syncWindowPartListToMidHeight,
+  windowOpeningsUseTable,
 } from '../windowOpenings';
 
 const columns = { free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8 };
@@ -54,6 +55,13 @@ describe('classifyWindowOpenings mirrors map_window', () => {
     ['legacy list with zero area', withList([legacy(1)], { ...columns, max_window_open_area: 0 }), { kind: 'closed' }],
   ])('%s', (_name, row, expected) => {
     expect(classifyWindowOpenings(row)).toMatchObject(expected);
+  });
+
+  it('ignores a part\'s underscore keys (host metadata the converter drops)', () => {
+    const styled = { ...part(1.2), _host_style: 'side_hung' };
+    expect(classifyWindowOpenings(withList([styled, part(2)]))).toMatchObject({ kind: 'rows', source: 'parts', rows: [part(1.2), part(2)] });
+    expect(windowOpeningsUseTable(withList([styled, { _host_style: 'top_hung' }]))).toBe(true);
+    expect(classifyWindowOpenings(withList([styled, { _host_style: 'top_hung' }]))).toMatchObject({ kind: 'repair', reason: 'incomplete_parts' });
   });
 
   it('reads columns from extra_json when the row has none, like the converter', () => {
@@ -123,6 +131,27 @@ describe('window opening write path', () => {
       ...part(2),
       extra_json: { note: 'keep', window_part_list: [legacy(2)] },
     });
+  });
+
+  it('moves the remaining part\'s host metadata onto the window, replacing the window\'s', () => {
+    const row = withList([part(1.2), { ...part(2), _host_style: 'top_hung' }], { ...columns });
+    (row.extra_json as Record<string, unknown>)._host_style = 'side_hung';
+    expect(buildRemainingOpeningPatch(row, { ...part(2), _host_style: 'top_hung' }).extra_json)
+      .toEqual({ note: 'keep', _host_style: 'top_hung', window_part_list: [legacy(2)] });
+  });
+
+  it('moves the window\'s own opening keys onto part 1 when a second part is added, and back when one is left', () => {
+    const keys = ['_host_style', '_host_area'];
+    const single = { ...columns, extra_json: { window_part_list: [legacy(1.65)], note: 'keep', _host_style: 'side_hung', _host_area: 0.3, _host_kind: 'window' } };
+    const added = buildAddWindowOpeningPatch(single, keys);
+    expect(added.extra_json).toEqual({ note: 'keep', _host_kind: 'window',
+      window_part_list: [{ ...columns, _host_style: 'side_hung', _host_area: 0.3 }, {}] });
+    // Part 2 gets its values, then is removed: the window is as it was.
+    const parts = added.extra_json!.window_part_list as Record<string, unknown>[];
+    const removed = buildRemainingOpeningPatch({ ...single, ...added }, parts[0] as never);
+    expect(removed).toEqual({ ...columns, extra_json: single.extra_json });
+    // Without keys to move, or with none set, nothing moves.
+    expect(buildAddWindowOpeningPatch(single).extra_json).toMatchObject({ _host_style: 'side_hung', window_part_list: [columns, {}] });
   });
 
   it('clears what the remaining opening leaves blank, so the removed one leaves nothing behind', () => {

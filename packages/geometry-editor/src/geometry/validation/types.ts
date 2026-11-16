@@ -50,11 +50,13 @@ export interface ValidationResult {
 
 /**
  * Issues a host adds for a task the user chose to run (e.g. a private calculation). They show as
- * errors on their element or space label. `blockingWarnings` are existing warning messages the
- * task cannot run past: those show as errors, with the same wording.
+ * errors on their element or space label. `elementWarnings` show as warnings on their element and
+ * do not block. `blockingWarnings` are existing warning messages the task cannot run past: those
+ * show as errors, with the same wording.
  */
 export type HostValidationFindings = Readonly<{
   elements?: Readonly<Record<string, readonly ValidationIssue[]>>;
+  elementWarnings?: Readonly<Record<string, readonly ValidationIssue[]>>;
   spaceLabels?: Readonly<Record<string, readonly ValidationIssue[]>>;
   blockingWarnings?: readonly string[];
 }>;

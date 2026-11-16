@@ -232,6 +232,28 @@ export type GeometryInspectorOpeningFieldsContribution = Readonly<{
   render: ComponentType<GeometryInspectorElementFieldsContext>;
 }>;
 
+export type GeometryInspectorOpeningPartFieldsContext = Readonly<{
+  /** The glazed element whose `window_part_list` holds the part. */
+  element: Readonly<Record<string, unknown>>;
+  /** The part's position in `window_part_list`; its row is labelled "Opening {partIndex + 1}". */
+  partIndex: number;
+  /** Replace the part's list entry. Host keys on it start with `_`, so the converter drops them. */
+  onPatchPart(update: (current: Record<string, unknown>) => Record<string, unknown>): void;
+}>;
+
+/**
+ * Host fields in each row of a window with two or more opening parts. A field marks its row with
+ * `data-host-field-key` so validation rows can focus it.
+ */
+export type GeometryInspectorOpeningPartFieldsContribution = Readonly<{
+  render: ComponentType<GeometryInspectorOpeningPartFieldsContext>;
+  /**
+   * Window extra_json keys that describe its one opening. Adding a second part moves them onto part 1; when one part
+   * is left, its `_` keys move back onto the window.
+   */
+  openingKeys?: readonly string[];
+}>;
+
 /** A host's one-line note under a window's Blinds / curtains, from its saved treatment; null for none. */
 export type GeometryWindowTreatmentNoteContribution = Readonly<{
   note(treatment: unknown, treatmentUi: unknown): string | null;
@@ -257,6 +279,7 @@ export type GeometryInspectorContributions = Readonly<{
   constructionDetails: GeometryConstructionDetailsContribution | null;
   elementFields: GeometryInspectorElementFieldsContribution | null;
   openingFields: GeometryInspectorOpeningFieldsContribution | null;
+  openingPartFields: GeometryInspectorOpeningPartFieldsContribution | null;
   windowTreatmentNote: GeometryWindowTreatmentNoteContribution | null;
   spaceLabelFields: GeometrySpaceLabelFieldsContribution | null;
 }>;
@@ -271,6 +294,7 @@ export function defineGeometryInspectorContributions(
     constructionDetails: contributions.constructionDetails ?? null,
     elementFields: contributions.elementFields ?? null,
     openingFields: contributions.openingFields ?? null,
+    openingPartFields: contributions.openingPartFields ?? null,
     windowTreatmentNote: contributions.windowTreatmentNote ?? null,
     spaceLabelFields: contributions.spaceLabelFields ?? null,
   });

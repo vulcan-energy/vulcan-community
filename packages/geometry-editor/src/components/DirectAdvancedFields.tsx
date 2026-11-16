@@ -23,7 +23,6 @@ import {
   classifyWindowOpenings,
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
-  type WindowOpeningRow,
   type WindowOpeningSource,
 } from '../lib/windowOpenings';
 import { useGeometryStore } from '../stores/geometryStore';
@@ -562,7 +561,10 @@ function PhysicalWindowPartsField({ args }: { args: Parameters<typeof renderCont
         ...args,
         applyChange: (segments, next) => {
           if (Array.isArray(next) && next.length === 1 && isRecord(next[0])) {
-            args.applyChange(segments, buildRemainingOpeningPatch(source, next[0] as WindowOpeningRow).extra_json?.window_part_list);
+            // The window's one opening: the list's normal form and the part's host keys, beside the list.
+            const parent = segments.slice(0, -1);
+            const extra = { window_part_list: undefined, ...buildRemainingOpeningPatch(source, next[0]).extra_json };
+            args.applyChanges(Object.entries(extra).map(([key, value]) => [[...parent, key], value] as const));
           } else {
             args.applyChange(segments, next);
           }
@@ -650,6 +652,8 @@ function renderControlForProperty(args: {
    */
   replicateRequiredError: boolean;
   applyChange: (segments: string[], value: unknown) => void;
+  /** Several changes as one data change: applyChange twice would write the second over the first. */
+  applyChanges: (changes: readonly (readonly [string[], unknown])[]) => void;
 }): React.ReactElement {
   const { segments, resolved, value, label, scope, schema, config, elementType, replicateRequiredError, applyChange } = args;
   // An unstated field whose default the run applies is not "required": the default shows as its placeholder.
@@ -874,11 +878,15 @@ export function DirectAdvancedFields({
   const defs = (schema as { $defs?: unknown }).$defs ?? (config as { $defs?: unknown }).$defs;
   const resolutionRoot = { $defs: defs };
 
-  const applyChange = React.useCallback(
-    (segments: string[], value: unknown) => {
-      onDataChange(setAtPath(data, segments, value));
+  const applyChanges = React.useCallback(
+    (changes: readonly (readonly [string[], unknown])[]) => {
+      onDataChange(changes.reduce((next, [segments, value]) => setAtPath(next, segments, value), data));
     },
     [data, onDataChange],
+  );
+  const applyChange = React.useCallback(
+    (segments: string[], value: unknown) => applyChanges([[segments, value]]),
+    [applyChanges],
   );
 
   const engineKeys = (config as { collapsedEngineFields?: ReadonlySet<string> }).collapsedEngineFields ?? NO_ENGINE_FIELDS;
@@ -949,6 +957,7 @@ export function DirectAdvancedFields({
       required: parentRequired.includes(leafKey),
       replicateRequiredError: true,
       applyChange,
+      applyChanges,
     });
   }
 
@@ -987,6 +996,7 @@ export function DirectAdvancedFields({
       required: requiredList.includes(key),
       replicateRequiredError: false,
       applyChange,
+      applyChanges,
     });
 
   const laidOut = layout ? renderLayoutNode(layout, 'root') : null;
@@ -1179,11 +1189,15 @@ export function DirectSpecFields({
   const defs = (schema as { $defs?: unknown }).$defs ?? (config as { $defs?: unknown }).$defs;
   const resolutionRoot = { $defs: defs };
 
-  const applyChange = React.useCallback(
-    (segments: string[], value: unknown) => {
-      onDataChange(setAtPath(data, segments, value));
+  const applyChanges = React.useCallback(
+    (changes: readonly (readonly [string[], unknown])[]) => {
+      onDataChange(changes.reduce((next, [segments, value]) => setAtPath(next, segments, value), data));
     },
     [data, onDataChange],
+  );
+  const applyChange = React.useCallback(
+    (segments: string[], value: unknown) => applyChanges([[segments, value]]),
+    [applyChanges],
   );
 
   function renderNode(
@@ -1245,6 +1259,7 @@ export function DirectSpecFields({
       required: false,
       replicateRequiredError: false,
       applyChange,
+      applyChanges,
     });
   }
 

@@ -104,6 +104,13 @@ describe('window_part_list on physical-opening targets', () => {
     expect(screen.queryByText('Presets')).toBeNull();
   });
 
+  it('moves the remaining part\'s host keys onto the window when a table removal leaves one part', () => {
+    const onChange = vi.fn();
+    mount(windowElement({ keep: 1, window_part_list: [part(1.2), { ...part(2), _host_style: 'top_hung' }] }), physicalItems, onChange, false);
+    fireEvent.click(screen.getByRole('button', { name: /Remove .* 1$/ }));
+    expect(onChange).toHaveBeenLastCalledWith({ keep: 1, window_part_list: [{ mid_height_air_flow_path: 2 }], _host_style: 'top_hung' });
+  });
+
   it('leaves a selected window\'s openings to its main form', () => {
     mount(windowElement({ window_part_list: [part(1.2), part(2)] }), physicalItems);
     expect(screen.queryByRole('table')).toBeNull();
@@ -315,6 +322,71 @@ describe('main-form window opening inputs', () => {
     return store;
   }
 
+  describe('Part that opens', () => {
+    const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed');
+    const follows = { mid_height: 1.5, free_area_height: 0.3, max_window_open_area: 0.3 };
+
+    it('reads Whole on a file without the key, and opening the window writes nothing', () => {
+      const element = windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows);
+      const store = renderForm(element);
+      expect(pressed('Whole')).toBe('true');
+      expect(stored(store)).toEqual(element);
+    });
+
+    it('reads Top from the key, and opening the window writes nothing', () => {
+      const element = windowElement({ _vulcan_ui_opening_part: 'top', window_part_list: [{ mid_height_air_flow_path: 1.85 }] }, { ...follows, mid_height: 1.85 });
+      const store = renderForm(element);
+      expect(pressed('Top')).toBe('true');
+      expect(stored(store)).toEqual(element);
+    });
+
+    it('single opening: Top moves a following mid height to head − free height ÷ 2, Whole moves it back', () => {
+      const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows));
+      fireEvent.click(screen.getByRole('button', { name: 'Top' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.85, extra_json: { _vulcan_ui_opening_part: 'top', window_part_list: [{ mid_height_air_flow_path: 1.85 }] } });
+      expect(screen.getByText('top − free height ÷ 2')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Whole' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.5, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.5 }] } });
+      expect(stored(store).extra_json).not.toHaveProperty('_vulcan_ui_opening_part');
+    });
+
+    it('one-row part list: Bottom writes the one opening with its mid height at sill + free height ÷ 2', () => {
+      const store = renderForm(windowElement({ window_part_list: [follows] },
+        { free_area_height: undefined, mid_height: undefined, max_window_open_area: undefined }));
+      fireEvent.click(screen.getByRole('button', { name: 'Bottom' }));
+      expect(stored(store)).toMatchObject({ ...follows, mid_height: 1.15,
+        extra_json: { _vulcan_ui_opening_part: 'bottom', window_part_list: [{ mid_height_air_flow_path: 1.15 }] } });
+    });
+
+    it('keeps a typed mid height and offers the part\'s value instead', () => {
+      const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }] }, { free_area_height: 0.3 }));
+      fireEvent.click(screen.getByRole('button', { name: 'Top' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.65, extra_json: { _vulcan_ui_opening_part: 'top' } });
+      expect(screen.getByRole('button', { name: /Mid height: use top − free height ÷ 2, 1\.85 m/ })).toBeInTheDocument();
+    });
+
+    it('a7: a list that follows the mid height moves with it; one that does not stays', () => {
+      // The full schema with an a7 window part list: parts are airflow divisions, not openings.
+      const a7: GeometrySchemaPort = {
+        ...canonicalGeometrySchemaPort,
+        getElementSubschema: (mode, type, subtype) => (type === 'BuildingElementTransparent'
+          ? listSchema(legacyItems) : canonicalGeometrySchemaPort.getElementSubschema(mode, type, subtype)),
+      } as GeometrySchemaPort;
+      const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows), a7);
+      fireEvent.click(screen.getByRole('button', { name: 'Top' }));
+      expect(stored(store)).toMatchObject({ mid_height: 1.85, extra_json: { _vulcan_ui_opening_part: 'top', window_part_list: [{ mid_height_air_flow_path: 1.85 }] } });
+      cleanup();
+      const own = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.2 }] }, follows), a7);
+      fireEvent.click(screen.getByRole('button', { name: 'Bottom' }));
+      expect(stored(own)).toMatchObject({ mid_height: 1.15, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.2 }] } });
+    });
+
+    it('is not offered for several parts: each has its own mid height', () => {
+      renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
+      expect(screen.queryByRole('group', { name: 'Part that opens' })).toBeNull();
+    });
+  });
+
   it('shows the three inputs when the schema moved them into the parts', () => {
     renderForm(windowElement());
     for (const name of [/^Free area height/, /^Mid height/, /^Open area/]) {
@@ -346,6 +418,16 @@ describe('main-form window opening inputs', () => {
     });
   });
 
+  it('moves the host\'s opening keys onto part 1 when a second opening is added', () => {
+    const host = defineGeometryInspectorContributions({ openingPartFields: { render: () => null, openingKeys: ['_host_style'] } });
+    const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }], _host_style: 'side_hung', _host_kind: 'w' }),
+      canonicalGeometrySchemaPort, host);
+    fireEvent.click(screen.getByRole('button', { name: 'Add openable part' }));
+    expect(stored(store).extra_json).toMatchObject({ _host_kind: 'w',
+      window_part_list: [{ free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8, _host_style: 'side_hung' }, {}] });
+    expect(stored(store).extra_json).not.toHaveProperty('_host_style');
+  });
+
   it('writes the normal form when a removal leaves one part', () => {
     const store = renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove opening 1' }));
@@ -366,6 +448,19 @@ describe('main-form window opening inputs', () => {
     expect(after(screen.getByText('Add openable part'), host)).toBe(true);
     expect(after(screen.getByLabelText('Security risk'), host)).toBe(true);
     expect(after(host, screen.getByText('Frame area fraction'))).toBe(true);
+  });
+
+  it('shows the host part fields in each part row and saves them on that part', () => {
+    const hostParts = defineGeometryInspectorContributions({ openingPartFields: { render: ({ partIndex, onPatchPart }) => (
+      <button type="button" onClick={() => onPatchPart((current) => ({ ...current, _host_style: `style ${partIndex + 1}` }))}>
+        Host part {partIndex + 1}</button>) } });
+    const store = renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }), canonicalGeometrySchemaPort, hostParts);
+    expect(after(screen.getByText('Opening 2'), screen.getByText('Host part 2'))).toBe(true);
+    expect(after(screen.getByText('Host part 1'), screen.getByText('Opening 2'))).toBe(true);
+    fireEvent.click(screen.getByText('Host part 2'));
+    expect(stored(store).extra_json).toMatchObject({ window_part_list: [part(1.2), { ...part(2), _host_style: 'style 2' }] });
+    expect(screen.getByLabelText('Mid height', { selector: '#window-opening-1-mid_height' }).closest('[data-host-field-key]'))
+      .toHaveAttribute('data-host-field-key', 'window_part_list.1.mid_height');
   });
 
   it('asks for Security risk in plain words and saves the same boolean', () => {

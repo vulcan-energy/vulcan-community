@@ -194,6 +194,11 @@ import { useTargetRules } from '../../hooks/useTargetRules';
 import {
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
+  syncWindowPartListToMidHeight,
+  windowHasSingleOpening,
+  windowOpeningPart,
+  withWindowOpeningPart,
+  type WindowOpeningPart,
   windowOpeningRepairMessages,
   windowOpeningsUseTable,
   windowPartsArePhysical,
@@ -250,6 +255,9 @@ export interface BuildingElementTransparentFormState {
   maxWindowOpenAreaInput: NumericDraftInputBinding;
   derivedWindowMidHeight: number;
   derivedWindowMaxOpenArea: number;
+  /** Which part of a single opening opens; `null` when the choice does not apply. */
+  openingPart: WindowOpeningPart | null;
+  chooseOpeningPart: (part: WindowOpeningPart) => void;
   /** Exposed so hydrate() can seed these on selection change — same
    * "expose the ref on state for module-method access" idiom
    * buildingElementGround.tsx's totalAreaInputSetValueRef uses. */
@@ -329,16 +337,44 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     maxWindowOpenAreaInputSetValueRef.current = maxWindowOpenAreaInput.syncValue;
   }, [maxWindowOpenAreaInput.syncValue, midHeightInput.syncValue]);
 
-  /** Opening mid-height: base + height/2 in Vulcan's ground-relative editor coordinates. */
-  const derivedWindowMidHeight = useMemo(() => {
+  const windowSource = selectedWindow?.type === 'BuildingElementTransparent' ? selectedWindow as unknown as WindowOpeningSource : null;
+  const openingPart = windowSource && isExistingElementSelection() && windowHasSingleOpening(windowSource)
+    ? windowOpeningPart(windowSource)
+    : null;
+  /** Opening mid-height in Vulcan's ground-relative editor coordinates: the centre of the part that opens. */
+  const midHeightFor = (part: WindowOpeningPart): number => {
     const h = Number(ctx.shared.heightInput.value) || 0;
     const baseM =
       typeof ctx.shared.baseHeightInput.value === 'number' &&
       ctx.shared.baseHeightInput.value > 0
         ? ctx.shared.baseHeightInput.value
         : ctx.derivedBaseHeight;
-    return calculateDerivedWindowMidHeight(baseM + (selectedWindow ? lineFaceEnvelope(selectedWindow).bottom : 0), h);
-  }, [ctx.derivedBaseHeight, ctx.shared.baseHeightInput.value, ctx.shared.heightInput.value, selectedWindow]);
+    const freeH = typeof freeAreaHeightInput.value === 'number' ? freeAreaHeightInput.value : undefined;
+    return calculateDerivedWindowMidHeight(baseM + (selectedWindow ? lineFaceEnvelope(selectedWindow).bottom : 0), h, part, freeH);
+  };
+  const derivedWindowMidHeight = midHeightFor(openingPart ?? 'whole');
+
+  /** Choosing the part moves a mid height that follows the drawing; a typed one stays. */
+  const chooseOpeningPart = (part: WindowOpeningPart) => {
+    if (!windowSource || part === openingPart) return;
+    const current = typeof midHeightInput.value === 'number' ? midHeightInput.value : null;
+    const next = midHeightFor(part);
+    const follows = next > 0 && (current == null || current <= 0 || !isOverridden(derivedWindowMidHeight, current));
+    // a7: a list that follows the mid height keeps following it, as on a8/a9.
+    const followingList = !follows || windowPartsPhysical || typeof windowSource.mid_height !== 'number'
+      ? null
+      : syncWindowPartListToMidHeight(windowSource, windowSource.mid_height, next);
+    const midPatch: { mid_height?: number | ''; extra_json?: Record<string, unknown> } = !follows
+      ? {}
+      : windowPartsPhysical
+        ? buildWindowOpeningFieldPatch(windowSource, 'mid_height', next)
+        : { mid_height: next, ...(followingList ? { extra_json: followingList } : {}) };
+    ctx.commitExistingElementDraft({
+      ...midPatch,
+      extra_json: withWindowOpeningPart({ ...windowSource, extra_json: midPatch.extra_json ?? windowSource.extra_json }, part),
+    } as Partial<Element>);
+    if (follows) midHeightInput.setValue(next);
+  };
 
   /** Max openable area from geometry: width x free-area height, capped by total window area. */
   const derivedWindowMaxOpenArea = useMemo(() => {
@@ -460,10 +496,23 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
     maxWindowOpenAreaInput,
     derivedWindowMidHeight,
     derivedWindowMaxOpenArea,
+    openingPart,
+    chooseOpeningPart,
     prevDerivedWindowMidHeightRef,
     prevDerivedWindowMaxOpenAreaRef,
   };
 }
+
+const OPENING_PART_OPTIONS: Array<{ value: WindowOpeningPart; label: string }> = [
+  { value: 'whole', label: 'Whole' },
+  { value: 'top', label: 'Top' },
+  { value: 'bottom', label: 'Bottom' },
+];
+const MID_HEIGHT_SOURCE: Record<WindowOpeningPart, string> = {
+  whole: 'base + height ÷ 2',
+  top: 'top − free height ÷ 2',
+  bottom: 'base + free height ÷ 2',
+};
 
 const SECTION_BUTTONS_STYLE = { display: 'flex', gap: 8, flexWrap: 'wrap' } as const;
 
@@ -544,6 +593,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       selectedSlopedDimensions,
       renderLinearDimensionsFields,
       openingFields,
+      renderOpeningPartFields,
+      openingPartKeys,
     } = ctx;
 
     // ElementCreator's getCurrentElementData has one OTHER call site (the
@@ -637,6 +688,17 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         </div>
         {!openingsInTable && !state.constructionBands && <>
+        {state.openingPart ? <>
+          <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Part that opens</div>
+          <div className="element-input" ref={registerBaseFieldRef('openingPart')}>
+            <CompactSegmentedControl
+              value={state.openingPart}
+              options={OPENING_PART_OPTIONS}
+              onChange={state.chooseOpeningPart}
+              ariaLabel="Part that opens"
+            />
+          </div>
+        </> : null}
         {renderFieldLabel('Free area height (m)', elementType)}
         <div
           className="element-input"
@@ -661,8 +723,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           <DerivedSource
             derived={state.derivedWindowMidHeight > 0 ? state.derivedWindowMidHeight : null}
             current={state.midHeightInput.value}
-            info={<SourceNote>base + height ÷ 2</SourceNote>}
-            useLabel="Use base + height ÷ 2"
+            info={<SourceNote>{MID_HEIGHT_SOURCE[state.openingPart ?? 'whole']}</SourceNote>}
+            useLabel={`Use ${MID_HEIGHT_SOURCE[state.openingPart ?? 'whole']}`}
             unit="m"
             fieldLabel="Mid height"
             onUse={(value) => {
@@ -729,7 +791,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         </>}
         {openingNote ? <div className="field-source-note">{openingNote}</div> : null}
         {windowSource && state.windowPartsPhysical && !state.constructionBands && (
-          <WindowOpeningParts source={windowSource} commit={(patch) => commitExistingElementDraft(patch as Partial<Element>)} />
+          <WindowOpeningParts source={windowSource} commit={(patch) => commitExistingElementDraft(patch as Partial<Element>)}
+            renderPartFields={renderOpeningPartFields} openingKeys={openingPartKeys} />
         )}
         {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
