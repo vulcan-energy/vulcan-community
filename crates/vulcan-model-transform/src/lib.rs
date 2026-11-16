@@ -629,6 +629,11 @@ pub struct TransformOutput {
     /// The pinned HEM Database's weather compensation curves, on a target that references products.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub weather_curves: Vec<WeatherCurve>,
+    /// HEM:EPC dwelling inputs the pinned Orchestrator accepts but its schema hides, for the host
+    /// to add after validation where the job input lacks them (`hemie::hidden_dwelling_inputs`,
+    /// DESNZ question E7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden_inputs: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -705,11 +710,12 @@ pub fn transform_geometry_csv(
     let mut model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
+    let mut schema_omissions = builder.take_schema_omissions();
+    let mut hidden_inputs = None;
     if request.profile.references_products() {
         epc_mappings::drop_mvhr_vent_type(&mut model);
+        hidden_inputs = hemie::hidden_dwelling_inputs(&model, &csv_data, &mut schema_omissions);
     }
-
-    let mut schema_omissions = builder.take_schema_omissions();
     let schema: Value = serde_json::from_str(&request.schema_json)
         .map_err(|error| TransformError::Schema(error.to_string()))?;
     let finalized =
@@ -769,6 +775,7 @@ pub fn transform_geometry_csv(
         provenance: builder.take_provenance(),
         derived_defaults: builder.take_derived_defaults(),
         weather_curves: builder.weather_curves(),
+        hidden_inputs,
     })
 }
 

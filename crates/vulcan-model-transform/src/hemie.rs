@@ -3482,6 +3482,123 @@ fn placed_windows<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
     }
 }
 
+/// Assumption pending DESNZ E7 (Vulcan's assumption registry lists it): the dwelling inputs the
+/// pinned Orchestrator hides from its schema and otherwise sets to 1 (building length and width,
+/// ground floor area, storeys in dwelling), which the EPC wrapper sizes the hot water pipework
+/// from. Length and width are the sides of the footprint's minimum rectangle and the ground floor
+/// area its lowest floor, as HEMIE's later Geometry derives them: on an existing building from
+/// each building part's first storey, on a new build from the drawn ground floors, or with none
+/// (a flat over another dwelling) from the lowest storey's floors of any type. Storeys on an
+/// existing building are HEMIE's (`calculate_storeys_in_dwelling`), which the guidance says HEMIE
+/// derives, so a stated number is not used there; on a new build they come from the model. The
+/// host adds only a field the job input lacks, after validation. With no footprint, a notice
+/// says the run keeps the Orchestrator's 1. If DESNZ exposes or derives them, delete this.
+pub(crate) fn hidden_dwelling_inputs(
+    model: &Value,
+    csv: &Rows,
+    notices: &mut Vec<SchemaOmission>,
+) -> Option<Value> {
+    let area = |rings: &[Vec<P>]| rings.iter().map(|r| signed_area(r).abs()).sum::<f64>();
+    let (points, ground_floor_area, storeys) = if model["Zone"]["model_type"] == "hemie" {
+        let parts: Vec<&Value> = model["Zone"]["building_parts"]
+            .as_object()
+            .into_iter()
+            .flat_map(Map::values)
+            .collect();
+        let dwelling = model["Zone"]["ventilation_zone_base_height"].as_f64();
+        let firsts: Vec<(Option<f64>, Vec<P>)> = parts
+            .iter()
+            .filter_map(|part| {
+                let ring = linear_ring(part["storeys"][0]["floorplan"].as_str()?)?;
+                Some((part["base_height"].as_f64().or(dwelling), ring))
+            })
+            .collect();
+        let lowest = firsts.iter().filter_map(|(base, _)| *base).reduce(f64::min);
+        let ground: Vec<Vec<P>> = firsts
+            .iter()
+            .filter(|(base, _)| *base == lowest)
+            .map(|(_, ring)| ring.clone())
+            .collect();
+        // HEMIE's count: the distinct base heights of every building part's storeys, each the
+        // part's base plus the ceiling heights and storey gaps below it. A room in roof is not
+        // a storey.
+        let mut bases: Vec<f64> = Vec::new();
+        for part in &parts {
+            let Some(base) = part["base_height"].as_f64().or(dwelling) else {
+                continue;
+            };
+            let mut below = 0.0;
+            for storey in part["storeys"].as_array().into_iter().flatten() {
+                if !bases.contains(&(base + below)) {
+                    bases.push(base + below);
+                }
+                below += storey["ceiling_height"].as_f64().unwrap_or(0.0) + STOREY_GAP;
+            }
+        }
+        (
+            firsts.into_iter().flat_map(|(_, ring)| ring).collect(),
+            area(&ground),
+            (!bases.is_empty()).then_some(bases.len()),
+        )
+    } else {
+        let floors: Vec<El> = elements(csv)
+            .into_iter()
+            .filter(|e| e.pts.len() >= 3)
+            .filter(|e| e.ty == "BuildingElementGround" || e.num("pitch") == Some(180.0))
+            .collect();
+        let lowest = floors.iter().map(|e| e.level).min();
+        let grounds: Vec<Vec<P>> = if floors.iter().any(|e| e.ty == "BuildingElementGround") {
+            floors
+                .into_iter()
+                .filter(|e| e.ty == "BuildingElementGround")
+                .map(|e| e.pts)
+                .collect()
+        } else {
+            floors
+                .into_iter()
+                .filter(|e| Some(e.level) == lowest)
+                .map(|e| e.pts)
+                .collect()
+        };
+        (
+            grounds.concat(),
+            area(&grounds),
+            crate::epc_mappings::storeys(csv),
+        )
+    };
+    if points.len() < 3 || ground_floor_area <= 0.0 {
+        notices.push(notice("/Zone", "The drawing has no floor to take the dwelling's length, width and ground floor area from, so the run sizes the hot water pipework from the EPC's own 1 m by 1 m. Draw the dwelling's lowest floor.".into()));
+        return None;
+    }
+    let rect = min_rectangle(&points);
+    let (a, b) = (dist(rect[0], rect[1]), dist(rect[1], rect[2]));
+    let mut inputs = json!({
+        "building_length": a.max(b),
+        "building_width": a.min(b),
+        "ground_floor_area": ground_floor_area,
+    });
+    if let Some(storeys) = storeys {
+        inputs["General"] = json!({"storeys_in_dwelling": storeys});
+    }
+    Some(inputs)
+}
+
+/// The points of a `LINEARRING (x y, ...)` floorplan, without the closing point.
+fn linear_ring(wkt: &str) -> Option<Vec<P>> {
+    let inner = wkt.strip_prefix("LINEARRING (")?.strip_suffix(')')?;
+    let mut ring: Vec<P> = inner
+        .split(',')
+        .map(|p| {
+            let mut v = p.split_whitespace().map(str::parse::<f64>);
+            Some([v.next()?.ok()?, v.next()?.ok()?])
+        })
+        .collect::<Option<_>>()?;
+    if ring.len() > 1 && ring.first() == ring.last() {
+        ring.pop();
+    }
+    Some(ring)
+}
+
 /// Settings rows for the three leakage-estimate inputs the existing-building input cannot derive
 /// from the drawing (HEMIE's `GeometryInfiltrationProperties`).
 pub(crate) const OPEN_FIREPLACES: &str = "HEMIE_number_of_open_fireplaces";
@@ -4348,6 +4465,108 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .map(|w| w["construction"].as_str().unwrap())
             .collect();
         assert_eq!(names, ["w1", "w2"]);
+    }
+
+    #[test]
+    fn hidden_dwelling_inputs_take_the_footprints_minimum_rectangle_and_lowest_floor() {
+        let text = house(gable_roof());
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(&text)
+            .expect("csv");
+        let (existing, errors, _) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let mut notices = Vec::new();
+        let expected =
+            json!({"building_length": 8.0, "building_width": 6.0, "ground_floor_area": 48.0});
+        // Existing: from the building parts' first storeys, and HEMIE's storey count; new build:
+        // from the drawn ground floor.
+        let mut with_storeys = expected.clone();
+        with_storeys["General"] = json!({"storeys_in_dwelling": 2});
+        assert_eq!(
+            hidden_dwelling_inputs(&existing, &rows, &mut notices),
+            Some(with_storeys)
+        );
+        assert_eq!(
+            hidden_dwelling_inputs(&json!({}), &rows, &mut notices),
+            Some(expected)
+        );
+        assert!(notices.is_empty(), "{notices:#?}");
+        // A flat over another dwelling has no ground floor: its lowest storey's floors of any
+        // type give the footprint (the party floor here, not the floor above).
+        let floor = |name: &str, ty: &str, z: f64, x: f64| -> Row {
+            [
+                ("Name", json!(name)),
+                ("Type", json!(ty)),
+                ("pitch", json!(180.0)),
+                (
+                    "coords",
+                    json!(format!("0,0,{z}|{x},0,{z}|{x},5,{z}|0,5,{z}")),
+                ),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
+        };
+        let flat: Rows = [(
+            "Non-Exposed Elements".to_string(),
+            vec![
+                floor(
+                    "Party floor",
+                    "BuildingElementAdjacentConditionedSpace",
+                    0.0,
+                    9.0,
+                ),
+                floor("Upper floor", "BuildingElementOpaque", 3.0, 4.0),
+            ],
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            hidden_dwelling_inputs(&json!({}), &flat, &mut notices),
+            Some(json!({"building_length": 9.0, "building_width": 5.0, "ground_floor_area": 45.0}))
+        );
+        // No footprint: a notice says the run keeps the Orchestrator's own values.
+        assert_eq!(
+            hidden_dwelling_inputs(&json!({}), &Rows::new(), &mut notices),
+            None
+        );
+        assert!(notices.len() == 1 && notices[0].message.contains("1 m by 1 m"));
+        assert_eq!(
+            linear_ring("LINEARRING (0 0, 2 0, 2 1, 0 0)"),
+            Some(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0]])
+        );
+    }
+
+    #[test]
+    fn existing_storeys_are_hemies_distinct_storey_base_heights() {
+        let part = |base: Option<f64>, ceilings: &[f64]| {
+            let storeys: Vec<Value> = ceilings
+                .iter()
+                .map(|c| json!({"ceiling_height": c, "floorplan": "LINEARRING (0 0, 4 0, 4 4, 0 4, 0 0)"}))
+                .collect();
+            let mut p = json!({"storeys": storeys});
+            if let Some(base) = base {
+                p["base_height"] = json!(base);
+            }
+            p
+        };
+        let storeys = |parts: Value| {
+            let model = json!({"Zone": {"model_type": "hemie", "ventilation_zone_base_height": 0.0, "building_parts": parts}});
+            hidden_dwelling_inputs(&model, &Rows::new(), &mut Vec::new()).unwrap()["General"]
+                ["storeys_in_dwelling"]
+                .clone()
+        };
+        // A two-storey house with a one-storey extension at the same base: two storeys; a room
+        // in roof is on the roof, not a storey.
+        assert_eq!(
+            storeys(json!({"Main": part(None, &[2.4, 2.4]), "Ext": part(None, &[2.4])})),
+            2
+        );
+        // A part a few steps down is a storey of its own, as HEMIE counts it.
+        assert_eq!(
+            storeys(json!({"Main": part(None, &[2.4, 2.4]), "Ext": part(Some(-0.3), &[2.4])})),
+            3
+        );
     }
 
     #[test]

@@ -1522,7 +1522,7 @@ fn plan_points(row: &BTreeMap<String, Value>) -> Vec<[f64; 2]> {
         .collect()
 }
 
-fn storeys(csv: &Rows) -> Option<usize> {
+pub(crate) fn storeys(csv: &Rows) -> Option<usize> {
     let stated = csv.get("Metadata").into_iter().flatten().find_map(|row| {
         match crate::builder::extract_metadata_field(row) {
             (Some(name), Some(value)) if name == "General_storeys_in_dwelling" => value
