@@ -13,6 +13,7 @@ import type {
 import { geometryDocumentContentsEqual } from '../../../packages/geometry-document/src/documentContents';
 import type { GeometryStoreApi } from '../../../packages/geometry-editor/src/stores/geometryStore';
 import { GEOMETRY_DIRTY_RECHECK_DEBOUNCE_MS } from '../../../packages/geometry-editor/src/lib/useGeometryDirty';
+import { CURRENT_VULCAN_CSV_VERSION } from '../../../packages/geometry-editor/src/geometry/io/parseCsvToGeometry';
 
 export type CommunityGeometryStoreDocumentBridgeOperation =
   | 'load'
@@ -288,7 +289,7 @@ export function createCommunityGeometryStoreDocumentBridge(
   const saveCurrent = async () => {
     store.getState().requestCsvUpgrade();
     const savedText = store.getState().generateCSV(); // Save requires resolved legacy meaning.
-    const upgrading = store.getState().csvUpgradeRequested && store.getState().sourceCsvVersion < 3;
+    const upgrading = store.getState().csvUpgradeRequested && store.getState().sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION;
     const document = flush();
     if (document.text !== savedText) {
       // Draft synchronization retains the source format until Save commits.
@@ -306,7 +307,7 @@ export function createCommunityGeometryStoreDocumentBridge(
     // draft too, so a late save cannot acknowledge an edited U-value meaning.
     if (upgrading && result.status === 'completed' && session.getSnapshot().revision === savedRevision
       && store.getState().generateCSV({ allowUnresolvedMigration: true }) === savedDraftText) {
-      store.setState({ sourceCsvVersion: 3, sourceProvenanceMarkersVersion: undefined, csvUpgradeRequested: false });
+      store.setState({ sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION, sourceProvenanceMarkersVersion: undefined, csvUpgradeRequested: false });
     }
     return result;
   };

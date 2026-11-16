@@ -53,6 +53,7 @@ import {
 } from './csvSectionRows';
 import { ingestGeometryTabularSections, NUMBER_CELL } from './ingestGeometryTabularSections';
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
+import { systemsRowVentilationBaseHeight } from '../../lib/effectiveDwellingDetails';
 import { parseProvenanceMetadataValue, PROVENANCE_METADATA_KEY, type ProvenanceSource } from '../../lib/provenance';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
@@ -859,10 +860,11 @@ export const parseCsvToGeometry = (
       ground.total_area = automaticTotal;
     }
   }
+  // The base the file states, where the converter reads it: the Metadata row, else a Systems row.
   const referenceNormalizedElements = migrateVulcanCsvElementsForEditor(
     newElements,
     csvVersion,
-    complianceSettings.Ventilation_ventilation_zone_base_height ?? 0,
+    complianceSettings.Ventilation_ventilation_zone_base_height ?? systemsRowVentilationBaseHeight(newElements) ?? 0,
   );
   const normalizedElements = normalizeThermalBridgeSourceLinks(referenceNormalizedElements, globalOffset);
 

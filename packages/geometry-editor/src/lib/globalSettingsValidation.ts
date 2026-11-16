@@ -10,7 +10,7 @@ import type {
 } from '../geometry/types';
 import type { GeometryState } from '../stores/geometryStore';
 import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
-import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight } from './effectiveDwellingDetails';
+import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight } from './effectiveDwellingDetails';
 import { targetFieldAccepts, targetFieldAvailability, targetFieldEnum } from './schemaCache';
 import { resolveBuildingElementPitch } from '../geometry/derivePitchFromGeometry';
 import { getAreaBasedElementExportGeometry } from './elementArea';
@@ -127,7 +127,7 @@ export function resolveEffectiveVentilationZoneBaseHeight(args: {
 }): number | undefined {
   const explicit = finiteNumber(
     args.complianceSettings.Ventilation_ventilation_zone_base_height,
-  );
+  ) ?? systemsRowVentilationBaseHeight(args.elements);
   if (explicit !== undefined) return explicit;
 
   const dwelling = calculateDwellingDetailsSuggestion(args.elements);
@@ -331,7 +331,8 @@ export function collectGlobalSettingsWarnings(args: {
     );
   }
 
-  const explicitBaseHeight = finiteNumber(settings.Ventilation_ventilation_zone_base_height);
+  const metadataBaseHeight = finiteNumber(settings.Ventilation_ventilation_zone_base_height);
+  const explicitBaseHeight = metadataBaseHeight ?? systemsRowVentilationBaseHeight(args.elements);
   if (explicitBaseHeight !== undefined && buildType !== undefined) {
     const derivedVentHeight = calculateSuggestedVentilationHeight(args.elements, args.floors);
     const effectiveVentHeight = finiteNumber(settings.AirPermeability_ventilation_zone_height)
@@ -365,7 +366,7 @@ export function collectGlobalSettingsWarnings(args: {
       if (Math.abs(explicitBaseHeight - suggestedBaseHeight) > STOREY_BASE_HEIGHT_TOLERANCE_M) {
         const suggestedBy = buildType === 'house' ? 'build type' : 'storey of dwelling';
         warnings.push(
-          `Ventilation zone base height is ${explicitBaseHeight} m, but ${suggestedBy} suggests ${suggestedBaseHeight} m.`,
+          `Ventilation zone base height is ${explicitBaseHeight} m${metadataBaseHeight === undefined ? ' (from a Systems InfiltrationVentilation row)' : ''}, but ${suggestedBy} suggests ${suggestedBaseHeight} m.`,
         );
       }
     }

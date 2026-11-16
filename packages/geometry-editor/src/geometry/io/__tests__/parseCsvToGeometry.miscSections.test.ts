@@ -250,6 +250,72 @@ Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,${terminal},,315,90,,"1.00
     expect(ventHeights(upgraded)).toMatchObject({ vent: 4.3, terminal: 4.6 });
   });
 
+  // The file states the base the export subtracted, where the converter reads it, so a reload adds
+  // back the same base: a Systems row's, or the editor's derived base written as a Metadata row.
+  const baseSourceCsv = (metadataRows: string, systemsBase?: number) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+VulcanCsvVersion,4,,,,,,,,,,,,,
+${metadataRows}
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,1.4,0.4,"0.000,0.000,1.000|1.000,0.000,1.000","{}"
+
+Ventilation Systems,,,,,,,,,,,,,
+Name,Type,length,duct_type,terminal_type,parent_element,host_element,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,coords,extra_json
+Trickle,Vents,,,,,,1.5,30,90,90,,"4.000,5.000,1.000","{}"
+${systemsBase === undefined ? '' : `
+Systems,,,,,,,
+Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json
+Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""ventilation_zone_base_height"":${systemsBase}}}"`}
+`.trim();
+  const openBaseSource = (csv: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(csv);
+    const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
+    return { store, vent: byName('Trickle').mid_height_air_flow_path, window: byName('Window 1').mid_height };
+  };
+
+  const flatRows = [
+    'General_build_type,flat,,,,,,,,,,,,,',
+    'General_storeys_in_dwelling,1,,,,,,,,,,,,,',
+    'General_storey_of_dwelling,2,,,,,,,,,,,,,',
+    'AirPermeability_ventilation_zone_height,2.4,,,,,,,,,,,,,',
+  ].join('\n');
+
+  it('adds back a Systems row base and leaves that row to state it', () => {
+    const opened = openBaseSource(baseSourceCsv('', 2.8));
+    expect(opened).toMatchObject({ vent: 4.3, window: 4.2 });
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).not.toContain('Ventilation_ventilation_zone_base_height');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
+  });
+
+  it('writes the derived base it subtracted and adds it back on reload', () => {
+    const opened = openBaseSource(baseSourceCsv(flatRows));
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.4,');
+    const reopened = openBaseSource(csv);
+    expect(reopened.store.getState().generateCSV()).toBe(csv);
+    expect(reopened).toMatchObject({ vent: opened.vent, window: opened.window });
+  });
+
+  it('writes a non-zero base the file lacked rather than leave the converter another', () => {
+    const opened = openBaseSource(baseSourceCsv(flatRows));
+    opened.store.setState({ complianceSettings: {
+      ...opened.store.getState().complianceSettings,
+      absentMetadataRows: ['Ventilation_ventilation_zone_base_height'],
+    } });
+    expect(opened.store.getState().generateCSV()).toContain('Ventilation_ventilation_zone_base_height,2.4,');
+  });
+
   it('parses the canonical property postcode metadata row', () => {
     const parsed = parseCsvToGeometry(`Metadata,,,,,,,,,,,,,
 Postcode,MK40 1AA,,,,,,,,,,,,,`);

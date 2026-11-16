@@ -225,6 +225,24 @@ describe('collectGlobalSettingsWarnings', () => {
     expect(warnings).toContain('Ventilation zone base height is 0 m, but storey of dwelling suggests 2.4 m.');
   });
 
+  it('warns when a Systems row base disagrees with the storey-derived default', () => {
+    const warnings = collectGlobalSettingsWarnings({
+      elements: [{
+        id: 'iv', name: 'Ventilation', type: 'System', subcategory: 'InfiltrationVentilation',
+        extra_json: { InfiltrationVentilation: { ventilation_zone_base_height: 0 } },
+      } as unknown as Element],
+      floors,
+      complianceSettings: {
+        build_type: 'flat',
+        storeys_in_dwelling: 1,
+        storey_of_dwelling: 2,
+        AirPermeability_ventilation_zone_height: 2.4,
+      },
+    });
+
+    expect(warnings).toContain('Ventilation zone base height is 0 m (from a Systems InfiltrationVentilation row), but storey of dwelling suggests 2.4 m.');
+  });
+
   it('warns when upper flat ventilation zone base height cannot be checked', () => {
     const warnings = collectGlobalSettingsWarnings({
       elements: [],

@@ -19,7 +19,7 @@ import {
 import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from '../../../lib/windowOpenings';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
-import { resolveEffectiveVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
+import { resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import {
   CURRENT_VULCAN_CSV_VERSION,
@@ -1111,9 +1111,23 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Every compliance row is written with its value (see metadataRowValues). A row the file had
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
+    const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
+      zones: state.zones,
+      elementsById: state.elementsById,
+      spaceLabelsById: state.spaceLabelsById,
+      spaceLabelIds: state.spaceLabelIds,
+      complianceSettings: compliance,
+      floors: state.floors,
+    });
+    // Heights below are written less this base (windows from version 2), so the file states it where
+    // the converter reads it first, and a reload adds back the same base: a Systems row that sets it
+    // already does; otherwise the Metadata row carries it, even where the file lacked the row.
+    const statedBaseRow = exportVersion >= 2 && effectiveVentBaseHeight !== 0
+      && systemsRowVentilationBaseHeight(exportElements) === undefined
+      ? String(effectiveVentBaseHeight) : undefined;
     const unreadRows = compliance.unreadMetadataRows ?? {};
     for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), targetRules(options.schemaPort, state.complianceSettings).storeyBuildTypes)) {
-      const cell = value ?? unreadRows[key];
+      const cell = value ?? unreadRows[key] ?? (key === 'Ventilation_ventilation_zone_base_height' ? statedBaseRow : undefined);
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }
     // The air test report's envelope area, only when stated: the converter otherwise sums the drawing.
@@ -1125,14 +1139,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (!options.schemaPort.targetSchemaMode && csvModelProfile(state.targetBundleId, compliance.complianceValidationCell) === 'core') {
       lines.push('ComplianceValidationEnabled,FALSE,,,,,,,,,,,,,');
     }
-    const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
-      zones: state.zones,
-      elementsById: state.elementsById,
-      spaceLabelsById: state.spaceLabelsById,
-      spaceLabelIds: state.spaceLabelIds,
-      complianceSettings: compliance,
-      floors: state.floors,
-    });
 
     lines.push(',,,,,,,,,,,,');
 

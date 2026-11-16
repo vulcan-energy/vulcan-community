@@ -63,7 +63,26 @@ export interface EffectiveVentilationBaseHeightInputs extends EffectiveDwellingD
   }>;
 }
 
-/** Resolve the exact ventilation-zone base height written to CSV and used by window mid-heights. */
+/**
+ * The ventilation zone base a Systems InfiltrationVentilation row sets, as the converter merges
+ * those rows: in order, the last one wins. A Metadata row takes precedence over it.
+ */
+export function systemsRowVentilationBaseHeight(elements: readonly Element[]): number | undefined {
+  let base: number | undefined;
+  for (const element of elements) {
+    if (element.type !== 'System' || element.subcategory !== 'InfiltrationVentilation') continue;
+    const fragment = (element.extra_json as { InfiltrationVentilation?: { ventilation_zone_base_height?: unknown } } | undefined)
+      ?.InfiltrationVentilation?.ventilation_zone_base_height;
+    if (typeof fragment === 'number' && Number.isFinite(fragment)) base = fragment;
+  }
+  return base;
+}
+
+/**
+ * Resolve the exact ventilation-zone base height the CSV measures window, vent and terminal
+ * heights from: the Metadata value, else a Systems row's (the converter's precedence), else the
+ * geometry's.
+ */
 export function resolveEffectiveVentilationBaseHeight(
   inputs: EffectiveVentilationBaseHeightInputs,
 ): number {
@@ -71,6 +90,8 @@ export function resolveEffectiveVentilationBaseHeight(
   if (typeof explicit === 'number' && Number.isFinite(explicit)) return explicit;
 
   const elements = Object.values(inputs.elementsById);
+  const systemsBase = systemsRowVentilationBaseHeight(elements);
+  if (systemsBase !== undefined) return systemsBase;
   const dwelling = resolveEffectiveDwellingDetails(inputs);
   const derivedVentilationHeight = calculateSuggestedVentilationHeight(elements, inputs.floors);
   const effectiveVentilationHeight =

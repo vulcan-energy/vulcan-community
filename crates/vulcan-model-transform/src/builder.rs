@@ -2137,10 +2137,13 @@ impl JSONBuilder {
         self.merge_combustion_appliances(&mut result, &sanitized_csv_data)?;
         Self::merge_systems_infiltration_ventilation_rows(&mut result, &sanitized_csv_data)?;
         self.merge_ventilation_env_from_metadata(&mut result, &sanitized_csv_data)?;
-        debug_assert_eq!(
-            ventilation_base_height,
-            ventilation_zone_base_height(&result)
-        );
+        let merged_base_height = ventilation_zone_base_height(&result);
+        if merged_base_height != ventilation_base_height {
+            return Err(BuildError::new(
+                "E034",
+                &format!("Heights were measured from a ventilation zone base of {ventilation_base_height} m, but the merged model's is {merged_base_height} m."),
+            ));
+        }
         let csv_data = &sanitized_csv_data;
 
         let existing_building =
@@ -13663,6 +13666,54 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
                 mv["position_exhaust"]["mid_height_air_flow_path"].as_f64(),
                 Some(1.8),
                 "{version_row:?} base {base}"
+            );
+        }
+    }
+
+    /// A Systems InfiltrationVentilation row that sets the base, with no Metadata row: windows,
+    /// vents and terminals are measured from that base.
+    #[test]
+    fn a_systems_row_base_measures_windows_vents_and_terminals() {
+        for (version_row, vent, window) in [
+            ("VulcanCsvVersion,4", 1.5, 1.4),
+            ("VulcanCsvVersion,3", 4.3, 1.4),
+            ("", 4.3, 4.2),
+        ] {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,3.6,{window},{{}}\n\nSystems\nName,Zone,Type,subcategory,extra_json\nVentilation,,System,InfiltrationVentilation,\"{{\"\"InfiltrationVentilation\"\":{{\"\"ventilation_zone_base_height\"\":2.8}}}}\"\n",
+                mvhr_terminal_csv(true).replace(
+                    "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                    "intake,mvhr_1,wall_1,,,,,,\"0,0,4.7\"",
+                ).replace(
+                    "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                    "exhaust,mvhr_1,wall_1,,,,,,\"1,0,4.6\"",
+                )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(2.8));
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.5),
+                "{version_row:?}"
+            );
+            let mv = &inf["MechanicalVentilation"]["mvhr_1"];
+            assert_eq!(
+                mv["position_intake"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.9)
+            );
+            assert_eq!(
+                mv["position_exhaust"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.8)
+            );
+            assert_eq!(
+                result["Zone"]["Default Zone"]["BuildingElement"]["window 0"]["mid_height"]
+                    .as_f64(),
+                Some(1.4),
+                "{version_row:?}"
             );
         }
     }
