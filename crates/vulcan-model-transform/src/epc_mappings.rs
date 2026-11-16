@@ -664,6 +664,27 @@ const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 17] = [
     ),
 ];
 
+/// Assumption pending DESNZ E33 (Vulcan's assumption registry lists it): a combi boiler's daily hot
+/// water usage is not an assessor input but the HEM:EPC usage profile's daily average, the EPC
+/// wrapper's own `hot_water_volume_daily_average` for its occupancy (from the bedrooms, and for one
+/// bedroom the floor area), in whole litres because the new-build input takes an integer. The FHS
+/// wrapper sets it the same way from its own profile. If DESNZ supplies it in the wrapper, delete
+/// this and leave the field out.
+fn combi_daily_hot_water(bedrooms: u64, floor_area: f64) -> u64 {
+    let occupants = match bedrooms.min(5) {
+        1 => 1.0 + 0.4373 * (1.0 - (-0.001902 * floor_area * floor_area).exp()),
+        2 => 2.2472,
+        3 => 2.9796,
+        4 => 3.3715,
+        _ => 3.8997,
+    };
+    // Plus the electric showers missing from the source data: 30% of homes, used half as often.
+    let showers = 0.60685;
+    let volume = 0.70 * 60.3 * f64::powf(occupants, 0.71) * (1.0 - showers + showers * 1.15);
+    volume.round() as u64
+}
+
+
 /// DESNZ's defaults for HEM:EPC inputs, each applied only when the input is absent and
 /// reported; values the converter works out from the model are reported too.
 /// - Battery: location outside, age 5 years, grid charging possible, no grid export
@@ -920,6 +941,19 @@ pub(crate) fn apply_desnz_defaults(
                 notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
             None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling Details."))),
+        }
+    }
+    if let Some(bedrooms) = model["NumberOfBedrooms"].as_u64().filter(|b| *b > 0) {
+        let usage = combi_daily_hot_water(bedrooms, area);
+        for (name, source) in model["HotWaterSource"]
+            .as_object_mut()
+            .into_iter()
+            .flatten()
+        {
+            if source["type"] == "CombiBoiler" && source.get("daily_HW_usage").is_none_or(Value::is_null) {
+                source["daily_HW_usage"] = json!(usage);
+                derive(json_pointer(&["HotWaterSource", name]), "daily_HW_usage", json!(usage));
+            }
         }
     }
     let mut unshaded = Vec::new();
@@ -1985,6 +2019,25 @@ mod tests {
         // Not stated: the target's own default applies, so the converter writes none.
         let (supply, _) = battery(json!({"type": "stationary"}));
         assert!(supply.get("power_limit_battery_import").is_none());
+    }
+
+    #[test]
+    fn a_combi_with_no_daily_usage_takes_the_wrappers_daily_average_for_its_occupancy() {
+        // The EPC wrapper's hot_water_volume_daily_average, rounded: 81.83, 99.98, 109.15,
+        // 121.03 litres for 2 to 5 bedrooms; one bedroom by floor area (57.24 at 30 m², 59.57 at 60 m²).
+        for (bedrooms, area, litres) in [(2, 80.0, 82), (3, 80.0, 100), (4, 80.0, 109), (5, 80.0, 121), (7, 80.0, 121), (1, 30.0, 57), (1, 60.0, 60)] {
+            assert_eq!(combi_daily_hot_water(bedrooms, area), litres, "{bedrooms} bedrooms");
+        }
+        let mut model = json!({
+            "NumberOfBedrooms": 3,
+            "Zone": {"z": {"area": 90.0}},
+            "HotWaterSource": {"combi": {"type": "CombiBoiler"}, "stated": {"type": "CombiBoiler", "daily_HW_usage": 120}}
+        });
+        let mut derived = Vec::new();
+        apply_desnz_defaults(&mut model, false, &mut Vec::new(), &mut Vec::new(), &mut derived);
+        assert_eq!(model["HotWaterSource"]["combi"]["daily_HW_usage"], 100);
+        assert_eq!(model["HotWaterSource"]["stated"]["daily_HW_usage"], 120);
+        assert!(derived.len() == 1 && derived[0].path == "/HotWaterSource/combi" && derived[0].field == "daily_HW_usage");
     }
 
     #[test]
