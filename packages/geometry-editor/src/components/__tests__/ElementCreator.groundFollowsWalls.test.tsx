@@ -9,7 +9,6 @@ import { emptyGeometryInspectorContributions } from '../../../../geometry-editor
 import { canonicalGeometrySchemaPort } from '../../lib/geometrySchemaPort';
 import { ElementCreator } from '../ElementCreator';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
-import { computeGroundUValueFromElementModel } from '../../lib/groundUValueCalculator';
 import type { GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 
 type Store = ReturnType<typeof createGeometryStore>;
@@ -144,16 +143,11 @@ describe('ground fabric edits in the store', () => {
     }
   });
 
-  it('clearing a derived value takes the drawing value back in the same edit', () => {
+  it('a floor edit stores no U-value: the converter works it out from the drawing', () => {
     const store = openedModel();
     const id = idOf(store, 'Floor');
     store.getState().updateElement(id, { thickness_walls: 0.3, extra_json: { thermal_resistance_floor_construction: 0.2 } } as never);
-    const u = (store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value;
-    expect(u).toBeGreaterThan(0);
-    const cleared = { ...(store.getState().elementsById[id]!.extra_json as Record<string, unknown>) };
-    delete cleared.u_value;
-    store.getState().updateElement(id, { extra_json: cleared });
-    expect((store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value).toBe(u);
+    expect((store.getState().elementsById[id]!.extra_json as Record<string, unknown>).u_value).toBeUndefined();
   });
 
   it('a copy of a floor keeps a stated perimeter', () => {
@@ -188,30 +182,19 @@ it('an older file with a blank suspended floor opens clean, and the export carri
 describe('suspended floors', () => {
   const extraOf = (store: Store) =>
     store.getState().elementsById[idOf(store, 'Floor')]!.extra_json as Record<string, unknown>;
-  const suspendedU = (store: Store) => {
-    const floor = store.getState().elementsById[idOf(store, 'Floor')] as { total_area?: number; area: number; perimeter: number };
-    const u = computeGroundUValueFromElementModel(floor, extraOf(store), 'Suspended_floor', {
-      totalArea: floor.total_area ?? floor.area,
-      perimeter: floor.perimeter,
-    });
-    return Number(u!.toFixed(4));
-  };
 
-  it('slab to suspended takes the suspended U-value, and it keeps following the walls', () => {
+  it('slab to suspended stores no U-value, and the perimeter keeps following the walls', () => {
     const store = openedModel();
     const id = idOf(store, 'Floor');
     store.getState().updateElement(id, {
       thickness_walls: 0.3,
       extra_json: { thermal_resistance_floor_construction: 0.2, thermal_transm_walls: 1.5 },
     } as never);
-    const slabU = extraOf(store).u_value;
     store.getState().updateElement(id, { floor_type: 'Suspended_floor' } as never);
-    expect(extraOf(store).u_value).toBe(suspendedU(store));
-    expect(extraOf(store).u_value).not.toBe(slabU);
-
+    expect(extraOf(store).u_value).toBeUndefined();
     store.getState().updateElement(idOf(store, 'Wall (S)'), { coordinates: line(2, 0, 4, 0) });
     expect(perimeterOf(store)).toBe(14.9);
-    expect(extraOf(store).u_value).toBe(suspendedU(store));
+    expect(extraOf(store).u_value).toBeUndefined();
   });
 
   /** The suspended floor as an older file or peer has it: defaults blank. */

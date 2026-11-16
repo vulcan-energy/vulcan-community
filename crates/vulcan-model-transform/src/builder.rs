@@ -1545,6 +1545,8 @@ pub struct JSONBuilder {
     opaque_template_roof: Option<Value>,
     /// Indexed from defaults: last opaque with `is_external_door` true.
     opaque_template_external_door: Option<Value>,
+    /// The model's fabric preset for this conversion (`FabricPreset` Metadata row), read by `build_json`.
+    fabric_preset: Option<crate::fabric_preset::FabricPreset>,
     /// Model profile the output targets; every profile-dependent step asks it a
     /// capability question (see `ModelProfile`).
     profile: ModelProfile,
@@ -1652,6 +1654,7 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
+            fabric_preset: None,
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
@@ -1695,6 +1698,7 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
+            fabric_preset: None,
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
@@ -2080,6 +2084,11 @@ impl JSONBuilder {
         )?;
         let csv_data = &sanitized_csv_data;
 
+        let existing_building =
+            metadata_field_value(csv_data, "IsExistingBuilding").is_some_and(|v| {
+                v == Value::Bool(true) || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("true"))
+            });
+        self.fabric_preset = crate::fabric_preset::read(csv_data, self.profile, existing_building)?;
         self.parse_cold_water_source_from_metadata(csv_data);
         if self.profile.references_products() {
             let mut errors = Vec::new();
@@ -3018,6 +3027,31 @@ impl JSONBuilder {
                         }
                     }
 
+                    // An element with no fabric value of its own takes the fabric preset's for its
+                    // type, over the defaults file's.
+                    let preset_values = self.fabric_preset.as_ref().and_then(|preset| {
+                        let row = crate::fabric_preset::FabricRow::of_element(
+                            &schema_element_type,
+                            is_external_door_flag,
+                            opaque_pitch_for_seed
+                                .is_some_and(Self::pitch_degrees_matches_roof_variant),
+                        )?;
+                        preset.values_for(row, element_row)
+                    });
+                    if let (Some(values), Some(element_obj_map)) =
+                        (&preset_values, element_obj.as_object_mut())
+                    {
+                        for (key, value) in values {
+                            if allowed_building_element_props.contains(key) {
+                                element_obj_map.insert(key.clone(), value.clone());
+                            }
+                        }
+                        // A U-value replaces a construction resistance the defaults file gives.
+                        if values.contains_key("u_value") {
+                            element_obj_map.remove("thermal_resistance_construction");
+                        }
+                    }
+
                     // Merge extra_json data with precedence: CSV columns > extra_json > defaults
                     if let Some(Value::Object(extra_json_obj)) = element_row.get("extra_json") {
                         if let Some(element_obj_map) = element_obj.as_object_mut() {
@@ -3133,6 +3167,56 @@ impl JSONBuilder {
                                         .expect("validated finite ground total area"),
                                 ),
                             );
+
+                            // A construction resistance from the element or the fabric preset,
+                            // with no U-value stated, takes its U-value from the floor
+                            // calculation: the defaults file's U-value belongs to its own
+                            // resistance. The defaults file's pair stays together.
+                            const R_FLOOR: &str = "thermal_resistance_floor_construction";
+                            let row_extra =
+                                element_row.get("extra_json").and_then(Value::as_object);
+                            let stated = |key: &str| {
+                                csv_set_keys.contains(key)
+                                    || row_extra
+                                        .and_then(|extra| extra.get(key))
+                                        .is_some_and(|v| !v.is_null() && v != "")
+                            };
+                            let preset_r = preset_values
+                                .as_ref()
+                                .is_some_and(|values| values.contains_key(R_FLOOR));
+                            if !stated("u_value") && (stated(R_FLOOR) || preset_r) {
+                                let wind = row_extra
+                                    .and_then(|extra| extra.get("wind_speed_mps"))
+                                    .and_then(Value::as_f64);
+                                match crate::ground_u_value::ground_u_value(element_obj_map, wind) {
+                                    Some(u) => {
+                                        element_obj_map.insert(
+                                            "u_value".into(),
+                                            json_number(u, &format!("{element_name} u_value"))?,
+                                        );
+                                    }
+                                    None => {
+                                        let floor_type = element_obj_map
+                                            .get("floor_type")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or_default();
+                                        let source = match (&self.fabric_preset, preset_r) {
+                                            (Some(preset), true) => {
+                                                format!("the fabric preset \"{}\"", preset.name)
+                                            }
+                                            _ => "the floor".to_string(),
+                                        };
+                                        self.push_non_fatal(
+                                            "E068",
+                                            &crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name, "u_value"]),
+                                            &format!(
+                                                "Ground floor '{element_name}': the U-value cannot be worked out from the construction resistance {source} gives. The floor calculation needs {}. Draw the floor against its walls or enter them, or enter the floor's U-value.",
+                                                crate::ground_u_value::required_inputs(floor_type)
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
 

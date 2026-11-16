@@ -99,24 +99,26 @@ export function upgradePcdbProductReferences(elements: readonly Element[]): Elem
   return changed ? result : (elements as Element[]);
 }
 
-/** Construction-band (existing-building) saves from before the editor stopped writing the
- * calculated ground U-value on its own. A U-value from an applied assembly is stated: it gets the
- * manual mark. Any other U-value without the mark that equals the calculator's result for the
- * saved inputs is removed, so the age band applies. Returns the same array when nothing changed,
- * and the names of the floors whose value was removed. */
-export function dropCalculatedGroundUValues(elements: readonly Element[]): { elements: Element[]; names: string[] } {
+/** Saves from before the editor stopped writing the calculated ground U-value on its own. A
+ * U-value without the manual mark that equals the calculator's result for the saved inputs is
+ * removed: the converter works it out again from the same inputs (`ground_u_value.rs`), and it
+ * follows later edits. With construction bands (an existing building) the age band applies
+ * instead, and a U-value from an applied assembly is stated: it gets the manual mark. Returns the
+ * same array when nothing changed, and the names of the floors whose value was removed under
+ * construction bands (the only case that changes the result). */
+export function dropCalculatedGroundUValues(elements: readonly Element[], constructionBands: boolean): { elements: Element[]; names: string[] } {
   const names: string[] = [];
   let changed = false;
   const result = elements.map((element) => {
     const extra = element.extra_json;
     if (element.type !== 'BuildingElementGround' || typeof extra?.u_value !== 'number' || extra[GROUND_U_VALUE_MANUAL_KEY] === true) return element;
-    if (extra.vulcan_assembly_v1 !== undefined) {
+    if (constructionBands && extra.vulcan_assembly_v1 !== undefined) {
       changed = true;
       return { ...element, extra_json: { ...extra, [GROUND_U_VALUE_MANUAL_KEY]: true } };
     }
     const computed = computeGroundUValueFromElementModel(element, extra, element.floor_type);
     if (computed == null || Math.abs(Number(computed.toFixed(4)) - extra.u_value) > 1e-5) return element;
-    names.push(element.name);
+    if (constructionBands) names.push(element.name);
     changed = true;
     const rest = { ...extra };
     delete rest.u_value;

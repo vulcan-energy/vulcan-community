@@ -16,7 +16,9 @@ pub mod parser {
 }
 mod epc_mappings;
 pub mod epc_products;
+mod fabric_preset;
 pub mod finalization;
+mod ground_u_value;
 mod hemie;
 pub mod preflight_diagnostics;
 mod schema_validation;
@@ -329,6 +331,15 @@ impl ModelProfile {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
+        }
+    }
+
+    /// The family of fabric presets the profile takes (`FabricPreset` Metadata row). EPC: a
+    /// preset for HEM:EPC new build; an existing building takes none (`fabric_preset::read`).
+    pub(crate) fn fabric_preset_family(self) -> &'static str {
+        match self {
+            Self::Core | Self::Fhs => "fhs",
+            Self::Epc => "epc",
         }
     }
 }

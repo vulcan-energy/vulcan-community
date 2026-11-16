@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFabricGroups, hemieFabricLabel, hemieFieldLabel, hemieLeftoverKeys, hemieRequiredPlaceholder, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
+import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieRequiredPlaceholder, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
 const plane = [...line, { x: 4, y: 4, z: 0 }];
@@ -68,10 +68,10 @@ it('gives a door in a party or sheltered wall the party or sheltered door constr
 
 it('takes the band and construction from the element, else its host wall, else the Defaults', () => {
   const wall = el({ type: 'BuildingElementOpaque', pitch: 90 });
-  expect(hemieFabricLabel(hemieFabric(wall, settings)!)).toBe('External wall · Band D · Cavity');
+  expect(hemieFabric(wall, settings)).toMatchObject({ constructionType: 'external_wall', band: 'D', values: { wall_construction_type: 'cavity' }, entered: false });
   const extension = el({ name: 'X', type: 'BuildingElementOpaque', pitch: 90, extra_json: { age_band: 'K', wall_construction_type: 'timber frame' } });
-  expect(hemieFabricLabel(hemieFabric(extension, settings)!)).toBe('External wall · Band K · Timber frame');
-  expect(hemieFabricLabel(hemieFabric(el({ type: 'BuildingElementOpaque', pitch: 90, u_value: 0.3 }), settings)!)).toBe('External wall · Entered U-value');
+  expect(hemieFabric(extension, settings)).toMatchObject({ band: 'K', values: { wall_construction_type: 'timber frame' } });
+  expect(hemieFabric(el({ type: 'BuildingElementOpaque', pitch: 90, u_value: 0.3 }), settings)).toMatchObject({ entered: true });
   expect(hemieFabric(el({ type: 'Appliance' }), settings)).toBeUndefined();
   const window = el({ type: 'BuildingElementTransparent', parent_element: 'X' });
   expect(hemieFabric(window, settings, [extension])).toMatchObject({ band: 'K', hostBand: 'K' });
@@ -92,17 +92,6 @@ it('labels fields and values for people, with units', () => {
 
 it('lists the existing-building fields an element holds', () => {
   expect(hemieLeftoverKeys(el({ type: 'BuildingElementOpaque', extra_json: { age_band: 'K', is_front_door: true, u_value: 1 } }))).toEqual(['age_band', 'is_front_door']);
-});
-
-it('groups elements by fabric, largest group first', () => {
-  const groups = hemieFabricGroups([
-    el({ id: 'a', type: 'BuildingElementOpaque', pitch: 90 }),
-    el({ id: 'b', type: 'BuildingElementOpaque', pitch: 90 }),
-    el({ id: 'c', type: 'BuildingElementOpaque', pitch: 90, extra_json: { age_band: 'K' } }),
-    el({ id: 'd', type: 'Appliance' }),
-  ], settings);
-  expect(groups.map(({ label, ids }) => [label, ids])).toEqual([['External wall · Band D · Cavity', ['a', 'b']], ['External wall · Band K · Cavity', ['c']]]);
-  expect(groups[0]!.color).not.toBe(groups[1]!.color);
 });
 
 it('knows every UK postcode area and the Crown dependency areas', () => {

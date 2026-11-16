@@ -2435,68 +2435,6 @@
   min-width: 0;
 }
 
-.fabric-legend {
-  position: absolute;
-  left: 12px;
-  bottom: 84px;
-  z-index: 2050;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 300px;
-  max-height: 40vh;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.fabric-legend-entry {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 4px 6px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.3;
-  text-align: left;
-  cursor: pointer;
-}
-
-.fabric-legend-entry:hover {
-  background: var(--bg-hover);
-}
-
-.fabric-legend-label {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: break-word;
-}
-
-.fabric-legend-title {
-  padding: 2px 6px 4px;
-  color: var(--text-subtle);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.fabric-legend-count {
-  flex: none;
-  margin-left: 8px;
-  color: var(--text-subtle);
-  font-variant-numeric: tabular-nums;
-}
-
-.fabric-legend-swatch {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border-radius: 2px;
-}
-
 .hide-control-button-wrap {
   min-width: 0;
 }

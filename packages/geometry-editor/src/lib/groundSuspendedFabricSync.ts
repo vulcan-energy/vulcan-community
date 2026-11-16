@@ -17,7 +17,6 @@ import { targetSchemaMode, type GeometrySchemaPort } from '../../../geometry-edi
 import { deriveAutomaticGroundTotalAreas } from './groundFloorArea';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
 import {
-  computeGroundUValueFromElementModel,
   defaultSuspendedAreaPerPerimeterVent,
   parseWindShieldLocation,
 } from './groundUValueCalculator';
@@ -221,34 +220,6 @@ export function groundExposedPerimeterManualFlag(extra: Record<string, unknown>)
 }
 
 /**
- * Writes the calculated ground U-value unless the user owns it. With construction bands (an
- * existing building) the age band applies unless the user states a U-value, so nothing is
- * written: the calculator writes only when the user applies it.
- */
-export function applyComputedGroundUValueAutofill(
-  extra: Record<string, unknown>,
-  computedUValue: number | null | undefined,
-  constructionBands: boolean,
-): { extra: Record<string, unknown>; changed: boolean } {
-  if (constructionBands || extra[GROUND_U_VALUE_MANUAL_KEY] === true) {
-    return { extra, changed: false };
-  }
-  if (computedUValue == null || !Number.isFinite(computedUValue) || computedUValue <= 0) {
-    return { extra, changed: false };
-  }
-
-  const roundedU = Number(computedUValue.toFixed(4));
-  if (numbersClose(readFinite(extra.u_value), roundedU)) {
-    return { extra, changed: false };
-  }
-
-  return {
-    extra: { ...extra, u_value: roundedU },
-    changed: true,
-  };
-}
-
-/**
  * Track whether `thermal_transm_walls` was edited directly in Advanced JsonForms so auto-sync can skip it.
  * Clearing the field removes the manual lock so wall-driven sync can resume.
  */
@@ -430,33 +401,13 @@ export function syncSuspendedGroundFabricFromWalls(
   }
 }
 
-/** The automatic ground U-value for these inputs, or null when the user owns it or it is not calculated. */
-function groundUValueFromDrawing(
-  ground: GroundElement,
-  extra: Record<string, unknown>,
-  inputs: { totalArea: number; perimeter: number | null },
-  constructionBands: boolean,
-): number | null {
-  if (inputs.perimeter == null || inputs.perimeter <= 0) return null;
-  const computed = applyComputedGroundUValueAutofill(
-    { ...extra, u_value: undefined },
-    computeGroundUValueFromElementModel(ground, extra, ground.floor_type, {
-      totalArea: inputs.totalArea,
-      perimeter: inputs.perimeter,
-    }),
-    constructionBands,
-  );
-  return computed.changed ? readFinite(computed.extra.u_value) : null;
-}
-
 /**
- * After an edit, `BuildingElementGround.total_area` follows the shared physical area for its floor,
- * each element's `perimeter` its own exposed wall-linked run, and the automatic U-value both
- * (see `takesDerivedValue`).
+ * After an edit, `BuildingElementGround.total_area` follows the shared physical area for its floor
+ * and each element's `perimeter` its own exposed wall-linked run (see `takesDerivedValue`).
  *
- * The fields remain user-editable: `_ground_exposed_perimeter_manual` in `extra_json`, the total
- * area override flag and `_ground_u_value_manual` keep the stored value. Automatic ground U-values
- * use the shared total area with each element's own perimeter, as in the HEM split-zone examples.
+ * The fields remain user-editable: `_ground_exposed_perimeter_manual` in `extra_json` and the total
+ * area override flag keep the stored value. The floor's U-value is not stored: the converter
+ * (`vulcan-model-transform` `ground_u_value.rs`) works it out from these inputs.
  *
  * `previous` is the model before the edit. Without it every ground counts as new. `copySources`
  * maps a copy made in this edit to its source.
@@ -464,7 +415,6 @@ function groundUValueFromDrawing(
 export function syncGroundExposedPerimetersFromWalls(
   elementsById: Record<string, Element>,
   updateElement: (id: string, patch: Partial<Element>) => void,
-  constructionBands: boolean,
   previous?: Record<string, Element>,
   copySources?: ReadonlyMap<string, string>,
 ): void {
@@ -489,14 +439,13 @@ export function syncGroundExposedPerimetersFromWalls(
   for (const ground of grounds) {
     const before = elementBefore(previous, copySources, ground.id);
     const prevGround = before?.type === 'BuildingElementGround' && !before.isPlaceholder ? before : null;
-    const extra = readExtraJsonRecord(ground.extra_json);
     const next = effectiveInputs(elementsById, ground, automaticTotalAreas.get(ground.id) ?? ground.area);
     const prev = prevGround && previous
       ? effectiveInputs(previous, prevGround, previousTotalAreas?.get(prevGround.id) ?? prevGround.area)
       : null;
     const patch: Partial<Element> = {};
 
-    let totalArea = readFinite(ground.total_area);
+    const totalArea = readFinite(ground.total_area);
     if (
       next.totalAreaFromDrawing != null
       && takesDerivedValue(
@@ -506,11 +455,10 @@ export function syncGroundExposedPerimetersFromWalls(
         1e-5,
       )
     ) {
-      totalArea = next.totalAreaFromDrawing;
-      (patch as { total_area?: number }).total_area = totalArea;
+      (patch as { total_area?: number }).total_area = next.totalAreaFromDrawing;
     }
 
-    let perimeter = readFinite(ground.perimeter);
+    const perimeter = readFinite(ground.perimeter);
     if (
       next.perimeterFromDrawing != null
       && takesDerivedValue(
@@ -520,27 +468,7 @@ export function syncGroundExposedPerimetersFromWalls(
         0.005,
       )
     ) {
-      perimeter = next.perimeterFromDrawing;
-      (patch as { perimeter?: number }).perimeter = perimeter;
-    }
-
-    if (extra[GROUND_U_VALUE_MANUAL_KEY] !== true) {
-      const u = groundUValueFromDrawing(ground, extra, { totalArea: totalArea ?? ground.area, perimeter }, constructionBands);
-      const prevExtra = prevGround ? readExtraJsonRecord(prevGround.extra_json) : {};
-      const beforeU = prevGround
-        ? {
-            stored: readFinite(prevExtra.u_value),
-            derived: groundUValueFromDrawing(
-              prevGround,
-              prevExtra,
-              { totalArea: readFinite(prevGround.total_area) ?? prevGround.area, perimeter: readFinite(prevGround.perimeter) },
-              constructionBands,
-            ),
-          }
-        : null;
-      if (takesDerivedValue(beforeU, readFinite(extra.u_value), u, 5e-5)) {
-        patch.extra_json = { ...extra, u_value: u };
-      }
+      (patch as { perimeter?: number }).perimeter = next.perimeterFromDrawing;
     }
 
     if (Object.keys(patch).length > 0) {
@@ -653,7 +581,7 @@ export function followGroundFabricOnEdit<
   },
 >(
   store: { subscribe: (listener: (state: S, previous: S) => void) => () => void; getState: () => S },
-  rules: { constructionBands: (state: S) => boolean; acceptsShieldLocation: () => boolean },
+  rules: { acceptsShieldLocation: () => boolean },
 ): GroundFabricFollower {
   let copySources: ReadonlyMap<string, string> | undefined;
   let syncing = false;
@@ -670,7 +598,7 @@ export function followGroundFabricOnEdit<
         // Defaults first: the wall U and the U-value of a new suspended floor read them.
         fillSuspendedFloorDefaults(state.elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
         syncSuspendedGroundFabricFromWalls(store.getState().elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
-        syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources);
+        syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, before, copySources);
       });
     } finally {
       syncing = false;

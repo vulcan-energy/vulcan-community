@@ -56,7 +56,8 @@ import {
   computeSuspendedThermalTransmWallsAutofillResultForGroundElement,
   hasSuspendedFloorThermalTransmWallsAutofillSourcesForGroundElement,
 } from '../lib/suspendedFloorThermalTransmWallsAutofill';
-import { assemblySourceValuesFor } from '../lib/fieldDefault';
+import { assemblySourceValuesFor, fabricPresetSourceFor } from '../lib/fieldDefault';
+import { fabricPresetForTarget, fabricRowField, fabricRowKey } from '../lib/fabricPreset';
 import {
   applySuspendedThermalTransmWallsManualTracking,
   GROUND_U_VALUE_MANUAL_KEY,
@@ -990,7 +991,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields, hemDatabaseProducts, constructionBands, arealHeatCapacity } = useTargetRules();
+  const targetRulesNow = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts, constructionBands, arealHeatCapacity } = targetRulesNow;
   // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
   const defaultsJson = useGeometryStore((state) => state.defaultsJson);
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
@@ -1763,17 +1765,26 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     () => assemblySourceValuesFor(currentData?.extra_json, elementType, subtype, arealHeatCapacity),
     [arealHeatCapacity, currentData.extra_json, elementType, subtype],
   );
+  // The fabric preset values the converter gives this element read as its default ("default · Fabric <name>").
+  const storedFabricPreset = useGeometryStore((state) => state.fabricPreset);
+  const fabricPresetSource = useMemo(
+    () => currentElementData ? fabricPresetSourceFor(currentElementData, fabricPresetForTarget(storedFabricPreset, targetRulesNow)) : undefined,
+    [currentElementData, storedFabricPreset, targetRulesNow],
+  );
+  const fabricRow = currentElementData ? fabricRowKey(currentElementData) : undefined;
 
+  // The floor calculation reads the fabric preset's resistance under the floor's own values, as the converter does.
+  const groundPresetValues = fabricPresetSource?.values;
   const groundUComputedWPerM2K = useMemo(
     () =>
       elementType === 'BuildingElementGround'
         ? computeGroundUValueFromElementModel(
             currentData as Record<string, unknown>,
-            advancedFieldsData as Record<string, unknown>,
+            { ...groundPresetValues, ...(advancedFieldsData as Record<string, unknown>) },
             subtype,
           )
         : null,
-    [elementType, currentData, advancedFieldsData, subtype],
+    [elementType, currentData, advancedFieldsData, subtype, groundPresetValues],
   );
   const resyncSuspendedThermalTransmWalls = useCallback(() => {
     if (
@@ -1835,6 +1846,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             : undefined,
         groundUComputedWPerM2K:
           elementType === 'BuildingElementGround' ? groundUComputedWPerM2K : undefined,
+        groundUFromCalculation: elementType === 'BuildingElementGround' && !constructionBands,
         resyncSuspendedThermalTransmWalls:
           shouldUseGroundThermalTransmWallsAutofill
             ? resyncSuspendedThermalTransmWalls
@@ -1853,6 +1865,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? (elementId: string) => setSelection({ type: 'element', id: elementId })
             : undefined,
         assemblySourceValues,
+        fabricPresetSource,
+        fabricRowField: fabricRow ? fabricRowField(fabricRow) : undefined,
         useFHSSchemaForValidation: useFHSSchema,
         schemaPort,
         // Pass $defs through config so TextControl can resolve references
@@ -1861,7 +1875,12 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
         // An existing building takes these from the DESNZ-defined construction tables: keep them out of the way.
         collapsedEngineFields: existingBuilding && hemDatabaseProducts && elementType !== 'System' ? COLLAPSED_ENGINE_FIELDS : undefined,
-        derivedDefaults: elementType === 'System' ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding) : undefined,
+        derivedDefaults: elementType === 'System'
+          ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding)
+          // The converter gives a blank ground U-value the floor calculation's (`ground_u_value.rs`).
+          : elementType === 'BuildingElementGround' && !constructionBands && groundUComputedWPerM2K != null
+            ? { u_value: Number(groundUComputedWPerM2K.toFixed(4)) }
+            : undefined,
         defaultProducts: elementType === 'System' ? defaultProducts : undefined,
       }),
     [
@@ -1882,6 +1901,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       shouldUseGroundThermalTransmWallsAutofill,
       setSelection,
       assemblySourceValues,
+      fabricPresetSource,
+      fabricRow,
       useFHSSchema,
       subschema,
       systemSampleBaselineAvailable,
@@ -1891,6 +1912,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       hemDatabaseProducts,
       advancedFieldsData,
       existingBuilding,
+      constructionBands,
       getActiveRootSchema,
     ],
   );
@@ -2222,7 +2244,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         const ex = { ...(nextExtra as Record<string, unknown>) };
         const computed = computeGroundUValueFromElementModel(
           currentData as Record<string, unknown>,
-          ex,
+          { ...groundPresetValues, ...ex },
           subtype,
         );
         const nextNum =
@@ -2235,7 +2257,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         const compRounded =
           computed != null && Number.isFinite(computed) && computed > 0 ? Number(computed.toFixed(4)) : null;
         // With construction bands every U-value here is stated: it replaces the age band.
+        // Without them the calculation's own value is not stored: the converter works it out.
         if (!constructionBands && compRounded != null && nextRounded != null && Math.abs(compRounded - nextRounded) <= 1e-5) {
+          delete ex.u_value;
           delete ex[GROUND_U_VALUE_MANUAL_KEY];
         } else if (nextRounded != null) {
           ex[GROUND_U_VALUE_MANUAL_KEY] = true;

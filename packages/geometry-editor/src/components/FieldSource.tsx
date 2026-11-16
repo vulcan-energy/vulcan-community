@@ -3,14 +3,15 @@
 
 import React from 'react';
 import { ResetFieldButton } from './ResetFieldButton';
-import { formatSourceValue, isOverridden, openDefaultsTab } from '../lib/fieldSource';
+import { formatSourceValue, isOverridden, openFabricTab } from '../lib/fieldSource';
 import './FieldSource.css';
 
 /**
  * Where a value comes from, shown the same way in every editor:
  * - set by the drawing or another input: a quiet note ("from the drawing", "from Wall (S)")
  *   whose link goes to the source;
- * - default: a grey placeholder and the note "default", linking to the Defaults tab;
+ * - default: a grey placeholder and the note "default" ("default · Fabric <preset>" when the
+ *   model's fabric preset gives it), linking to the Fabric tab;
  * - entered by you: white text, plus one "↺ Use …" control only when there is a value to go back to.
  * A value HEM does not let you set reads as text (`Readout`), not as a dead input box.
  */
@@ -42,9 +43,9 @@ export function SourceNote({
   );
 }
 
-/** The "default" note, linking to where the property's defaults are set. */
-export function DefaultNote({ field }: { field?: string }) {
-  return <SourceNote link="default" onGo={() => openDefaultsTab(field)} title="Open the model defaults" />;
+/** The "default" note, linking to the Fabric tab (at `field`, the element's construction row, when given). */
+export function DefaultNote({ field, preset }: { field?: string; preset?: string }) {
+  return <SourceNote link={preset ? `default · Fabric ${preset}` : 'default'} onGo={() => openFabricTab(field)} title="Open the Fabric tab" />;
 }
 
 /** Label on the left, its source on the right (wraps under the label when narrow). */

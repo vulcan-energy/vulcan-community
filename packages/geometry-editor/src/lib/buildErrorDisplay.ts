@@ -8,7 +8,7 @@ import { HEMIE_NATION, hemieConstructionTypeLabel } from './hemieFabric';
 import { globalSettingsFieldSection, METADATA_INPUT_LABELS, type GlobalSettingsFieldSection, TARGET_INPUT_ROW_SET } from './globalSettingsValidation';
 
 const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = {
-  defaults: 'Global Settings > Defaults',
+  fabric: 'Global Settings > Fabric',
   target: 'Global Settings',
   dwelling: 'Global Settings > Dwelling details',
   airTightness: 'Global Settings > Air Tightness',
@@ -70,7 +70,7 @@ const buildErrorLocation = (path?: string) => {
     return {
       location: segments[1] === HEMIE_NATION
         ? 'Global Settings > Dwelling details'
-        : `Global Settings > Defaults > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
+        : `Global Settings > Fabric${constructionType ? ` > ${hemieConstructionTypeLabel(constructionType)}` : ''}`,
     };
   }
 

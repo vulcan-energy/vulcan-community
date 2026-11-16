@@ -114,7 +114,7 @@ export interface TargetRules {
   /**
    * Fabric comes from construction bands: the model's age band and a construction per
    * construction type (the `HEMIE_` model settings), which an element may override. The host's
-   * fabric defaults replace the default assemblies, and the canvas can colour elements by fabric.
+   * fabric defaults replace the default assemblies.
    */
   constructionBands: boolean;
   /** The first zone states its living-room and rest-of-dwelling areas (the target's zone schema requires both). */

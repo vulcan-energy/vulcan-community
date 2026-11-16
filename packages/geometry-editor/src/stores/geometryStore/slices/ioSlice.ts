@@ -141,6 +141,7 @@ export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
 import { lineFaceEnvelope } from '../../../lib/profileLineFace';
 import { assertCsvMigrationResolved, csvMigrationIssues, dropCalculatedGroundUValues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
+import { parseFabricPreset } from '../../../lib/fabricPreset';
 
 export interface IoSlice {
   sourceCsvVersion: number;
@@ -149,6 +150,8 @@ export interface IoSlice {
   requestCsvUpgrade: () => void;
   targetBundleId?: string;
   setTargetBundleId: (id: string) => void;
+  /** The defaults file the model runs with on a host that pins targets (`defaultsPathForTarget`); undefined on a host that pins none. */
+  pinnedDefaultsPath: (targetBundleId: string | undefined) => string | undefined;
   getCsvMigrationIssues: () => CsvMigrationIssue[];
   resolveCsvUValueInterpretation: (ids: readonly string[], meaning: UValueInterpretation) => void;
   generateCSV: (options?: { allowUnresolvedMigration?: boolean }) => string;
@@ -912,6 +915,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // The host selects the port's target before it sets the pin, so these are the new target's rules.
     followTarget();
   },
+  // A host that pins targets runs an unpinned model on its standard defaults too.
+  pinnedDefaultsPath: (targetBundleId) => {
+    const path = options.defaultsPathForTarget ? standardDefaultsPath(targetBundleId) : undefined;
+    return path ? normalizeDefaultsPathForMetadata(path) : undefined;
+  },
   getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
   resolveCsvUValueInterpretation: (ids, meaning) => set(state => ({ elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, element]) => [id, ids.includes(id) ? resolveCsvUValueMeaning(element, meaning) : element])) })),
   lastSavedCsv: null,
@@ -1006,6 +1014,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     lines.push(`DefaultAssemblyWall,${escapeCSV(asmIds.wall ?? '')},,,,,,,,,,,,,`);
     lines.push(`DefaultAssemblyRoof,${escapeCSV(asmIds.roof ?? '')},,,,,,,,,,,,,`);
     lines.push(`DefaultAssemblyGroundFloor,${escapeCSV(asmIds.ground_floor ?? '')},,,,,,,,,,,,,`);
+    if (state.fabricPreset) lines.push(`FabricPreset,${escapeCSV(JSON.stringify(state.fabricPreset))},,,,,,,,,,,,,`);
     for (const key of options.hostDocumentMetadataKeys) {
       const value = state.hostDocumentMetadata[key]?.trim();
       if (value) lines.push(`${escapeCSV(key)},${escapeCSV(value)},,,,,,,,,,,,,`);
@@ -1897,7 +1906,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         stateBeforeDefaults.defaultsJson != null &&
         stateBeforeDefaults.defaultsPath === defaultsPathForStore;
       if (keepDefaults) {
-        set({ creationDefaultAssemblyIds: metadata.creationDefaultAssemblyIds ?? {} });
+        set({ creationDefaultAssemblyIds: metadata.creationDefaultAssemblyIds ?? {}, fabricPreset: parseFabricPreset(metadata.fabricPreset) ?? null });
       } else {
         const defaultsLoadVersion = invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
         set({
@@ -1905,6 +1914,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           defaultsJson: null,
           defaultsLoading: pathsToTry.length > 0,
           creationDefaultAssemblyIds: metadata.creationDefaultAssemblyIds ?? {},
+          fabricPreset: parseFabricPreset(metadata.fabricPreset) ?? null,
         });
         if (pathsToTry.length > 0) {
           // Clear any previous defaults and load per-CSV defaults asynchronously.
@@ -2485,9 +2495,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
-    const calculatedGroundU = targetRules(options.schemaPort, get().complianceSettings).constructionBands
-      ? dropCalculatedGroundUValues(loadedElements)
-      : { elements: loadedElements, names: [] };
+    const calculatedGroundU = dropCalculatedGroundUValues(loadedElements, targetRules(options.schemaPort, get().complianceSettings).constructionBands);
     const upgradedElements = rederiveContextShadingFromDrawing(
       liftStoreyIndexDuctsToMetres(
         upgradePcdbProductReferences(calculatedGroundU.elements),

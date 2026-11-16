@@ -173,6 +173,7 @@ import {
 } from './namingStore';
 import { createDefaultsLookup, type DefaultsLookup } from '../lib/defaultsCache';
 import { applyCreationDefaultAssemblyToElement } from '../lib/multiSelectAssemblyApply';
+import { fabricPresetForTarget, type FabricPreset } from '../lib/fabricPreset';
 import {
   getElementCanvasFloorZValue,
   getThermalBridgeExtraJsonFloorStorey,
@@ -1585,6 +1586,12 @@ export interface GeometryState extends
    * Undefined patch values remain own keys so explicit extra_json clearing semantics are preserved.
    */
   applyExtraJsonMergeBulk: (patchesById: Record<string, Record<string, unknown>>) => void;
+  /**
+   * Picks the Fabric tab's preset (null: the defaults file's own fabric), the model's FabricPreset
+   * row. Its build-ups replace the default assemblies it states. Elements are not changed: the
+   * converter gives each the preset values it does not state.
+   */
+  setFabricPreset: (preset: FabricPreset | null) => void;
   updateElementsFloor: (elementIds: string[], newFloorZ: number) => void;
   syncCurrentFloorWithSelection: () => void;
   copyWindowShadingDetails: (sourceWindowId: string, targetWindowIds: string[]) => void;
@@ -3097,6 +3104,7 @@ const createGeometryState = (
       // A cancelled defaults read never clears this flag itself.
       defaultsLoading: false,
       creationDefaultAssemblyIds: {},
+      fabricPreset: null,
       hostDocumentMetadata: {},
       propertyPostcode: undefined,
       modelId: undefined,
@@ -3252,8 +3260,9 @@ const createGeometryState = (
   fieldSourceOf: () => {
     const { defaultsJson, defaultsLookup, complianceSettings } = get();
     if (!defaultsJson) return null;
-    const { arealHeatCapacity } = targetRules(schemaPort, complianceSettings);
-    return (element, field) => elementFieldSource(element, field, defaultsJson, defaultsLookup, arealHeatCapacity);
+    const rules = targetRules(schemaPort, complianceSettings);
+    const preset = fabricPresetForTarget(get().fabricPreset, rules);
+    return (element, field) => elementFieldSource(element, field, defaultsJson, defaultsLookup, rules.arealHeatCapacity, preset);
   },
   ...createComplianceSlice(set, get, api),
   ...createHeatingSizingSlice(options.heatingSizingProvider)(set, get, api),
@@ -3332,6 +3341,10 @@ const createGeometryState = (
     });
   },
 
+  setFabricPreset: (preset) => {
+    // The preset's build-ups replace the ones it states; the user's others stay.
+    set((state) => ({ fabricPreset: preset, creationDefaultAssemblyIds: { ...state.creationDefaultAssemblyIds, ...preset?.buildUps } }));
+  },
   applyExtraJsonMergeBulk: (patchesById) => {
     const snapshot = get().elementsById;
     const entries: Array<[string, Record<string, unknown>]> = [];
@@ -7902,7 +7915,6 @@ export const createGeometryStore = (
   }) as typeof store.setState;
   const schemaPort = options.schemaPort ?? unavailableGeometrySchemaPort;
   const follower = followGroundFabricOnEdit(store, {
-    constructionBands: (state) => targetRules(schemaPort, state.complianceSettings).constructionBands,
     acceptsShieldLocation: () => acceptsSuspendedShieldLocation(schemaPort),
   });
   rawSetState({ withCopySources: follower.withCopySources });

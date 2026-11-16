@@ -58,6 +58,7 @@ import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThe
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
 import { METADATA_INPUT_LABELS, metadataSettingKey, TARGET_INPUT_ROW_SET, type TargetInputRow } from '../../lib/globalSettingsValidation';
 import { PRODUCT_SETTING_ROWS, type ProductSettingRow } from '../../stores/geometryStore/slices/complianceSlice';
+import { parseFabricPreset } from '../../lib/fabricPreset';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
 export const LEGACY_VULCAN_CSV_VERSION = 1;
@@ -261,6 +262,8 @@ export type ParsedCsvMetadata = {
   floorBaseHeightOverrides: readonly FloorBaseHeightOverrideRow[];
   complianceSettings: ComplianceSettings;
   creationDefaultAssemblyIds?: Partial<Record<'wall' | 'roof' | 'ground_floor', string>>;
+  /** The Fabric tab's preset, as saved JSON (Metadata row FabricPreset). */
+  fabricPreset?: string;
   detailedBridgePsiProfile?: ExternalDetailProfileLink | null;
 };
 
@@ -333,6 +336,7 @@ export const parseCsvToGeometry = (
     OVERRIDE_PROVENANCE_REGISTRY.zone.map((descriptor) => [descriptor.key, descriptor]),
   );
   let detectedDefaultAssemblyWall: string | undefined;
+  let detectedFabricPreset: string | undefined;
   let detectedDefaultAssemblyRoof: string | undefined;
   let detectedDefaultAssemblyGroundFloor: string | undefined;
   let detectedDetailedBridgePsiProfileSource: string | undefined;
@@ -439,6 +443,13 @@ export const parseCsvToGeometry = (
     if (line.startsWith('SchemaProfile,')) {
       const parts = parseCsvLine(line);
       detectedSchemaProfile = parseSchemaProfileMetadata(parts[1]);
+      continue;
+    }
+    if (line.startsWith('FabricPreset,')) {
+      const v = parseCsvLine(line)[1]?.trim();
+      // A preset the model cannot use fails the load plainly.
+      parseFabricPreset(v);
+      if (v) detectedFabricPreset = v;
       continue;
     }
     if (line.startsWith('DefaultAssemblyWall,')) {
@@ -867,6 +878,7 @@ export const parseCsvToGeometry = (
       floorBaseHeightOverrides: detectedFloorBaseHeightOverrides,
       complianceSettings,
       ...(Object.keys(creationDefaultAssemblyIds).length > 0 ? { creationDefaultAssemblyIds } : {}),
+      ...(detectedFabricPreset ? { fabricPreset: detectedFabricPreset } : {}),
       ...(detailedBridgePsiProfile ? { detailedBridgePsiProfile } : {}),
     },
   };
