@@ -298,8 +298,28 @@ Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""
     expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
   });
 
-  it('writes the derived base it subtracted and adds it back on reload', () => {
+  // A file that lacks the base row, or has it blank, states no base: the converter measures from 0
+  // (no defaults template sets it), and on HEM:EPC an existing building takes HEMIE's estimate and a
+  // new-build upper flat must state it. The save keeps the row as the file had it.
+  it.each([
+    ['an FHS file', flatRows, undefined],
+    ['an existing-building EPC file', `${flatRows}\nIsExistingBuilding,TRUE,,,,,,,,,,,,,`, undefined],
+    ['a new-build EPC file', `${flatRows}\nIsExistingBuilding,FALSE,,,,,,,,,,,,,`, undefined],
+    ['a file with the row blank', `${flatRows}\nVentilation_ventilation_zone_base_height,,,,,,,,,,,,,,`, 'Ventilation_ventilation_zone_base_height,,'],
+  ])('measures %s that states no base from 0 and saves the row as it was', (_, rows, baseRow) => {
+    const opened = openBaseSource(baseSourceCsv(rows));
+    expect(opened).toMatchObject({ vent: 1.5, window: 1.4 });
+    const csv = opened.store.getState().generateCSV();
+    if (baseRow) expect(csv).toContain(baseRow);
+    else expect(csv).not.toContain('Ventilation_ventilation_zone_base_height');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
+  });
+
+  it('writes the derived base of a model the editor built and adds it back on reload', () => {
     const opened = openBaseSource(baseSourceCsv(flatRows));
+    opened.store.setState({ complianceSettings: { ...opened.store.getState().complianceSettings, absentMetadataRows: undefined } });
     const csv = opened.store.getState().generateCSV();
     expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.4,');
     const reopened = openBaseSource(csv);
@@ -307,13 +327,14 @@ Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""
     expect(reopened).toMatchObject({ vent: opened.vent, window: opened.window });
   });
 
-  it('writes a non-zero base the file lacked rather than leave the converter another', () => {
-    const opened = openBaseSource(baseSourceCsv(flatRows));
-    opened.store.setState({ complianceSettings: {
-      ...opened.store.getState().complianceSettings,
-      absentMetadataRows: ['Ventilation_ventilation_zone_base_height'],
-    } });
-    expect(opened.store.getState().generateCSV()).toContain('Ventilation_ventilation_zone_base_height,2.4,');
+  it('keeps a Metadata base the file had over a Systems row, even where it matches the geometry', () => {
+    const opened = openBaseSource(baseSourceCsv(`${flatRows}\nVentilation_ventilation_zone_base_height,2.4,,,,,,,,,,,,,`, 2.8));
+    expect(opened).toMatchObject({ vent: 3.9, window: 3.8 });
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.4,');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
   });
 
   it('parses the canonical property postcode metadata row', () => {

@@ -1000,6 +1000,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     resolveEffectiveVentilationBaseHeight({
       zones: state.zones,
       elementsById: state.elementsById,
+      elementIds: state.elementIds,
       spaceLabelsById: state.spaceLabelsById,
       spaceLabelIds: state.spaceLabelIds,
       complianceSettings: state.complianceSettings,

@@ -132,6 +132,7 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
     resolveEffectiveVentilationBaseHeight({
       zones: state.zones,
       elementsById: state.elementsById,
+      elementIds: state.elementIds,
       spaceLabelsById: state.spaceLabelsById,
       spaceLabelIds: state.spaceLabelIds,
       complianceSettings: state.complianceSettings,

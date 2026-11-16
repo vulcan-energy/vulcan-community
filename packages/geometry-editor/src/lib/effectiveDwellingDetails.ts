@@ -57,11 +57,17 @@ export interface EffectiveDwellingDetailsInputs {
 
 export interface EffectiveVentilationBaseHeightInputs extends EffectiveDwellingDetailsInputs {
   floors?: Floor[];
+  /** Load order: the converter merges Systems rows in file order. */
+  elementIds: string[];
   complianceSettings: EffectiveDwellingDetailsInputs['complianceSettings'] & Partial<{
     AirPermeability_ventilation_zone_height: number;
     Ventilation_ventilation_zone_base_height: number;
+    absentMetadataRows: string[];
+    unreadMetadataRows: Record<string, string>;
   }>;
 }
+
+const BASE_HEIGHT_ROW = 'Ventilation_ventilation_zone_base_height';
 
 /**
  * The ventilation zone base a Systems InfiltrationVentilation row sets, as the converter merges
@@ -80,18 +86,30 @@ export function systemsRowVentilationBaseHeight(elements: readonly Element[]): n
 
 /**
  * Resolve the exact ventilation-zone base height the CSV measures window, vent and terminal
- * heights from: the Metadata value, else a Systems row's (the converter's precedence), else the
- * geometry's.
+ * heights from, the one the converter uses: the Metadata value, else a Systems row's, else 0 for a
+ * loaded file that lacks the Metadata row or has it blank (no defaults template sets it, and the
+ * save keeps the row as the file had it), else the geometry's (the save writes it).
  */
 export function resolveEffectiveVentilationBaseHeight(
   inputs: EffectiveVentilationBaseHeightInputs,
 ): number {
-  const explicit = inputs.complianceSettings.Ventilation_ventilation_zone_base_height;
+  const settings = inputs.complianceSettings;
+  const explicit = settings.Ventilation_ventilation_zone_base_height;
   if (typeof explicit === 'number' && Number.isFinite(explicit)) return explicit;
 
-  const elements = Object.values(inputs.elementsById);
-  const systemsBase = systemsRowVentilationBaseHeight(elements);
+  const systemsBase = systemsRowVentilationBaseHeight(
+    inputs.elementIds.flatMap((id) => inputs.elementsById[id] ?? []),
+  );
   if (systemsBase !== undefined) return systemsBase;
+  if (settings.absentMetadataRows?.includes(BASE_HEIGHT_ROW) || settings.unreadMetadataRows?.[BASE_HEIGHT_ROW] !== undefined) return 0;
+  return derivedVentilationBaseHeight(inputs);
+}
+
+/** The ventilation-zone base height the geometry and dwelling details give. */
+export function derivedVentilationBaseHeight(
+  inputs: Omit<EffectiveVentilationBaseHeightInputs, 'elementIds'>,
+): number {
+  const elements = Object.values(inputs.elementsById);
   const dwelling = resolveEffectiveDwellingDetails(inputs);
   const derivedVentilationHeight = calculateSuggestedVentilationHeight(elements, inputs.floors);
   const effectiveVentilationHeight =

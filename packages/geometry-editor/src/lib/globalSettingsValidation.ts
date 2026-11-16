@@ -10,7 +10,7 @@ import type {
 } from '../geometry/types';
 import type { GeometryState } from '../stores/geometryStore';
 import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
-import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight } from './effectiveDwellingDetails';
+import { derivedVentilationBaseHeight, resolveEffectiveDwellingDetails, systemsRowVentilationBaseHeight } from './effectiveDwellingDetails';
 import { targetFieldAccepts, targetFieldAvailability, targetFieldEnum } from './schemaCache';
 import { resolveBuildingElementPitch } from '../geometry/derivePitchFromGeometry';
 import { getAreaBasedElementExportGeometry } from './elementArea';
@@ -594,7 +594,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     ['Ventilation_shield_class', text(compliance.Ventilation_shield_class)],
     ['Ventilation_terrain_class', text(compliance.Ventilation_terrain_class)],
     ['Ventilation_altitude', num(compliance.Ventilation_altitude)],
-    ['Ventilation_ventilation_zone_base_height', num(resolveEffectiveVentilationBaseHeight({
+    ['Ventilation_ventilation_zone_base_height', num(finiteNumber(compliance.Ventilation_ventilation_zone_base_height) ?? derivedVentilationBaseHeight({
       zones: state.zones as Zone[],
       elementsById: state.elementsById,
       spaceLabelsById: state.spaceLabelsById as Record<string, SpaceLabel>,

@@ -5,7 +5,7 @@
 // (Part F context, ioSlice CSV export, GeometryBuilder UI) all depend on this contract.
 
 import { describe, it, expect } from 'vitest';
-import { resolveEffectiveDwellingDetails } from '../effectiveDwellingDetails';
+import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight } from '../effectiveDwellingDetails';
 import type { Element, SpaceLabel, Zone } from '../../geometry/types';
 
 const zone = (): Zone => ({
@@ -176,5 +176,19 @@ describe('resolveEffectiveDwellingDetails', () => {
     expect(result.primaryZoneSpaceLabelAggregate).toBeNull();
     expect(result.bedrooms).toBeUndefined();
     expect(result.totalFloorAreaM2).toBe(0);
+  });
+});
+
+describe('resolveEffectiveVentilationBaseHeight', () => {
+  it('takes the base of the last Systems row in load order, as the converter merges them', () => {
+    const system = (id: string, base: number) => ({
+      id, name: id, type: 'System', subcategory: 'InfiltrationVentilation',
+      extra_json: { InfiltrationVentilation: { ventilation_zone_base_height: base } },
+    }) as unknown as Element;
+    // An all-digit id enumerates first in Object.values, ahead of load order.
+    const elementsById = { a: system('a', 2.8), 7: system('7', 3.1) };
+    expect(resolveEffectiveVentilationBaseHeight({
+      zones: [zone()], elementsById, elementIds: ['a', '7'], spaceLabelsById: {}, spaceLabelIds: [], complianceSettings: {},
+    })).toBe(3.1);
   });
 });
