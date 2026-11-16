@@ -128,7 +128,7 @@ const EMPTY_ADVANCED_FIELDS: Record<string, unknown> = Object.freeze({});
 const COLLAPSED_ENGINE_FIELDS: ReadonlySet<string> = new Set(['areal_heat_capacity', 'mass_distribution_class', 'solar_absorption_coeff']);
 /** An existing building's window under the age band method takes its g-value from the glazing type. */
 const COLLAPSED_BAND_WINDOW_FIELDS: ReadonlySet<string> = new Set([...COLLAPSED_ENGINE_FIELDS, 'g_value']);
-/** With a colour offered, the solar absorption coefficient is its override. */
+/** With a colour stated, the solar absorption coefficient is its override; without one it stays in view. */
 const COLLAPSED_COLOUR_FIELDS: ReadonlySet<string> = new Set(['solar_absorption_coeff']);
 /** A heating circuit's less common inputs: flow limits and rates, thermal mass and the weather curve. */
 const COLLAPSED_HEATING_FIELDS: ReadonlySet<string> = new Set([
@@ -1974,7 +1974,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           : existingBuilding && hemDatabaseProducts
             ? (elementType === 'OnSiteGeneration' ? COLLAPSED_PV_FIELDS
               : thermalMethod === 'band' && elementType === 'BuildingElementTransparent' ? COLLAPSED_BAND_WINDOW_FIELDS : COLLAPSED_ENGINE_FIELDS)
-            : offersColour ? COLLAPSED_COLOUR_FIELDS : undefined,
+            : colourAbsorption !== undefined ? COLLAPSED_COLOUR_FIELDS : undefined,
         derivedDefaults: elementType === 'System'
           ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding)
           // The converter gives a blank ground U-value the floor calculation's (`ground_u_value.rs`).
@@ -2038,7 +2038,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       constructionBands,
       getActiveRootSchema,
       thermalMethod,
-      offersColour,
       colourAbsorption,
       takesResistance,
       resistanceShown,
