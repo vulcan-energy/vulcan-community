@@ -910,6 +910,18 @@ describe('where a value comes from (one source treatment)', () => {
     expect(screen.getByRole('button', { name: /^U-value: use calculation, 0.21/ })).toBeInTheDocument();
   });
 
+  it('a blank ground U-value is the floor calculation\'s, and "Use calculation" goes back to blank', () => {
+    const config = { elementType: 'BuildingElementGround', groundUComputedWPerM2K: 0.1744, groundUFromCalculation: true, derivedDefaults: { u_value: 0.1744 } };
+    const { container } = renderControl(NumberControl, { data: null, path: 'u_value', label: 'U-value', config });
+    expect(sourceOf(container)).toHaveTextContent('from the floor calculation');
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', '0.1744');
+    cleanup();
+    const handleChange = vi.fn();
+    renderControl(NumberControl, { data: 0.3, path: 'u_value', label: 'U-value', config, handleChange });
+    fireEvent.click(screen.getByRole('button', { name: /^U-value: use calculation, 0.174/ }));
+    expect(handleChange).toHaveBeenLastCalledWith('u_value', undefined);
+  });
+
   it('System Sample: a blank field the preset omits shows the default note, with no "Use default" write', () => {
     const handleChange = vi.fn();
     renderControl(NumberControl, {

@@ -3167,6 +3167,56 @@ impl JSONBuilder {
                                         .expect("validated finite ground total area"),
                                 ),
                             );
+
+                            // A construction resistance from the element or the fabric preset,
+                            // with no U-value stated, takes its U-value from the floor
+                            // calculation: the defaults file's U-value belongs to its own
+                            // resistance. The defaults file's pair stays together.
+                            const R_FLOOR: &str = "thermal_resistance_floor_construction";
+                            let row_extra =
+                                element_row.get("extra_json").and_then(Value::as_object);
+                            let stated = |key: &str| {
+                                csv_set_keys.contains(key)
+                                    || row_extra
+                                        .and_then(|extra| extra.get(key))
+                                        .is_some_and(|v| !v.is_null() && v != "")
+                            };
+                            let preset_r = preset_values
+                                .as_ref()
+                                .is_some_and(|values| values.contains_key(R_FLOOR));
+                            if !stated("u_value") && (stated(R_FLOOR) || preset_r) {
+                                let wind = row_extra
+                                    .and_then(|extra| extra.get("wind_speed_mps"))
+                                    .and_then(Value::as_f64);
+                                match crate::ground_u_value::ground_u_value(element_obj_map, wind) {
+                                    Some(u) => {
+                                        element_obj_map.insert(
+                                            "u_value".into(),
+                                            json_number(u, &format!("{element_name} u_value"))?,
+                                        );
+                                    }
+                                    None => {
+                                        let floor_type = element_obj_map
+                                            .get("floor_type")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or_default();
+                                        let source = match (&self.fabric_preset, preset_r) {
+                                            (Some(preset), true) => {
+                                                format!("the fabric preset \"{}\"", preset.name)
+                                            }
+                                            _ => "the floor".to_string(),
+                                        };
+                                        self.push_non_fatal(
+                                            "E068",
+                                            &crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name, "u_value"]),
+                                            &format!(
+                                                "Ground floor '{element_name}': the U-value cannot be worked out from the construction resistance {source} gives. The floor calculation needs {}. Draw the floor against its walls or enter them, or enter the floor's U-value.",
+                                                crate::ground_u_value::required_inputs(floor_type)
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
 

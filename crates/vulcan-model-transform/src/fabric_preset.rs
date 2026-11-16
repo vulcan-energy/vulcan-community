@@ -48,8 +48,8 @@ impl FabricRow {
         }
     }
 
-    /// The values a preset sets. Not a ground floor's U-value: the floor calculation derives it
-    /// from the construction's resistance and the drawing.
+    /// The values a preset sets. Not a ground floor's U-value: the floor calculation
+    /// (`ground_u_value.rs`) derives it from the construction's resistance and the drawing.
     fn preset_keys(self) -> &'static [&'static str] {
         match self {
             Self::Wall | Self::AdjacentWall | Self::Roof | Self::Door => &["u_value"],

@@ -65,6 +65,8 @@ type RendererConfig = {
   fieldIndicators?: Readonly<Record<string, readonly string[]>>;
   focusSourceElement?: (elementId: string) => void;
   groundUComputedWPerM2K?: number | null;
+  /** The converter works a blank ground U-value out with the floor calculation (no construction bands). */
+  groundUFromCalculation?: boolean;
   opaqueFabricVariant?: OpaqueFabricVariant;
   openGroundUCalculator?: () => void;
   openRuCalculator?: () => void;
@@ -524,6 +526,7 @@ function resolveAdvancedFieldSource(args: {
   unit: string | undefined;
   isGroundUField: boolean;
   groundUComputedWPerM2K: number | null | undefined;
+  groundUFromCalculation: boolean;
   openGroundUCalculator: (() => void) | undefined;
   fabricRowField: string | undefined;
 }): { source: React.ReactNode; followsSource: boolean } {
@@ -547,14 +550,15 @@ function resolveAdvancedFieldSource(args: {
   if (args.isGroundUField && fieldSource.kind === 'default') {
     const u = args.groundUComputedWPerM2K;
     if (typeof u === 'number' && Number.isFinite(u) && u > 0) {
-      if (groundAdvancedUValueMatchesComputed(data, u)) {
-        return {
-          source: <SourceNote link="from the floor calculation" onGo={args.openGroundUCalculator} title="Open the floor calculation" />,
-          followsSource: true,
-        };
-      }
+      const note = <SourceNote link="from the floor calculation" onGo={args.openGroundUCalculator} title="Open the floor calculation" />;
+      if (args.groundUFromCalculation && !hasExplicit) return { source: note, followsSource: false };
+      if (groundAdvancedUValueMatchesComputed(data, u)) return { source: note, followsSource: true };
       const uRounded = Number(u.toFixed(4));
-      return { source: sourceButton('Use calculation', uRounded, withUnit(uRounded)), followsSource: false };
+      // A blank U-value takes the calculation; under construction bands it is stated, over the age band.
+      return {
+        source: sourceButton('Use calculation', args.groundUFromCalculation ? undefined : uRounded, withUnit(uRounded)),
+        followsSource: false,
+      };
     }
   }
 
@@ -751,6 +755,7 @@ function useAdvancedControlPreamble(
     unit: fieldUnit,
     isGroundUField,
     groundUComputedWPerM2K,
+    groundUFromCalculation: cfg.groundUFromCalculation === true,
     openGroundUCalculator: cfg.openGroundUCalculator,
     fabricRowField: cfg.fabricRowField,
   });

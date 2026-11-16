@@ -118,13 +118,17 @@ export function fabricRowKey(element: Element): FabricRow | undefined {
   return variant === 'external_door' ? 'door' : variant;
 }
 
-const extraOf = (element: Element) => (element.extra_json ?? {}) as Record<string, unknown>;
 const stated = (value: unknown) => value !== undefined && value !== null && value !== '';
+/** An element value as the converter reads it: its CSV column (an element field), else `extra_json`. */
+function ownValue(element: Element, key: string): unknown {
+  const column = (element as unknown as Record<string, unknown>)[key];
+  return stated(column) ? column : (element.extra_json as Record<string, unknown> | undefined)?.[key];
+}
 
 /** The fabric keys the element states itself. A ground U-value the floor calculation wrote is not one. */
 export function ownFabricKeys(element: Element, row: FabricRow): string[] {
-  const extra = extraOf(element);
-  return OWN_FABRIC_KEYS[row].filter((key) => stated(extra[key]) && !(row === 'ground_floor' && key === 'u_value' && extra[GROUND_U_VALUE_MANUAL_KEY] !== true));
+  return OWN_FABRIC_KEYS[row].filter((key) => stated(ownValue(element, key))
+    && !(row === 'ground_floor' && key === 'u_value' && ownValue(element, GROUND_U_VALUE_MANUAL_KEY) !== true));
 }
 
 /**
@@ -136,14 +140,28 @@ export function presetValueFor(element: Element, preset: FabricPreset | null): R
   const row = fabricRowKey(element);
   const values = row ? preset?.values[row] : undefined;
   if (!row || !values) return {};
-  const extra = extraOf(element);
-  return Object.fromEntries(Object.entries(values).filter(([key]) => !blockingKeys(row, key).some((own) => stated(extra[own]))));
+  return Object.fromEntries(Object.entries(values).filter(([key]) => !blockingKeys(row, key).some((own) => stated(ownValue(element, own)))));
 }
 
-/** The patch that removes an element's own fabric values, a stated ground U-value with its flag (Apply to all). */
-export const ownFabricClear = (row: FabricRow): Record<string, unknown> => Object.fromEntries(
-  [...OWN_FABRIC_KEYS[row], ...(row === 'ground_floor' ? [GROUND_U_VALUE_MANUAL_KEY] : [])].map((key) => [key, undefined]),
-);
+/**
+ * The patch "Apply to all" makes on an element: its own fabric values go, in a CSV column or in
+ * `extra_json`, with a stated ground U-value's flag. A build-up goes with the values it set that
+ * still hold its value (`buildUpValues`, from `assemblySourceValuesFor`), such as the heat
+ * capacity, so none of them stays without it.
+ */
+export function ownFabricClear(element: Element, row: FabricRow, buildUpValues: Readonly<Record<string, unknown>>): Partial<Element> {
+  const fields = element as unknown as Record<string, unknown>;
+  const extra = { ...(element.extra_json as Record<string, unknown> | undefined) };
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(buildUpValues)) {
+    if (JSON.stringify(extra[key]) === JSON.stringify(value)) delete extra[key];
+  }
+  for (const key of [...OWN_FABRIC_KEYS[row], ...(row === 'ground_floor' ? [GROUND_U_VALUE_MANUAL_KEY] : [])]) {
+    delete extra[key];
+    if (stated(fields[key])) patch[key] = undefined;
+  }
+  return { ...patch, extra_json: extra } as Partial<Element>;
+}
 
 /** The family of presets the target takes; none under construction bands, where the age band gives the fabric. */
 export function fabricPresetFamily(rules: Pick<TargetRules, 'requiredMetadataRows' | 'constructionBands'>): FabricPreset['family'] | undefined {

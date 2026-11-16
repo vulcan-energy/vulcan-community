@@ -5,7 +5,7 @@ import { act } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Element } from "../../geometry/types";
 import { createGeometryStore } from "../../stores/geometryStore";
-import { BUILT_IN_FABRIC_PRESETS, fabricPresetForTarget, ownFabricKeys, parseFabricPreset, presetValueFor } from "../fabricPreset";
+import { BUILT_IN_FABRIC_PRESETS, fabricPresetForTarget, ownFabricClear, ownFabricKeys, parseFabricPreset, presetValueFor } from "../fabricPreset";
 import { syncGroundExposedPerimetersFromWalls } from "../groundSuspendedFabricSync";
 
 const [partL, caseStudy] = BUILT_IN_FABRIC_PRESETS;
@@ -40,6 +40,19 @@ describe("presetValueFor", () => {
     expect(ownFabricKeys(element("BuildingElementGround", { u_value: 0.17, _ground_u_value_manual: true }), "ground_floor")).toEqual(["u_value"]);
   });
 
+  it("reads a CSV-column value as the element's own, as the converter does", () => {
+    const columnU = element("BuildingElementOpaque", {}, { pitch: 90, u_value: 0.35 });
+    expect(presetValueFor(columnU, partL!)).toEqual({});
+    expect(ownFabricKeys(columnU, "wall")).toEqual(["u_value"]);
+    expect(ownFabricClear(columnU, "wall", {})).toEqual({ u_value: undefined, extra_json: {} });
+  });
+
+  it("clears a build-up with the values it set, and keeps a value the user changed since", () => {
+    const wall = element("BuildingElementOpaque", { vulcan_assembly_v1: {}, u_value: 0.2, areal_heat_capacity: "Medium", mass_distribution_class: "I: Mass concentrated on internal side", colour: "Light" }, { pitch: 90 });
+    const buildUp = { u_value: 0.2, areal_heat_capacity: "Medium", mass_distribution_class: "E: Mass concentrated on external side" };
+    expect(ownFabricClear(wall, "wall", buildUp)).toEqual({ extra_json: { mass_distribution_class: "I: Mass concentrated on internal side", colour: "Light" } });
+  });
+
   it("is for the target's family only, and for no existing building", () => {
     const fhs = { requiredMetadataRows: [], constructionBands: false };
     const epcNew = { requiredMetadataRows: ["IsExistingBuilding"], constructionBands: false };
@@ -63,31 +76,16 @@ describe("an element's field source", () => {
 });
 
 describe("a fabric preset on a ground floor", () => {
-  it("gives the floor calculation its resistance, and a change of preset works the U-value out again", () => {
+  it("gives the floor its resistance and stores no U-value: the converter works it out", () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     store.setState({ elementsById: { g: ground } as never, elementIds: ["g"] });
     const extra = () => (store.getState().elementsById.g!.extra_json ?? {}) as Record<string, unknown>;
-    // What the element creator's effect runs after every change, with the preset the target takes.
-    const sync = () => act(() => syncGroundExposedPerimetersFromWalls(store.getState().elementsById, store.getState().updateElement, false,
-      (g) => presetValueFor(g, store.getState().fabricPreset)));
-
-    sync();
-    expect(extra().u_value).toBeUndefined();
+    const sync = () => act(() => syncGroundExposedPerimetersFromWalls(store.getState().elementsById, store.getState().updateElement));
     act(() => store.getState().setFabricPreset(partL!));
     sync();
-    const partLU = extra().u_value as number;
-    expect(partLU).toEqual(expect.any(Number));
-    // The resistance stays the preset's, not the element's.
-    expect(extra().thermal_resistance_floor_construction).toBeUndefined();
-
-    act(() => store.getState().setFabricPreset(caseStudy!));
-    sync();
-    expect(extra().u_value).toBeLessThan(partLU);
-
-    // No preset: the calculated U-value goes, and the defaults file's pair applies.
-    act(() => store.getState().setFabricPreset(null));
-    sync();
+    expect(presetValueFor(store.getState().elementsById.g!, partL!)).toEqual({ thermal_resistance_floor_construction: 4.5 });
     expect(extra().u_value).toBeUndefined();
+    expect(extra().thermal_resistance_floor_construction).toBeUndefined();
   });
 
   it("keeps a U-value the user stated through a change of preset", () => {

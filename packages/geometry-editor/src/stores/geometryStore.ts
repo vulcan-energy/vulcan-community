@@ -173,7 +173,7 @@ import {
 } from './namingStore';
 import { createDefaultsLookup, type DefaultsLookup } from '../lib/defaultsCache';
 import { applyCreationDefaultAssemblyToElement } from '../lib/multiSelectAssemblyApply';
-import { fabricPresetForTarget, presetValueFor, type FabricPreset } from '../lib/fabricPreset';
+import { fabricPresetForTarget, type FabricPreset } from '../lib/fabricPreset';
 import {
   getElementCanvasFloorZValue,
   getThermalBridgeExtraJsonFloorStorey,
@@ -214,9 +214,7 @@ import {
   computeWeightedExternalWallAssemblyThicknessForGroundElement,
   acceptsSuspendedShieldLocation,
   followGroundFabricOnEdit,
-  followGroundUValueOnPresetChange,
   type GroundFabricFollower,
-  type InheritedGroundValues,
 } from '../lib/groundSuspendedFabricSync';
 import {
   SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS,
@@ -3344,16 +3342,8 @@ const createGeometryState = (
   },
 
   setFabricPreset: (preset) => {
-    const inherited = (): InheritedGroundValues => {
-      const forTarget = fabricPresetForTarget(get().fabricPreset, targetRules(schemaPort, get().complianceSettings));
-      return (ground) => presetValueFor(ground, forTarget);
-    };
-    const before = inherited();
     // The preset's build-ups replace the ones it states; the user's others stay.
     set((state) => ({ fabricPreset: preset, creationDefaultAssemblyIds: { ...state.creationDefaultAssemblyIds, ...preset?.buildUps } }));
-    // A ground U-value the floor calculation works out follows the preset's resistance, in the same step.
-    get().asEditFollowUp(() => followGroundUValueOnPresetChange(get().elementsById, get().updateElement,
-      targetRules(schemaPort, get().complianceSettings).constructionBands, before, inherited()));
   },
   applyExtraJsonMergeBulk: (patchesById) => {
     const snapshot = get().elementsById;
@@ -7925,12 +7915,7 @@ export const createGeometryStore = (
   }) as typeof store.setState;
   const schemaPort = options.schemaPort ?? unavailableGeometrySchemaPort;
   const follower = followGroundFabricOnEdit(store, {
-    constructionBands: (state) => targetRules(schemaPort, state.complianceSettings).constructionBands,
     acceptsShieldLocation: () => acceptsSuspendedShieldLocation(schemaPort),
-    inherited: (state) => {
-      const preset = fabricPresetForTarget(state.fabricPreset, targetRules(schemaPort, state.complianceSettings));
-      return (ground) => presetValueFor(ground, preset);
-    },
   });
   rawSetState({ withCopySources: follower.withCopySources });
   return store;

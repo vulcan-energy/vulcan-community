@@ -6,6 +6,8 @@ import { useShallow } from "zustand/react/shallow";
 import type { GeometryWorkspaceResourcePort } from "../../../geometry-editor-host/src/workspaceResourcePort";
 import type { Element } from "../geometry/types";
 import type { DefaultsLookup } from "../lib/defaultsCache";
+import { assemblySourceValuesFor, elementSubtype } from "../lib/fieldDefault";
+import { useTargetRules } from "../hooks/useTargetRules";
 import {
   BUILT_IN_FABRIC_PRESETS,
   FabricTabCloseContext,
@@ -66,7 +68,7 @@ const canonical = (value: unknown): unknown => isObject(value)
 const samePreset = (a: FabricPreset | null, b: FabricPreset | null) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const presetFileName = (name: string) => `${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "preset"}.json`;
 
-type Change = { id: string; name: string; patch: Record<string, unknown>; to: string };
+type Change = { id: string; name: string; patch: Partial<Element>; to: string };
 type SavedPresets = { presets: { preset: FabricPreset; path: string }[]; problems: string[] };
 
 
@@ -177,7 +179,8 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
   const preset = storedPreset?.family === family ? storedPreset : null;
   const setIds = useGeometryStore((state) => state.setCreationDefaultAssemblyIds);
   const setPreset = useGeometryStore((state) => state.setFabricPreset);
-  const applyBulk = useGeometryStore((state) => state.applyExtraJsonMergeBulk);
+  const updateElement = useGeometryStore((state) => state.updateElement);
+  const { arealHeatCapacity } = useTargetRules();
   // The preview of "Apply to all", or how many elements the last apply changed.
   const [step, setStep] = useState<{ preview: Change[] } | { applied: number } | null>(null);
   const preview = step && "preview" in step ? step.preview : null;
@@ -269,9 +272,16 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
   // take the table's values (the preset's, else the file's).
   const changes = (): Change[] => ROWS.flatMap((row) => {
     if (FABRIC_PRESET_KEYS[row.key].every((key) => !values.get(row.key)![key]!.length)) return [];
-    return byRow.get(row.key)!.flatMap((element) => ownFabricKeys(element, row.key).length
-      ? [{ id: element.id, name: element.name, patch: ownFabricClear(row.key), to: `${describe(row.key)} from ${preset?.name ?? fileLabel}` }]
-      : []);
+    return byRow.get(row.key)!.flatMap((element) => {
+      const own = ownFabricKeys(element, row.key);
+      if (!own.length) return [];
+      const buildUp = own.includes("vulcan_assembly_v1")
+        ? assemblySourceValuesFor(element.extra_json, element.type, elementSubtype(element), arealHeatCapacity)
+        : {};
+      const to = `${describe(row.key)} from ${preset?.name ?? fileLabel}`
+        + (own.includes("vulcan_assembly_v1") ? "; its build-up is removed, with the values it set (such as the heat capacity)" : "");
+      return [{ id: element.id, name: element.name, patch: ownFabricClear(element, row.key, buildUp), to }];
+    });
   });
 
   const buildUps = () => (Object.keys(ids).length ? { buildUps: { ...ids } } : {});
@@ -420,7 +430,7 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
         <ApplyPreview
           preview={preview}
           onApply={() => {
-            applyBulk(Object.fromEntries(preview.map((change) => [change.id, change.patch])));
+            preview.forEach((change, index) => updateElement(change.id, change.patch, index < preview.length - 1));
             setStep({ applied: preview.length });
           }}
           onClose={() => setStep(null)}

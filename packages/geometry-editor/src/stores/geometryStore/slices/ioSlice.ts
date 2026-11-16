@@ -2495,9 +2495,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
-    const calculatedGroundU = targetRules(options.schemaPort, get().complianceSettings).constructionBands
-      ? dropCalculatedGroundUValues(loadedElements)
-      : { elements: loadedElements, names: [] };
+    const calculatedGroundU = dropCalculatedGroundUValues(loadedElements, targetRules(options.schemaPort, get().complianceSettings).constructionBands);
     const upgradedElements = rederiveContextShadingFromDrawing(
       liftStoreyIndexDuctsToMetres(
         upgradePcdbProductReferences(calculatedGroundU.elements),

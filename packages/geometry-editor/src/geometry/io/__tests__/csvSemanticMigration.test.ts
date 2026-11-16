@@ -498,9 +498,12 @@ Floor,Zone 1,BuildingElementGround,20,0,0,18,Slab_no_edge_insulation,,0.3,,"0,0,
     expect(assembly.result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
   });
 
-  it('leaves an FHS model with a stale existing-building flag alone', () => {
+  it('without construction bands removes it silently: the converter works the same value out', () => {
     const { result, extra } = load({ u_value: calculated }, false);
-    expect(extra.u_value).toBe(calculated);
+    expect(extra.u_value).toBeUndefined();
     expect(result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
+    // The calculation's value from a build-up goes too; a stated one stays.
+    expect(load({ u_value: calculated, vulcan_assembly_v1: { schemaVersion: 1 } }, false).extra.u_value).toBeUndefined();
+    expect(load({ u_value: 0.45 }, false).extra.u_value).toBe(0.45);
   });
 });

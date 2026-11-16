@@ -5339,7 +5339,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     ? (el.extra_json as Record<string, unknown>)
                     : {};
                 const nextExtra = { ...prev, ...patch };
-                if (el?.type === 'BuildingElementGround') {
+                if (el?.type === 'BuildingElementGround' && !constructionBands) {
+                  // The converter works the U-value out from the build-up's resistance and the drawing.
+                  delete nextExtra.u_value;
+                  delete nextExtra[GROUND_U_VALUE_MANUAL_KEY];
+                } else if (el?.type === 'BuildingElementGround') {
                   const depthBasementFloor = readFiniteNumber(el.depth_basement_floor);
                   const thicknessWalls =
                     typeof buildingElementGroundFormState.thicknessWallsInput.value === 'number' && Number.isFinite(buildingElementGroundFormState.thicknessWallsInput.value)
@@ -5358,10 +5362,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
                   });
                   if (uComputed != null && Number.isFinite(uComputed) && uComputed > 0) {
+                    // With construction bands the build-up states the U-value: it replaces the age band.
                     nextExtra.u_value = Number(uComputed.toFixed(4));
-                    // Applying an assembly states the U-value; with construction bands it replaces the age band.
-                    if (constructionBands) nextExtra[GROUND_U_VALUE_MANUAL_KEY] = true;
-                    else delete nextExtra[GROUND_U_VALUE_MANUAL_KEY];
+                    nextExtra[GROUND_U_VALUE_MANUAL_KEY] = true;
                   }
                 }
                 updateElement(selection.id, {
