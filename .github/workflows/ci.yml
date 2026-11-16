@@ -121,11 +121,17 @@ jobs:
           components: clippy, rustfmt
 
       # Caches the registry and compiled dependencies; the workspace crates and the
-      # path-patched HEM upstreams are always rebuilt. Keyed on the rustc version and
-      # every Cargo.toml/Cargo.lock, so it must follow the toolchain step. Tag runs
+      # path-patched HEM upstreams are always rebuilt. Keyed on the rustc version,
+      # Cargo.lock and the member manifests, so it must follow the toolchain step. Tag runs
       # skip it so release validation never builds on a restored cache.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          # Only main writes this cache. A pull request restores main's cache but cannot
+          # save one of its own, so a commit on a PR cannot leave build artefacts for that
+          # PR's later runs of this required check to trust. It also stops merge-queue
+          # runs writing caches under refs that are deleted straight afterwards.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check Rust formatting
         run: cargo fmt --check
