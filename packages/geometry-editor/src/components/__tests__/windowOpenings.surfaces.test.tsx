@@ -333,6 +333,13 @@ describe('main-form window opening inputs', () => {
       expect(stored(store)).toEqual(element);
     });
 
+    it('reads Top from the key, and opening the window writes nothing', () => {
+      const element = windowElement({ _vulcan_ui_opening_part: 'top', window_part_list: [{ mid_height_air_flow_path: 1.85 }] }, { ...follows, mid_height: 1.85 });
+      const store = renderForm(element);
+      expect(pressed('Top')).toBe('true');
+      expect(stored(store)).toEqual(element);
+    });
+
     it('single opening: Top moves a following mid height to head − free height ÷ 2, Whole moves it back', () => {
       const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.5 }] }, follows));
       fireEvent.click(screen.getByRole('button', { name: 'Top' }));

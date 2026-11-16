@@ -2364,8 +2364,8 @@ const applyTransparentOpeningAutomaticFields = (
   const updateRecord = normalizedUpdates as Record<string, unknown>;
   // A floor cascade writes its own list. a7 lists follow the sill in WindowPartListControl.
   const updateOwnsWindowParts = Object.prototype.hasOwnProperty.call(readJsonRecord(updateRecord.extra_json) ?? {}, 'window_part_list');
+  const baseDelta = resolveWindowBaseHeight(nextElement, effectiveFloors) - resolveWindowBaseHeight(prevElement, effectiveFloors);
   if (windowPartsPhysical && !updateOwnsWindowParts) {
-    const baseDelta = resolveWindowBaseHeight(nextElement, effectiveFloors) - resolveWindowBaseHeight(prevElement, effectiveFloors);
     const shiftedExtraJson = baseDelta === 0
       ? null
       : shiftPhysicalPartsWithBaseHeight(nextElement as unknown as WindowOpeningSource, baseDelta);
@@ -2418,10 +2418,10 @@ const applyTransparentOpeningAutomaticFields = (
     typeof canonicalPatch.mid_height === 'number'
   ) {
     nextElement.mid_height = canonicalPatch.mid_height;
-    // a8/a9 keeps its one opening's height in the list. The a7 list follows the sill in
-    // WindowPartListControl instead, so shifting it here as well would move it twice.
+    // A list that matches the mid height follows it. An a7 list follows a sill move in
+    // WindowPartListControl instead, so moving it here as well would move it twice.
     if (
-      windowPartsPhysical &&
+      (windowPartsPhysical || baseDelta === 0) &&
       typeof prevElement.mid_height === 'number' &&
       !updateOwnsWindowParts
     ) {

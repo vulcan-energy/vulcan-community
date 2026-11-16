@@ -134,6 +134,36 @@ describe('part that opens: store and export', () => {
     expect(windowRow()[midColumn]).toBe('2.05');
   });
 
+  it('a7: a free height edit moves a following top mid height and the list that matches it', () => {
+    const { store, get } = setup(window({ ...top, window_part_list: [{ mid_height_air_flow_path: 1.85 }] }, { ...columns, mid_height: 1.85 }));
+    store.getState().updateElement('w', { free_area_height: 0.5 } as Partial<Element>);
+    expect(get()).toMatchObject({ mid_height: 1.75, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.75 }] } });
+  });
+
+  it('a7: a height edit moves a following whole mid height and the list that matches it; a list of its own stays', () => {
+    const { store, get } = setup(window({ window_part_list: [{ mid_height_air_flow_path: 1.4 }] }));
+    store.getState().updateElement('w', { height: 1.4 } as Partial<Element>);
+    expect(get()).toMatchObject({ mid_height: 1.5, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.5 }] } });
+    const own = setup(window({ window_part_list: [{ mid_height_air_flow_path: 1.2 }] }));
+    own.store.getState().updateElement('w', { height: 1.4 } as Partial<Element>);
+    expect(own.get()).toMatchObject({ mid_height: 1.5, extra_json: { window_part_list: [{ mid_height_air_flow_path: 1.2 }] } });
+  });
+
+  // One physical part: its own free height is the one HEM runs, not a stale column.
+  const onePart = (mid: number) => window({ ...top, window_part_list: [{ free_area_height: 0.3, mid_height: 1.85, max_window_open_area: 0.27 }] },
+    { free_area_height: 0.9, mid_height: mid, max_window_open_area: 0.8 });
+
+  it('one physical part: derives from the part\'s free height', () => {
+    const element = onePart(1.85) as Extract<Element, { type: 'BuildingElementTransparent' }>;
+    expect(deriveTransparentOpeningDerivedValues(element).midHeight).toBe(1.85);
+    expect(getTransparentExportMidHeight(element)).toBe(1.85);
+  });
+
+  it('one physical part: exports a following mid height from the part, and keeps a typed one', () => {
+    expect(setup(onePart(1.85)).windowRow()[12]).toBe('1.85');
+    expect(setup(onePart(1.7)).windowRow()[12]).toBe('1.7');
+  });
+
   it('exports a window without the key exactly as before: the centre', () => {
     const { windowRow } = setup(window(undefined));
     expect(windowRow()[12]).toBe('1.4');

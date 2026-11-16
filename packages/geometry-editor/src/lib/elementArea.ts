@@ -15,7 +15,7 @@ import { calculatePolygonArea } from './polygonSync';
 import { isVulcanUiPartyFloorElement } from './assemblyMaterialFabric';
 import { getElementShape } from './shapeUtils';
 import { calculateDerivedWindowMidHeight } from './zoneDerivation';
-import { windowOpeningPart, type WindowOpeningSource } from './windowOpenings';
+import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from './windowOpenings';
 import {
   deriveSlopedElementDimensions,
   getSlopedPolygonSurfaceArea,
@@ -358,7 +358,7 @@ export const getTransparentExportMidHeight = (element: BuildingElementTransparen
   const part = windowOpeningPart(element as unknown as WindowOpeningSource);
   return part === 'whole'
     ? roundToTwoDecimals(baseHeight + height / 2)
-    : calculateDerivedWindowMidHeight(baseHeight, height, part, element.free_area_height);
+    : calculateDerivedWindowMidHeight(baseHeight, height, part, windowOpeningFreeHeight(element as unknown as WindowOpeningSource));
 };
 
 export const getElementGrossArea = (element: Element, globalOrientationOffset?: number): number => {

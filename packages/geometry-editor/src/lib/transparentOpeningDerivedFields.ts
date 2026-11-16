@@ -8,7 +8,7 @@ import {
   calculateDerivedWindowMidHeight,
 } from './zoneDerivation';
 import { lineFaceEnvelope } from './profileLineFace';
-import { windowOpeningPart, type WindowOpeningSource } from './windowOpenings';
+import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from './windowOpenings';
 
 const DERIVED_VALUE_EPSILON = 0.005;
 
@@ -101,7 +101,9 @@ function deriveWindowMidHeight(
     deriveBaseHeightForMidHeight(element, patch, effectiveFloors) + lineFaceEnvelope(element).bottom,
     patchedNumber(element, patch, 'height'),
     windowOpeningPart(element as unknown as WindowOpeningSource),
-    patchedNumber(element, patch, 'free_area_height'),
+    hasOwn(patch, 'free_area_height')
+      ? finiteNumberOrZero(patch.free_area_height)
+      : windowOpeningFreeHeight(element as unknown as WindowOpeningSource),
   );
 }
 

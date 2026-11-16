@@ -171,6 +171,14 @@ export function windowOpeningPart(row: WindowOpeningSource): WindowOpeningPart {
   return (stated === 'top' || stated === 'bottom') && windowHasSingleOpening(row) ? stated : 'whole';
 }
 
+/** The free height the window runs: one physical part's own, else the column. */
+export function windowOpeningFreeHeight(row: WindowOpeningSource): number | undefined {
+  const parts = sourceField(row, 'window_part_list');
+  return Array.isArray(parts) && parts.length === 1 && isPhysicalPart(parts[0])
+    ? finite((parts[0] as Record<string, unknown>).free_area_height)
+    : columnNumber(row, 'free_area_height');
+}
+
 /** `extra_json` stating the part; Whole removes the key, so the window is as it was. */
 export function withWindowOpeningPart(row: WindowOpeningSource, part: WindowOpeningPart): Record<string, unknown> {
   const extra = isRecord(row.extra_json) ? { ...row.extra_json } : {};
