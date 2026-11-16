@@ -2605,6 +2605,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             });
           }}
           elementType={elementType}
+          elementKey={currentElementData?.id}
           flat={flat}
         />
       )}

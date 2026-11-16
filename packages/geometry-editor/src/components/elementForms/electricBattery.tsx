@@ -13,6 +13,7 @@ import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import { elementSchemaTakesField } from '../../lib/schemaCache';
+import { hemieFieldLabel } from '../../lib/hemieFabric';
 import { decimalInputProps, readExtraJsonRecord, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
@@ -27,7 +28,7 @@ export interface ElectricBatteryFormState {
   gridInputs: boolean;
   /** The target's battery schema takes capacity and efficiency; a HEM Database product states its own. */
   ratingInputs: boolean;
-  /** The selected battery's `extra_json`, where age, grid charging and grid export are stored. */
+  /** The selected battery's `extra_json`, where age, grid charging, grid export and the supply's grid import limit are stored. */
   extra: Record<string, unknown>;
   commitExtra: (key: string, value: unknown) => void;
 }
@@ -117,10 +118,12 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
       globalComparisonFieldIndicators,
       commitExistingElementDraft,
     } = ctx;
+    const label = (key: string) => renderFieldLabel(hemieFieldLabel(key), elementType, key);
     const gridLabels = gridInputs ? {
-      age: renderFieldLabel('Battery Age (years):', elementType, 'battery_age'),
-      charging: renderFieldLabel('Grid Charging Possible:', elementType, 'grid_charging_possible'),
-      exporting: renderFieldLabel('Grid Exporting Possible:', elementType, 'grid_exporting_possible'),
+      age: label('battery_age'),
+      charging: label('grid_charging_possible'),
+      exporting: label('grid_exporting_possible'),
+      importLimit: label('power_limit_battery_import'),
     } : null;
     return (
       <>
@@ -154,7 +157,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value)} issue={getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value) || undefined} />
         </div>
         </>}
-        {renderFieldLabel('Battery Location:', elementType)}
+        {label('battery_location')}
         <div className="element-input" ref={registerBaseFieldRefs(['batteryLocation', 'battery_location'])}>
           <StandardDropdown
             value={batteryLocation}
@@ -179,6 +182,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
               <StandardInput
                 type="number"
                 value={typeof extra.battery_age === 'number' ? String(extra.battery_age) : ''}
+                unit={fieldUnit('battery_age')}
                 onChange={(event) => {
                   const value = event.target.value.trim();
                   commitExtra('battery_age', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
@@ -210,6 +214,24 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
                 placeholder="No (default)"
                 variant="ghost"
                 size="md"
+              />
+            </div>
+            {gridLabels.importLimit}
+            <div className="element-input" ref={registerBaseFieldRefs('power_limit_battery_import')}>
+              <StandardInput
+                type="number"
+                value={typeof extra.power_limit_battery_import === 'number' ? String(extra.power_limit_battery_import) : ''}
+                onChange={(event) => {
+                  const value = event.target.value.trim();
+                  commitExtra('power_limit_battery_import', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
+                }}
+                // DESNZ-defined; the target applies it when blank.
+                placeholder="18.4 (default)"
+                min="0"
+                step="any"
+                variant="ghost"
+                size="md"
+                className="flex-1"
               />
             </div>
           </>

@@ -694,6 +694,15 @@ pub(crate) fn apply_desnz_defaults(
         })
     };
     for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
+        // The battery states its supply's grid import limit for charging, a supply field. Not
+        // stated, the target's own default applies (18.4 kW, DESNZ-defined; the schema default).
+        if let Some(limit) = value
+            .get_mut("ElectricBattery")
+            .and_then(Value::as_object_mut)
+            .and_then(|battery| battery.remove("power_limit_battery_import"))
+        {
+            value["power_limit_battery_import"] = limit;
+        }
         let Some(battery) = value
             .get_mut("ElectricBattery")
             .and_then(Value::as_object_mut)
@@ -1952,6 +1961,30 @@ mod tests {
             })
             .collect();
         assert_eq!(table, schema);
+    }
+
+    #[test]
+    fn a_batterys_grid_import_limit_goes_on_its_supply() {
+        let battery = |extra: Value| {
+            let mut model = json!({"EnergySupply": {"mains elec": {"fuel": "electricity", "ElectricBattery": extra}}});
+            let mut notices = Vec::new();
+            apply_desnz_defaults(
+                &mut model,
+                false,
+                &mut Vec::new(),
+                &mut notices,
+                &mut Vec::new(),
+            );
+            (model["EnergySupply"]["mains elec"].clone(), notices)
+        };
+        let (supply, _) = battery(json!({"type": "stationary", "power_limit_battery_import": 7.2}));
+        assert_eq!(supply["power_limit_battery_import"], json!(7.2));
+        assert!(supply["ElectricBattery"]
+            .get("power_limit_battery_import")
+            .is_none());
+        // Not stated: the target's own default applies, so the converter writes none.
+        let (supply, _) = battery(json!({"type": "stationary"}));
+        assert!(supply.get("power_limit_battery_import").is_none());
     }
 
     #[test]

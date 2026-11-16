@@ -83,6 +83,16 @@ it('asks for battery age, grid charging and export where the target takes them',
   expect(screen.queryByText(/Capacity|Efficiency/)).not.toBeInTheDocument();
   await userEvent.setup().selectOptions(charging, 'No');
   expect(store.getState().elementsById.battery).toMatchObject({ extra_json: { grid_charging_possible: false } });
+  // The supply's grid import limit for charging, held on the battery.
+  // Labels in sentence case, as the shared field labels give them.
+  for (const label of ['Battery age', 'Grid charging possible', 'Grid exporting possible', 'Battery location', 'Grid import limit for charging (kW)']) {
+    expect(screen.getByText(label)).toBeInTheDocument();
+  }
+  const limit = screen.getByPlaceholderText('18.4 (default)');
+  await userEvent.setup().type(limit, '7.2');
+  expect(store.getState().elementsById.battery).toMatchObject({ extra_json: { power_limit_battery_import: 7.2 } });
+  await userEvent.setup().clear(limit);
+  expect(store.getState().elementsById.battery.extra_json).not.toHaveProperty('power_limit_battery_import');
 });
 
 it('asks for no battery grid input on a target without them', () => {
@@ -90,7 +100,7 @@ it('asks for no battery grid input on a target without them', () => {
   expect(store.getState().validateElement(battery, store.getState().elementsById).issues.map((i) => i.fieldKey))
     .toEqual(expect.arrayContaining(['battery_location', 'capacity', 'charge_discharge_efficiency_round_trip']));
   expect(screen.queryByText(/\(default\)/)).not.toBeInTheDocument();
-  expect(screen.queryByText(/Grid Charging/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Grid charging/)).not.toBeInTheDocument();
 });
 
 function renderElement(element: Element, schemaPort: Partial<GeometrySchemaPort>) {
