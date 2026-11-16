@@ -23,6 +23,7 @@ import {
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
 import { targetFieldAvailability } from "../lib/schemaCache";
 import { HEMIE_NATION, NATIONS, postcodeBorderArea, postcodeUnrecognised } from "../lib/hemieFabric";
+import { SourceNote } from "./FieldSource";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
@@ -73,6 +74,11 @@ import { ValidationIndicator, ValidationPill } from "./ValidationIndicator";
 import { useKeyedState } from "../hooks/useKeyedState";
 import { useTargetRules } from "../hooks/useTargetRules";
 import { getElementEffectiveArea } from "../lib/elementArea";
+
+/** Global Settings rows of HEMIE's leakage-estimate inputs (hemie.rs `leakage_estimate_inputs`). */
+const HEMIE_OPEN_FIREPLACES = "HEMIE_number_of_open_fireplaces";
+const HEMIE_DOUBLE_GLAZING_PERIOD = "HEMIE_double_glazing_installation_period";
+const HEMIE_HEAT_LOSS_CORRIDOR = "HEMIE_heat_loss_corridor";
 
 /** Element types the converter counts in the envelope area (a party adjacent element counts too). */
 const ENVELOPE_TYPES: ReadonlySet<string> = new Set(["BuildingElementOpaque", "BuildingElementTransparent", "BuildingElementGround",
@@ -662,6 +668,14 @@ export function GlobalSettingsModal({
     hardcodedExtra,
     useFHSSchema
   );
+  // DESNZ question E17: an existing building with no air test gives HEMIE's leakage-estimate inputs.
+  const estimatedAirtightness =
+    epcTarget && complianceSettings.IsExistingBuilding === true && complianceSettings.AirPermeability_test_result === undefined;
+  const setHemieSetting = (key: string, value: string) => {
+    const others = { ...complianceSettings.hemieSettings };
+    delete others[key];
+    setComplianceSettings({ hemieSettings: value === "" ? others : { ...others, [key]: value } });
+  };
   const requiredYesNoProps = (key: RequiredYesNoKey, label = METADATA_INPUT_LABELS[key] ?? key) => ({
     label: complianceFieldLabel(label, key),
     value: complianceSettings[key],
@@ -2607,6 +2621,50 @@ export function GlobalSettingsModal({
                       variant="ghost"
                       size="md"
                     />
+                    {estimatedAirtightness && (
+                      <>
+                        <SourceNote>Estimated (no air test). HEM:EPC estimates the airtightness from the dwelling and these inputs.</SourceNote>
+                        <StandardInput
+                          type="number"
+                          label={<span data-field-key={HEMIE_OPEN_FIREPLACES}>Open fireplaces</span>}
+                          helperText="Fireplaces open to the outside, for example through a chimney."
+                          value={complianceSettings.hemieSettings?.[HEMIE_OPEN_FIREPLACES] ?? ""}
+                          onChange={(e) => setHemieSetting(HEMIE_OPEN_FIREPLACES, e.target.value)}
+                          min="0"
+                          step="1"
+                          variant="ghost"
+                          size="md"
+                        />
+                        <StandardDropdown
+                          label={<span data-field-key={HEMIE_DOUBLE_GLAZING_PERIOD}>Double glazing installed</span>}
+                          value={complianceSettings.hemieSettings?.[HEMIE_DOUBLE_GLAZING_PERIOD] ?? ""}
+                          onChange={(value) => setHemieSetting(HEMIE_DOUBLE_GLAZING_PERIOD, value)}
+                          options={[
+                            { value: "double_glazing_post_2002", label: "2002 or later" },
+                            { value: "double_glazing_pre_2002", label: "Before 2002" },
+                            { value: "double_glazing_unknown_install_date", label: "Unknown" },
+                          ]}
+                          placeholder="Only if the windows are double glazed"
+                          variant="ghost"
+                          size="md"
+                        />
+                        {(shownBuildType === "flat" || shownBuildType === "maisonette") && (
+                          <StandardDropdown
+                            label={<span data-field-key={HEMIE_HEAT_LOSS_CORRIDOR}>Heat loss corridor</span>}
+                            value={complianceSettings.hemieSettings?.[HEMIE_HEAT_LOSS_CORRIDOR] ?? ""}
+                            onChange={(value) => setHemieSetting(HEMIE_HEAT_LOSS_CORRIDOR, value)}
+                            options={[
+                              { value: "no_corridor", label: "No corridor" },
+                              { value: "heated_corridor", label: "Heated corridor" },
+                              { value: "unheated_corridor", label: "Unheated corridor" },
+                            ]}
+                            placeholder="Select corridor..."
+                            variant="ghost"
+                            size="md"
+                          />
+                        )}
+                      </>
+                    )}
                     {hemDatabaseProducts && (
                       <StandardInput
                         type="number"

@@ -121,6 +121,36 @@ describe("GlobalSettingsModal target-required rows", () => {
   });
 });
 
+describe("GlobalSettingsModal existing building with no air test", () => {
+  it("says the airtightness is estimated and asks HEMIE's estimate inputs, saved as HEMIE rows", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ requiredMetadataRows: ["IsExistingBuilding"] }) }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="AirPermeability_test_result" />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    expect(await screen.findByText(/Estimated \(no air test\)/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Open fireplaces"), "2");
+    await user.selectOptions(screen.getByLabelText("Double glazing installed"), "double_glazing_unknown_install_date");
+    expect(store.getState().complianceSettings.hemieSettings).toMatchObject({
+      HEMIE_number_of_open_fireplaces: "2",
+      HEMIE_double_glazing_installation_period: "double_glazing_unknown_install_date",
+    });
+    // A flat also states its heat loss corridor; a measured air test needs none of these.
+    expect(screen.queryByLabelText("Heat loss corridor")).not.toBeInTheDocument();
+    act(() => store.getState().setComplianceSettings({ AirPermeability_test_result: 5 }));
+    expect(screen.queryByText(/Estimated \(no air test\)/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Open fireplaces")).not.toBeInTheDocument();
+  });
+});
+
 describe("GlobalSettingsModal smart meter GUID", () => {
   it("asks for the GUID once the dwelling has a smart meter, and checks its format", async () => {
     const user = userEvent.setup();
