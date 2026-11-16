@@ -88,7 +88,7 @@ Garage,Living,System,ZoneUnconditioned,,,"1,1,0","{""ZoneUnconditioned"":{""Gara
 it('names a missing shading input, and a window area width and height cannot give', () => {
   const window = { type: 'BuildingElementZoneUnconditionedTransparent', u_value: 1.4, pitch: 90, orientation360: 180, base_height: 1, height: 1, g_value: 0.6, frame_area_fraction: 0.2 };
   expect(issues(garage({ method: 'Calculated', building_element: { Window: window } }))).toEqual([
-    "extra_json: Garage (System): Enter the Area of 'Window'. Enter the Width of 'Window'.",
+    "extra_json: Garage (System): Enter the Width of 'Window'.",
   ]);
   expect(issues(garage({ method: 'Calculated', building_element: {
     Window: { ...window, width: 1, area: 1, shading: [{ type: 'overhang', depth: 0.5 }, { type: 'obstacle', distance: 3, height: 2 }] },
@@ -107,4 +107,35 @@ it('keys the zone by its row name: an auto-name, a rename and the linked walls f
   store.getState().updateElement('sys', { name: 'Garage' });
   expect(store.getState().elementsById.sys.extra_json).toEqual({ ZoneUnconditioned: { Garage: { method: 'Calculated' } } });
   expect(store.getState().elementsById.wall.extra_json).toMatchObject({ ZoneUnconditioned: 'Garage' });
+});
+
+it('keys a duplicated or renamed zone by its row name, whatever the key was', () => {
+  const store = createGeometryStore();
+  store.setState({ elementsById: { garage: garage({ method: 'Calculated' }) }, elementIds: ['garage'] } as never);
+  store.getState().duplicateElement('garage');
+  const copy = Object.values(store.getState().elementsById).find((e) => e.id !== 'garage')!;
+  expect(copy.name).not.toBe('Garage');
+  expect(copy.extra_json).toEqual({ ZoneUnconditioned: { [copy.name]: { method: 'Calculated' } } });
+  const stale = { ...garage({ method: 'Calculated' }), id: 'stale', name: 'Shed' } as Element;
+  store.setState({ elementsById: { stale }, elementIds: ['stale'] } as never);
+  store.getState().updateElement('stale', { name: 'Porch' });
+  expect(store.getState().elementsById.stale.extra_json).toEqual({ ZoneUnconditioned: { Porch: { method: 'Calculated' } } });
+});
+
+it('follows a zone rename only from the zone row, not from another element of that name', () => {
+  const store = createGeometryStore();
+  const namesake = { ...wall({}), id: 'namesake', name: 'Garage', type: 'BuildingElementOpaque' } as Element;
+  const linked = wall({ ZoneUnconditioned: 'Garage' });
+  store.setState({ elementsById: { garage: { ...garage({ method: 'Calculated' }), zoneId: 'elsewhere' } as Element, namesake, wall: linked }, elementIds: ['garage', 'namesake', 'wall'] } as never);
+  store.getState().updateElement('namesake', { name: 'Front wall' });
+  expect(store.getState().elementsById.wall.extra_json).toMatchObject({ ZoneUnconditioned: 'Garage' });
+  store.getState().updateElement('garage', { name: 'Porch' });
+  expect(store.getState().elementsById.wall.extra_json).toMatchObject({ ZoneUnconditioned: 'Porch' });
+});
+
+it('asks for a window\'s width and height, not its read-only area', () => {
+  const window = { type: 'BuildingElementZoneUnconditionedTransparent', u_value: 1.4, pitch: 90, orientation360: 180, base_height: 1, g_value: 0.6, frame_area_fraction: 0.2 };
+  expect(issues(garage({ method: 'Calculated', building_element: { Window: window } }))).toEqual([
+    "extra_json: Garage (System): Enter the Height of 'Window'. Enter the Width of 'Window'.",
+  ]);
 });

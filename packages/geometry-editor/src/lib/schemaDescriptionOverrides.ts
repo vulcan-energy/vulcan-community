@@ -2152,8 +2152,45 @@ function applyLabelSpellings(label: string): string {
   return LABEL_HYPHENATIONS.get(spelled.toLowerCase()) ?? spelled;
 }
 
-/** Step 0 of the override ladder: an explicit `label` on this key's own entry. */
+/**
+ * Labels for fabric fields whose key or title reads badly start-cased, in the sentence case
+ * of the curated `label`s, so every row of a wall, window or floor reads alike. Kept apart
+ * from TOOLTIP_OVERRIDES so a label never changes which entry supplies a description.
+ */
+const FIELD_LABELS: Readonly<Record<string, string>> = {
+  base_height: 'Base height',
+  total_area: 'Total area',
+  frame_area_fraction: 'Frame area fraction',
+  free_area_height: 'Free area height',
+  mid_height: 'Mid height',
+  max_window_open_area: 'Open area',
+  security_risk: 'Security risk',
+  is_external_door: 'External door',
+  Control_WindowOpenable: 'Window opening control',
+  is_unheated_pitched_roof: 'Unheated pitched roof',
+  thermal_resistance_unconditioned_space: 'Unheated space thermal resistance',
+  party_wall_cavity_type: 'Party wall cavity type',
+  party_wall_lining_type: 'Party wall lining type',
+  thermal_resistance_cavity: 'Cavity thermal resistance',
+  floor_type: 'Floor type',
+  thermal_resistance_floor_construction: 'Floor construction thermal resistance',
+  psi_wall_floor_junc: 'Wall-floor junction psi',
+  thickness_walls: 'Wall thickness',
+  edge_insulation: 'Edge insulation',
+  height_upper_surface: 'Upper surface height',
+  shield_fact_location: 'Wind shielding',
+  area_per_perimeter_vent: 'Vent area per perimeter',
+  thermal_resist_insul: 'Void base insulation thermal resistance',
+  thermal_transm_walls: 'Wall thermal transmittance',
+  depth_basement_floor: 'Basement floor depth',
+  thermal_resist_walls_base: 'Basement wall thermal resistance',
+  height_basement_walls: 'Basement wall height',
+  thermal_transm_envi_base: 'Basement floor thermal transmittance',
+};
+
+/** Step 0 of the override ladder: an explicit `label` for this key. */
 function labelOverrideFor(propertyKey: string): string | undefined {
+  if (FIELD_LABELS[propertyKey]) return FIELD_LABELS[propertyKey];
   const info = TOOLTIP_OVERRIDES[propertyKey] ?? TOOLTIP_OVERRIDES[`*:${propertyKey}`];
   const label = info?.label?.trim();
   return label && label.length > 0 ? label : undefined;

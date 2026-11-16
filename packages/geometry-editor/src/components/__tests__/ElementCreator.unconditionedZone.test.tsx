@@ -162,3 +162,19 @@ it('keeps the shading values the new kind takes', async () => {
   await user.selectOptions(screen.getByLabelText('Shading 1'), 'obstacle');
   expect(shading()).toEqual([{ type: 'obstacle', distance: 0.2 }]);
 });
+
+it('keeps a CSV window area when width and height are entered later; a near-equal area counts as derived', async () => {
+  const store = renderSelected([garage({ method: 'Calculated', building_element: {
+    Window: { type: 'BuildingElementZoneUnconditionedTransparent', area: 2 },
+    Square: { type: 'BuildingElementZoneUnconditionedTransparent', width: 1.25, height: 1.25, area: 1.5625 },
+  } })], 'garage');
+  const window = () => (store.getState().elementsById.garage.extra_json as any).ZoneUnconditioned.Garage.building_element.Window;
+  expect(screen.getAllByText('from width × height')).toHaveLength(1);
+  const user = userEvent.setup();
+  const field = (key: string) => within(document.querySelectorAll<HTMLElement>(`[data-field-key="${key}"]`)[0]).getByRole('textbox');
+  await user.type(field('width'), '1');
+  await user.type(field('height'), '1');
+  await user.tab();
+  expect(window()).toMatchObject({ width: 1, height: 1, area: 2 });
+  expect(screen.getByRole('button', { name: 'Use width × height' })).toBeInTheDocument();
+});

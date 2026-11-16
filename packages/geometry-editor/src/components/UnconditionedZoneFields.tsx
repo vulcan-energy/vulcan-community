@@ -10,6 +10,7 @@ import { generateUniqueElementName } from '../lib/elementAutoNaming';
 import { isExistingBuilding } from '../lib/windowOpenings';
 import {
   adjacentUnconditionedZone,
+  areaIsWidthByHeight,
   METHOD_FORBIDS,
   OBSTACLE,
   shadingDef,
@@ -157,10 +158,14 @@ function widthByHeight({ width, height }: Record<string, unknown>): number | und
   return typeof width === 'number' && typeof height === 'number' ? Math.round(width * height * 1000) / 1000 : undefined;
 }
 
-/** A width or height edit writes the area as width × height; any other edit keeps the stored area. */
+/**
+ * A width or height edit writes the area as width × height, unless the area was the window's
+ * own (a CSV area other than its width × height, or one with no width or height): that is kept.
+ */
 function withWindowArea(prev: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
   const derived = widthByHeight(next);
   if (derived === undefined || (next.width === prev.width && next.height === prev.height)) return next;
+  if (prev.area !== undefined && !areaIsWidthByHeight(prev)) return next;
   return { ...next, area: derived };
 }
 
@@ -317,16 +322,17 @@ export function UnconditionedZoneFields({ row, commit }: {
                 {transparent && (() => {
                   // A stored area other than width × height (from a CSV) is its own value until reset.
                   const derived = widthByHeight(p);
-                  const own = p.area !== derived;
+                  const own = p.area !== undefined && !areaIsWidthByHeight(p);
+                  const reset = derived !== undefined && (own || p.area === undefined);
                   return (
                     <>
                       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
                         <span className="element-label">Area</span>
-                        {!own && <SourceNote>from width × height</SourceNote>}
+                        {!own && !reset && <SourceNote>from width × height</SourceNote>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <Readout value={typeof p.area === 'number' ? p.area : null} unit="m²" label={`${part} area`} />
-                        {own && derived !== undefined && (
+                        {reset && (
                           <button type="button" className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action" onClick={() => setPart(part, { ...p, area: derived })}>
                             Use width × height
                           </button>
