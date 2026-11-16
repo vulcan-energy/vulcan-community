@@ -1204,7 +1204,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'm',
   },
   'max_window_open_area': {
-    description: 'Maximum effective openable area for airflow (unit: m²). This is the total opening area at maximum opening. Distinct from free_area_height (m), which is the vertical aperture height used for airflow-path positioning.',
+    description: 'The area of the opening for airflow when the window is fully open, also called its free area (unit: m²).',
     type: 'number',
     units: 'm²',
   },

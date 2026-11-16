@@ -86,7 +86,7 @@
 //   never emitted them.
 // - The renderAttributePanel case: Linked Wall (ParentElementDropdown),
 //   width/height (via ctx.renderLinearDimensionsFields), the sloped-opening
-//   rebuild button, Area, Free Area Height, Mid Height, Max Window Open
+//   rebuild button, Area, Free Area Height, Mid Height, Open
 //   Area, Frame Area Fraction, Pitch (now via wallPitchField.tsx's
 //   renderWallPitchField — this stage's SECOND caller, converging the
 //   dedup's second of three copies per decision 9; Adjacent-like was the
@@ -181,17 +181,18 @@ import {
   decimalInputProps,
   useDecimalInput,
   formatToTwoDecimals,
+  readExtraJsonRecord,
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import { hydrateWallSharedFields } from './wallShared';
 import { renderWallPitchField } from './wallPitchField';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { CloseShadingFields } from './CloseShadingFields';
+import { SecurityRiskField, WindowOpeningParts } from './WindowOpeningParts';
 import { isExistingBuilding } from '../../lib/windowOpenings';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import {
-  buildAddWindowOpeningPatch,
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   windowOpeningRepairMessages,
@@ -265,10 +266,7 @@ function displayedOpeningValues(
   const openings = windowPartsPhysical ? classifyWindowOpenings(element as unknown as WindowOpeningSource) : null;
   const opening: WindowOpeningRow | undefined =
     openings?.kind === 'rows' && openings.rows.length === 1 ? openings.rows[0] : undefined;
-  const display = (key: WindowOpeningField): number | '' => {
-    const value = opening?.[key] ?? element[key];
-    return typeof value === 'number' ? roundToTwoDecimals(value) : (value ?? '');
-  };
+  const display = (key: WindowOpeningField): number | '' => opening?.[key] ?? element[key] ?? '';
   return {
     free_area_height: display('free_area_height'),
     mid_height: display('mid_height'),
@@ -305,7 +303,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
   };
   const freeAreaHeightInput = useDecimalInput('', commitOpeningField('free_area_height'), { commitOnChange: true });
   const midHeightInput = useDecimalInput('', commitOpeningField('mid_height'), { commitOnChange: true });
-  const maxWindowOpenAreaInput = useDecimalInput('', commitOpeningField('max_window_open_area'), { commitOnChange: true });
+  const maxWindowOpenAreaInput = useDecimalInput('', commitOpeningField('max_window_open_area'), { commitOnChange: true, formatOnBlur: 'number' });
 
   // Table edits and "Convert to a single opening" write the store outside these inputs.
   const storedOpening = windowPartsPhysical && selectedWindow?.type === 'BuildingElementTransparent'
@@ -481,11 +479,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     hydrateWallSharedFields(state, element, state.getCurrentOrientation);
 
     // Window-specific fields.
-    const frameAreaFraction = 'frame_area_fraction' in element && typeof element.frame_area_fraction === 'number'
-      ? roundToTwoDecimals(element.frame_area_fraction) : (element.frame_area_fraction ?? '');
     const opening = displayedOpeningValues(element, state.windowPartsPhysical);
 
-    state.freeAreaFractionInput.setValue(frameAreaFraction);
+    state.freeAreaFractionInput.setValue(element.frame_area_fraction ?? '');
     state.freeAreaHeightInput.setValue(opening.free_area_height);
     state.midHeightInput.setValue(opening.mid_height);
     state.maxWindowOpenAreaInput.setValue(opening.max_window_open_area);
@@ -611,11 +607,9 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       : null;
     const openingsInTable = state.windowPartsPhysical && !!windowSource && windowOpeningsUseTable(windowSource);
     const openings = state.windowPartsPhysical && windowSource ? classifyWindowOpenings(windowSource) : null;
-    const openingNote = openingsInTable
-      ? 'This window has separate openings. Edit them in Advanced Fields.'
-      : openings?.kind === 'repair'
-        ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a Mid Height replaces the parts with one opening.' : ''}`
-        : null;
+    const openingNote = !openingsInTable && openings?.kind === 'repair'
+      ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a mid height replaces the parts with one opening.' : ''}`
+      : null;
 
     return (
       <>
@@ -657,7 +651,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         </div>
         {!openingsInTable && !state.constructionBands && <>
-        {renderFieldLabel('Free Area Height (m):', elementType)}
+        {renderFieldLabel('Free area height (m)', elementType)}
         <div
           className="element-input"
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -675,7 +669,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value)} issue={getFieldValidationIssue('freeAreaHeight', state.freeAreaHeightInput.value) || undefined} />
         </div>
         {renderFieldLabel(
-          'Mid Height (m):',
+          'Mid height (m)',
           elementType,
           undefined,
           <DerivedSource
@@ -712,7 +706,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         </div>
         {renderFieldLabel(
-          'Max Window Open Area (m²):',
+          'Open area (m²)',
           elementType,
           undefined,
           state.freeAreaHeightInput.value !== '' ? (
@@ -722,7 +716,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
               info={<SourceNote>width × free area height</SourceNote>}
               useLabel="Use width × free height"
               unit="m²"
-              fieldLabel="Max window open area"
+              fieldLabel="Open area"
               onUse={(value) => {
                 state.maxWindowOpenAreaInput.setValue(value);
                 state.commitOpeningField('max_window_open_area')(value);
@@ -746,9 +740,11 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('maxWindowOpenArea', state.maxWindowOpenAreaInput.value)} issue={getFieldValidationIssue('maxWindowOpenArea', state.maxWindowOpenAreaInput.value) || undefined} />
         </div>
-        {openingFields}
         </>}
         {openingNote ? <div className="field-source-note">{openingNote}</div> : null}
+        {windowSource && state.windowPartsPhysical && !state.constructionBands && (
+          <WindowOpeningParts source={windowSource} commit={(patch) => commitExistingElementDraft(patch as Partial<Element>)} />
+        )}
         {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
             <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type</div>
@@ -838,17 +834,20 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                   <button type="button" className="btn btn-small btn-secondary" onClick={() => save([...sections, { windowType: '' }])}>
                     Add glazing section
                   </button>
-                  {state.windowPartsPhysical && (
-                    <button type="button" className="btn btn-small btn-secondary" onClick={() => commitExistingElementDraft(buildAddWindowOpeningPatch(selectedElement as unknown as WindowOpeningSource) as Partial<Element>)}>
-                      Add openable part
-                    </button>
-                  )}
                   </div>
                 </div>
               );
             })()}
           </>
         ) : null}
+        {selectedElement?.type === 'BuildingElementTransparent' && (
+          <SecurityRiskField
+            element={selectedElement}
+            fieldRef={registerBaseFieldRef('security_risk')}
+            commit={(securityRisk) => commitExistingElementDraft({ extra_json: { ...readExtraJsonRecord(selectedElement.extra_json), security_risk: securityRisk } })}
+          />
+        )}
+        {openingFields}
         {renderFieldLabel('Frame area fraction:', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput

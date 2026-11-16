@@ -19,14 +19,12 @@ import {
   type ResolvedFieldPresentation,
 } from '../lib/fieldPresentation';
 import { JUNCTION_TYPE_DESCRIPTIONS } from '../lib/simplifiedFabricMap';
-import { WINDOW_SECURITY_RISK_HELPER } from '../lib/schemaDescriptionOverrides';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { DefaultsLookup, OpaqueFabricVariant } from '../lib/defaultsCache';
-import { windowSecurityRiskDefaultForElement } from '../lib/windowSecurityRisk';
 import { usesGroundThermalTransmWallsAutofill } from '../lib/groundFloorSubtype';
 import { errorMessageFromUnknown, isRecord, readRecord, type JsonRecord } from '../lib/jsonTypes';
 import { schemaAlternatives, schemaTypeList } from '../lib/schemaShape';
-import type { Element, Floor } from '../geometry/types';
+import type { Element } from '../geometry/types';
 import {
   buildConvertToSingleOpeningPatch,
   isPhysicalPart,
@@ -59,11 +57,9 @@ type RendererConfig = {
   compact?: boolean;
   tableCell?: boolean;
   validateValue?: (value: unknown) => { valid: boolean; errors?: readonly string[] };
-  currentElementData?: unknown;
   elementType?: string;
   evidenceFieldKeys?: Set<string>;
   fieldIndicators?: Readonly<Record<string, readonly string[]>>;
-  floors?: unknown;
   focusSourceElement?: (elementId: string) => void;
   groundUComputedWPerM2K?: number | null;
   opaqueFabricVariant?: OpaqueFabricVariant;
@@ -130,24 +126,6 @@ function schemaWithOverride(uischema: unknown, schema: unknown): JsonRecord {
 
 function schemaDefs(value: unknown): Record<string, SchemaNode> | undefined {
   return isRecord(value) ? (value as Record<string, SchemaNode>) : undefined;
-}
-
-function elementStoreyInput(value: unknown): Pick<Element, 'coordinates' | 'floorId'> | undefined {
-  const record = readRecord(value);
-  return Array.isArray(record.coordinates)
-    ? {
-        coordinates: record.coordinates as Element['coordinates'],
-        floorId: typeof record.floorId === 'string' ? record.floorId : undefined,
-      }
-    : undefined;
-}
-
-function floorStoreyInputs(value: unknown): Pick<Floor, 'id' | 'zIndex'>[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((floor): floor is Pick<Floor, 'id' | 'zIndex'> => {
-    const record = readRecord(floor);
-    return typeof record.id === 'string' && typeof record.zIndex === 'number';
-  });
 }
 
 function fieldIndicatorsFor(
@@ -372,12 +350,6 @@ function getAdvancedDefaultValue(
   propKey: string,
   config: RendererConfig | undefined,
 ): unknown {
-  if (propKey === 'security_risk' && elementType === 'BuildingElementTransparent') {
-    return windowSecurityRiskDefaultForElement(
-      elementStoreyInput(config?.currentElementData),
-      floorStoreyInputs(config?.floors),
-    );
-  }
   if (config?.defaultProducts && config.systemSamplePathSegments) {
     const own = config.defaultProducts[`/${config.systemSamplePathSegments.map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`];
     if (own !== undefined) return own;
@@ -1177,10 +1149,10 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, fontSize: 12 }}>
         <div style={{ whiteSpace: 'pre-line' }}>
           {physicalParts.map((part, idx) => (
-            `Part ${idx + 1}: free height ${String(part.free_area_height ?? 'blank')} m, mid height ${String(part.mid_height ?? 'blank')} m, max open area ${String(part.max_window_open_area ?? 'blank')} m²`
+            `Part ${idx + 1}: free height ${String(part.free_area_height ?? 'blank')} m, mid height ${String(part.mid_height ?? 'blank')} m, open area ${String(part.max_window_open_area ?? 'blank')} m²`
           )).join('\n')}
         </div>
-        <div role="alert">This HEM version cannot use window parts with their own free height and max open area.</div>
+        <div role="alert">This HEM version cannot use window parts with their own free height and open area.</div>
         {selection?.type === 'element' && currentElement ? (
           <div>
             <button
@@ -2037,13 +2009,6 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     }
   }
 
-  if (propKey === 'security_risk' && coerceType === 'boolean' && options.length > 0) {
-    options = options.map((o) => ({
-      ...o,
-      label: o.value === 'true' ? 'Yes' : o.value === 'false' ? 'No' : o.label,
-    }));
-  }
-
   // A saved value the options do not list (a numeric a8/a9 areal capacity) stays visible.
   if (valueString !== '' && options.length > 0 && !options.some((o) => o.value === valueString)) {
     options = [...options, { value: valueString, label: valueString }];
@@ -2071,9 +2036,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       : undefined;
   const shouldShowOptionDescription = propKey !== 'ecodesign_control_class';
   // The default shows as the placeholder and the label row says "default", so no "Default: X" line.
-  const helperText = propKey === 'security_risk'
-    ? WINDOW_SECURITY_RISK_HELPER
-    : shouldShowOptionDescription ? selectedOptionDescription : undefined;
+  const helperText = shouldShowOptionDescription ? selectedOptionDescription : undefined;
   const fieldUnit = coerceType === 'number' ? resolvedFieldUnit : undefined;
 
   if (isReadOnly) {

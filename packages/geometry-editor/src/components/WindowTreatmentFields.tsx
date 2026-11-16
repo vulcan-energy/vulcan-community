@@ -33,6 +33,8 @@ export interface WindowTreatmentFieldsProps {
   onPatch: (patch: Record<string, unknown>) => void;
   elementType: string;
   flat?: boolean;
+  /** A host note on what a check makes of this treatment; shown under the fields. */
+  note?: string | null;
 }
 
 const ROW = WINDOW_DETAIL_ROW_MARGIN;
@@ -87,6 +89,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
   onPatch,
   elementType,
   flat = false,
+  note,
 }) => {
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = targetSchemaMode(schemaPort);
@@ -344,6 +347,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
           </div>
         </div>
       )}
+      {form.enabled && note ? <div className="element-editor-note" style={{ margin: ROW(compact) }}>{note}</div> : null}
     </WindowDetailSection>
   );
 };

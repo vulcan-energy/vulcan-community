@@ -155,7 +155,7 @@ const lowestBottom = (face: ProfileLineFace) => Math.min(...face.bottom_profile.
  */
 export function exportedBaseHeightForWallFace(foot: number, face: ProfileLineFace): number {
   const lowest = lowestBottom(face);
-  return lowest === 0 ? Math.round(foot * 100) / 100 : roundMicro(foot + lowest);
+  return lowest === 0 ? foot : roundMicro(foot + lowest);
 }
 
 /** Inverse of {@link exportedBaseHeightForWallFace}. An invalid face is left alone: validation reports it. */

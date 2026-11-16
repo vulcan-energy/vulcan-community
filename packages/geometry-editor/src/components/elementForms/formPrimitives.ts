@@ -68,6 +68,8 @@ export const useIntegerInput = (
   };
 
   const commitRawValue = (rawValue: string) => {
+    // Focus passing through writes nothing (see useNumericDraftInput).
+    if (!isEditing && rawValue.trim() === inputValue.trim()) return;
     setIsEditing(false);
     const emitCommit = (nextValue: number | '') => {
       if (!onCommit) return;

@@ -100,24 +100,24 @@ function V(d: Record<string, string>, k: string): string {
  */
 let rowText: Record<string, string> = {};
 
+/** A stored number reads back exactly as saved: the save writes it unrounded. */
 function num(d: Record<string, string>, column: string, cell = V(d, column)): number | undefined {
   if (cell === '') return undefined;
   if (!NUMBER_CELL.test(cell)) {
     rowText[column] = cell;
     return undefined;
   }
-  return roundToTwoDecimals(Number(cell));
+  return Number(cell);
 }
 
 /**
  * base_height of an opaque or transparent row. For a profiled wall the cell is the lowest edge
- * (see exportedBaseHeightForWallFace); the offset is removed from the exact cell before the
- * usual 2 dp rounding, so the foot comes back as it was saved.
+ * (see exportedBaseHeightForWallFace); removing the offset gives back the foot as it was saved.
  */
 function wallFootCell(d: Record<string, string>, extraJson: unknown): number | undefined {
   const cell = V(d, 'base_height');
   if (cell === '' || !NUMBER_CELL.test(cell)) return num(d, 'base_height');
-  return roundToTwoDecimals(wallFootFromExportedBaseHeight(Number(cell), extraJson)!);
+  return wallFootFromExportedBaseHeight(Number(cell), extraJson);
 }
 
 function reqNum(d: Record<string, string>, column: string, cell?: string): number {
@@ -346,7 +346,7 @@ export function ingestGeometryTabularSections(
         const hoRaw = V(d, 'height_override');
         const hoParsed = hoRaw !== '' ? parseFloat(hoRaw) : NaN;
         const height_override =
-          hoRaw !== '' && Number.isFinite(hoParsed) ? roundToTwoDecimals(hoParsed) : undefined;
+          hoRaw !== '' && Number.isFinite(hoParsed) ? hoParsed : undefined;
         const extra = parseExtraJson(V(d, 'extra_json'), V(d, 'Name'));
         const rawSource = typeof extra?.space_label_source === 'string' ? extra.space_label_source : '';
         const source =

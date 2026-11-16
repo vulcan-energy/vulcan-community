@@ -318,11 +318,12 @@ export const getAreaBasedElementExportGeometry = (
     };
   }
 
+  // Stored height and base height go out as stored; a width measured from coordinates is rounded.
   if (element.coordinates.length === 2) {
     return {
       width: roundToTwoDecimals(getLineWidth(element)),
-      height: roundToTwoDecimals(element.height || 0),
-      baseHeight: roundToTwoDecimals(getAreaBasedBaseHeight(element)),
+      height: element.height || 0,
+      baseHeight: getAreaBasedBaseHeight(element),
     };
   }
 
@@ -331,16 +332,16 @@ export const getAreaBasedElementExportGeometry = (
     const widthUserOverride = (element as { _widthUserOverride?: boolean })._widthUserOverride === true;
     const heightUserOverride = (element as { _heightUserOverride?: boolean })._heightUserOverride === true;
     return {
-      width: widthUserOverride ? roundToTwoDecimals(element.width || 0) : slopedDimensions.width,
-      height: heightUserOverride ? roundToTwoDecimals(element.height || 0) : slopedDimensions.height,
-      baseHeight: roundToTwoDecimals(getAreaBasedBaseHeight(element)),
+      width: widthUserOverride ? element.width || 0 : slopedDimensions.width,
+      height: heightUserOverride ? element.height || 0 : slopedDimensions.height,
+      baseHeight: getAreaBasedBaseHeight(element),
     };
   }
 
   return {
-    width: roundToTwoDecimals(element.width || 0),
-    height: roundToTwoDecimals(element.height || 0),
-    baseHeight: roundToTwoDecimals(getAreaBasedBaseHeight(element)),
+    width: element.width || 0,
+    height: element.height || 0,
+    baseHeight: getAreaBasedBaseHeight(element),
   };
 };
 

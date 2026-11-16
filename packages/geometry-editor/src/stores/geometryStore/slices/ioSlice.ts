@@ -40,7 +40,7 @@ import {
 } from '../../../geometry/guideOverlayByFloor';
 import { resolveBuildingElementPitch } from '../../../geometry/derivePitchFromGeometry';
 import { formatCoords } from '../../../geometry/coords';
-import { MIN_WALL_SEGMENT, roundToTwoDecimals } from '../../../geometry/constants';
+import { MIN_WALL_SEGMENT, roundFloatNoise, roundToTwoDecimals } from '../../../geometry/constants';
 import {
   deriveSlopedPolygonOrientation360,
   deriveWallProperties,
@@ -485,7 +485,7 @@ const mechanicalVentilationTerminalMidHeightForCsv = (
   element: ElementByType<'MechanicalVentilationTerminal'>,
 ): number | '' => {
   if (typeof element.mid_height_air_flow_path === 'number' && Number.isFinite(element.mid_height_air_flow_path)) {
-    return roundToTwoDecimals(element.mid_height_air_flow_path);
+    return element.mid_height_air_flow_path;
   }
   const z = element.coordinates?.[0]?.z;
   return typeof z === 'number' && Number.isFinite(z) ? roundToTwoDecimals(z) : '';
@@ -1301,7 +1301,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             ? undefined
             : !midHeightIsCustom && exportedHeight !== undefined && exportedBaseHeight !== undefined
               ? roundToTwoDecimals(exportedBaseHeight - windowHeightOffset + exportedHeight / 2)
-              : roundToTwoDecimals(element.mid_height - windowHeightOffset);
+              : roundFloatNoise(element.mid_height - windowHeightOffset);
           const windowRow = [
             escapeCSV(element.name),
             escapeCSV(zone.name),

@@ -270,7 +270,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'max_window_open_area',
-    label: 'Max Window Open Area',
+    label: 'Open area',
     field: 'max_window_open_area',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',

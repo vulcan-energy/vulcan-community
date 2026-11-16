@@ -43,7 +43,7 @@ import type {
   Element,
   SapBuiltFormCode,
 } from '../types';
-import { roundToTwoDecimals } from '../constants';
+import { roundFloatNoise } from '../constants';
 import {
   csvMetadataValue,
   parseCsvLine,
@@ -83,7 +83,7 @@ function convertWindowPartListToGround(
       if (!convertLegacyParts || typeof midpoint !== 'number' || !Number.isFinite(midpoint)) return part;
       return {
         ...part,
-        mid_height_air_flow_path: roundToTwoDecimals(midpoint + baseHeight),
+        mid_height_air_flow_path: roundFloatNoise(midpoint + baseHeight),
       };
     }),
   };
@@ -108,7 +108,7 @@ export function convertGroundRelativeWindowExtraJsonForCsv(
       if (typeof midpoint !== 'number' || !Number.isFinite(midpoint)) return part;
       return {
         ...part,
-        mid_height_air_flow_path: roundToTwoDecimals(midpoint - ventilationZoneBaseHeight),
+        mid_height_air_flow_path: roundFloatNoise(midpoint - ventilationZoneBaseHeight),
       };
     }),
   };
@@ -140,7 +140,7 @@ function migrateVulcanCsvElementsForEditor(
     return {
       ...element,
       ...(typeof midpoint === 'number' && Number.isFinite(midpoint)
-        ? { mid_height: roundToTwoDecimals(midpoint + ventilationZoneBaseHeight) }
+        ? { mid_height: roundFloatNoise(midpoint + ventilationZoneBaseHeight) }
         : {}),
       extra_json: convertWindowPartListToGround(element.extra_json, ventilationZoneBaseHeight),
     };

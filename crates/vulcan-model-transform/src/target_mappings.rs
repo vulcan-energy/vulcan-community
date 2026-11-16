@@ -641,7 +641,7 @@ fn check_opening_limits(
             .filter_map(|part| number(part, "max_window_open_area"))
             .sum();
         if strictly_above(open_area, width * height) {
-            block("The max open area is greater than the window area (height x width).".into());
+            block("The open area is greater than the window area (height x width).".into());
         }
     }
     let limits = sill_and_head(row, ventilation_base_height);

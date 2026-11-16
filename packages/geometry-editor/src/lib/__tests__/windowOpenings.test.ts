@@ -16,7 +16,7 @@ import {
   windowPartsCopyBlocked,
   windowPartsCopyColumns,
   buildConvertToSingleOpeningPatch,
-  buildSingleOpeningPatch,
+  buildRemainingOpeningPatch,
   buildWindowOpeningFieldPatch,
   classifyWindowOpenings,
   syncWindowPartListToMidHeight,
@@ -44,8 +44,8 @@ describe('classifyWindowOpenings mirrors map_window', () => {
     ['G with free height set and area 0', { ...columns, max_window_open_area: 0 }, { kind: 'closed' }],
     ['G2 no list and blank columns', {}, { kind: 'needs_input', missing: ['free_area_height', 'mid_height', 'max_window_open_area'] }],
     ['H empty list', withList([]), { kind: 'closed' }],
-    ['I partial new-style row', withList([{ free_area_height: 1, mid_height: 1 }]), { kind: 'repair', reason: 'incomplete_parts', partIssues: ['Part 1 needs max open area'] }],
-    ['J empty row', withList([{}]), { kind: 'repair', reason: 'incomplete_parts', partIssues: ['Part 1 needs free height, mid height and max open area'] }],
+    ['I partial new-style row', withList([{ free_area_height: 1, mid_height: 1 }]), { kind: 'repair', reason: 'incomplete_parts', partIssues: ['Part 1 needs open area'] }],
+    ['J empty row', withList([{}]), { kind: 'repair', reason: 'incomplete_parts', partIssues: ['Part 1 needs free height, mid height and open area'] }],
     ['K mixed list', withList([legacy(1), part(1)]), { kind: 'repair', reason: 'unsupported_list' }],
     ['non-array list', withList({ a: 1 }), { kind: 'repair', reason: 'unsupported_list' }],
     ['legacy row with an extra key', withList([{ mid_height_air_flow_path: 1, other: 2 }]), { kind: 'repair', reason: 'unsupported_list' }],
@@ -119,9 +119,15 @@ describe('window opening write path', () => {
   });
 
   it('reduces a remaining table row to the normal form', () => {
-    expect(buildSingleOpeningPatch(withList([part(1.2), part(2)]), part(2))).toEqual({
+    expect(buildRemainingOpeningPatch(withList([part(1.2), part(2)]), part(2))).toEqual({
       ...part(2),
       extra_json: { note: 'keep', window_part_list: [legacy(2)] },
+    });
+  });
+
+  it('clears what the remaining opening leaves blank, so the removed one leaves nothing behind', () => {
+    expect(buildRemainingOpeningPatch(withList([part(1.2), { free_area_height: 0.3 }]), { free_area_height: 0.3 })).toEqual({
+      free_area_height: 0.3, mid_height: '', max_window_open_area: '', extra_json: { note: 'keep' },
     });
   });
 

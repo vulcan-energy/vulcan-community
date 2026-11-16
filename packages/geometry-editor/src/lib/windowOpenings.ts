@@ -6,6 +6,7 @@ import type {
   GeometrySchemaPort,
 } from '../../../geometry-editor-host/src/schemaPort';
 import type { WindowShading } from '../geometry/types';
+import { roundFloatNoise } from '../geometry/constants';
 import { unwrapNullableSchema } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
 
@@ -36,12 +37,12 @@ const LEGACY_KEY = 'mid_height_air_flow_path';
 const PART_FIELD_LABELS: Record<WindowOpeningField, string> = {
   free_area_height: 'free height',
   mid_height: 'mid height',
-  max_window_open_area: 'max open area',
+  max_window_open_area: 'open area',
 };
 
 const REPAIR_MESSAGES = {
   conflicting_heights:
-    'The window parts have different heights. This HEM version needs one opening, or parts with their own free height and max open area.',
+    'The window parts have different heights. This HEM version needs one opening, or parts with their own free height and open area.',
   unsupported_list: 'The window part list has entries this HEM version cannot use.',
 } as const;
 
@@ -228,7 +229,7 @@ function extraJsonWithHeight(row: WindowOpeningSource, height: number | undefine
 }
 
 /** The one-opening normal form: the given values in the columns, one legacy entry in the list. */
-export function buildSingleOpeningPatch(
+function buildSingleOpeningPatch(
   row: WindowOpeningSource,
   opening: WindowOpeningRow,
 ): WindowOpeningPatch {
@@ -237,6 +238,17 @@ export function buildSingleOpeningPatch(
     if (opening[key] !== undefined) patch[key] = opening[key];
   }
   patch.extra_json = extraJsonWithHeight(row, opening.mid_height ?? columnNumber(row, 'mid_height'));
+  return patch;
+}
+
+/** The one opening left when a list goes down to one replaces the window's: a value it leaves blank is cleared. */
+export function buildRemainingOpeningPatch(
+  row: WindowOpeningSource,
+  opening: WindowOpeningRow,
+): WindowOpeningPatch {
+  const patch: WindowOpeningPatch = {};
+  for (const key of OPENING_FIELDS) patch[key] = opening[key] ?? '';
+  patch.extra_json = extraJsonWithHeight(row, opening.mid_height);
   return patch;
 }
 
@@ -367,7 +379,7 @@ export function shiftPhysicalPartsWithBaseHeight(
 export function shiftPhysicalPartHeight<T extends Record<string, unknown>>(part: T, delta: number): T {
   const midHeight = finite(part.mid_height);
   if (midHeight === undefined) return part;
-  return { ...part, mid_height: Math.round((midHeight + delta) * 1e9) / 1e9 };
+  return { ...part, mid_height: roundFloatNoise(midHeight + delta) };
 }
 
 // Close shading of a window on an existing-building EPC: one category per kind, stated on the

@@ -265,13 +265,13 @@ function formatNumberForIssue(value: number): string {
 const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
   free_area_height: 'Free Area Height should not be 0',
   mid_height: 'Mid Height should not be 0',
-  max_window_open_area: 'Max Window Open Area should not be 0',
+  max_window_open_area: 'Open area should not be 0',
 };
 
 const WINDOW_OPENING_FIELD_REQUIRED: Record<WindowOpeningField, string> = {
   free_area_height: 'Free Area Height is required',
   mid_height: 'Mid Height is required',
-  max_window_open_area: 'Max Window Open Area is required',
+  max_window_open_area: 'Open area is required',
 };
 
 /** A zero and a blank field need different wording. */
@@ -301,7 +301,7 @@ function physicalOpeningLimitIssues(
   const totalOpenArea = rows.reduce((sum, row) => sum + (row.max_window_open_area ?? 0), 0);
   if (strictlyAbove(totalOpenArea, height * width)) {
     issues.push(geoIssue(
-      'The max open area is greater than the window area (height x width).',
+      'The open area is greater than the window area (height x width).',
       several ? 'window_part_list' : 'max_window_open_area',
     ));
   }
@@ -342,7 +342,7 @@ function validateWindowOpenings(
     }
     if (openings.kind === 'rows' && openings.source === 'parts' && physical === false) {
       issues.unshift(geoIssue(
-        'This HEM version cannot use window parts with their own free height and max open area. Use "Convert to a single opening" in Advanced Fields.',
+        'This HEM version cannot use window parts with their own free height and open area. Use "Convert to a single opening" in Advanced Fields.',
         'window_part_list',
       ));
     }
@@ -1564,8 +1564,10 @@ export const validateElementCore = (
       if (!isPositiveFiniteNumber(el.frame_area_fraction) && !leftToTarget(el.type, 'frame_area_fraction')) {
         issues.push(geo('Frame Area Fraction is required and must be greater than 0', 'frame_area_fraction'));
       }
-      // HEMIE gives an opening type no default (DESNZ-defined); a conservatory window is closed unless stated.
-      if (targetRules(schemaPort, context.complianceSettings ?? {}).constructionBands
+      // HEMIE takes the opening type in place of the FHS opening inputs, and gives it no default
+      // (DESNZ-defined); a conservatory window is closed unless stated.
+      const constructionBands = targetRules(schemaPort, context.complianceSettings ?? {}).constructionBands;
+      if (constructionBands
         && (!windowSections(el).length || windowSections(el).some((section) => !section.windowType))
         && !(elementsById && isConservatoryGlazing(el, elementsById))) {
         issues.push(geo('Opening type is not set. Choose how this window opens.', 'window_sections'));
@@ -1581,7 +1583,7 @@ export const validateElementCore = (
           ? 'Section width fractions must total less than 1, so the other sections share the rest.'
           : 'Section width fractions must total 1.', 'window_sections'));
       }
-      issues.push(...validateWindowOpenings(
+      if (!constructionBands) issues.push(...validateWindowOpenings(
         el,
         windowPartsArePhysical(schemaPort, targetSchemaMode(schemaPort)),
         () => getAreaBasedElementExportGeometry(el, context.globalOrientationOffset),

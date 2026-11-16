@@ -52,7 +52,6 @@ import { EdgeInsulationFields } from './EdgeInsulationFields';
 import { WindowTreatmentFields } from './WindowTreatmentFields';
 import { FancoilTestDataFields } from './FancoilTestDataFields';
 import { TREATMENT_UI_KEY } from '../lib/windowTreatment';
-import { WINDOW_SECURITY_RISK_HELPER, WINDOW_SECURITY_RISK_LABEL } from '../lib/schemaDescriptionOverrides';
 import {
   computeSuspendedThermalTransmWallsAutofillResultForGroundElement,
   hasSuspendedFloorThermalTransmWallsAutofillSourcesForGroundElement,
@@ -1030,7 +1029,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     detailedBridgePsiProfile,
     elementsById,
     elementIds,
-    floors,
     zones,
     setSelection,
     setSelectedElementIds,
@@ -1044,7 +1042,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       detailedBridgePsiProfile: s.detailedBridgePsiProfile,
       elementsById: s.elementsById as Record<string, Element>,
       elementIds: s.elementIds,
-      floors: s.floors,
       zones: s.zones,
       setSelection: s.setSelection,
       setSelectedElementIds: s.setSelectedElementIds,
@@ -1406,20 +1403,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       delete advancedProperties.Control_WindowOpenable;
     }
 
-    // `security_risk`: FHS boolean — show Yes/No dropdown + official guidance (EnumControl).
-    // R4.3b: this intent is finally REALIZED, not just aspirational. Through R4.3,
-    // DirectAdvancedFields' executed-table `pickDirectControl` routed boolean type
-    // ahead of enum, so this inlined `.enum` was inert here -- BooleanControl's plain
-    // checkbox won regardless. R4.3b's enum-first dispatch order means this field now
-    // actually reaches EnumControl, whose propKey-gated Yes/No label mapping
-    // (jsonformsRenderers.tsx) was itself dead code until this slice made it reachable.
+    // `security_risk`: the window's main form asks for it in its Opening section.
     if (elementType === 'BuildingElementTransparent' && advancedProperties.security_risk) {
-      advancedProperties.security_risk = {
-        type: 'boolean',
-        enum: [true, false],
-        title: WINDOW_SECURITY_RISK_LABEL,
-        description: WINDOW_SECURITY_RISK_HELPER,
-      };
+      delete advancedProperties.security_risk;
     }
 
     // shield_fact_location renders as a dropdown either way (SELECT, both pre- and
@@ -1868,9 +1854,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             : undefined,
         assemblySourceValues,
         useFHSSchemaForValidation: useFHSSchema,
-        currentElementData: currentData,
         schemaPort,
-        floors,
         // Pass $defs through config so TextControl can resolve references
         $defs: subschema?.$defs || getActiveRootSchema()?.$defs,
         systemSampleMode: systemSampleBaselineAvailable,
@@ -1887,9 +1871,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       opaqueFabricVariant,
       fieldIndicators,
       evidenceFieldKeys,
-      currentData,
       schemaPort,
-      floors,
       openRuCalculator,
       openGroundUCalculator,
       groundUComputedWPerM2K,
@@ -2477,6 +2459,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           }}
           elementType={elementType}
           flat={flat}
+          note={inspectorContributions.windowTreatmentNote?.note(advancedFieldsData.treatment, advancedFieldsData[TREATMENT_UI_KEY])}
         />
       )}
 
