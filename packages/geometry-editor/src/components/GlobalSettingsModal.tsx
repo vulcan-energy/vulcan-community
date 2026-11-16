@@ -24,7 +24,6 @@ import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schem
 import { targetFieldAvailability } from "../lib/schemaCache";
 import { HEMIE_NATION, NATIONS, postcodeBorderArea, postcodeUnrecognised } from "../lib/hemieFabric";
 import { SourceNote } from "./FieldSource";
-
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
