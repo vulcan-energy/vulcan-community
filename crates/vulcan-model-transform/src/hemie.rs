@@ -56,7 +56,7 @@ const SETTING: &str = "HEMIE_";
 const RETIRED_SETTINGS: [(&str, &str); 3] = [
     ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Global Settings."),
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
-    ("HEMIE_infiltration_properties", "An existing building needs an air test. Remove the row and enter the air test result in Global Settings."),
+    ("HEMIE_infiltration_properties", "Remove the row. With no air test, enter the open fireplaces and glazing date in Global Settings > Air tightness."),
 ];
 /// HEMIE's roof detail inputs (DESNZ-defined; `roof_construction.py`): the ceiling, the joists
 /// and the insulation's conductivity.
@@ -2259,6 +2259,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     geometry.insert("reference_building_part".into(), json!(names[0]));
     geometry.insert("reference_orientation".into(), json!(reference_orientation));
     let full_ventilation = &model["InfiltrationVentilation"];
+    if let Some(level) = wind_sheltering_level(full_ventilation) {
+        geometry.insert("wind_sheltering_level".into(), json!(level));
+    }
     // DESNZ-defined: the base height, or else HEMIE's estimate from the base storey. The
     // estimate is given as the height because the pinned Orchestrator drops a Geometry's
     // base_storey_of_dwelling before HEMIE reads it.
@@ -2302,7 +2305,17 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         Value::Object(std::mem::take(&mut ctx.constructions.by_name)),
     );
 
-    let ventilation = infiltration(ctx, full_ventilation, dwelling_height(&geometry, dwelling));
+    let double_glazed = geometry["constructions"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .any(|(_, c)| c["construction_type"] == "window" && c["glazing_type"] == "double");
+    let ventilation = infiltration(
+        ctx,
+        full_ventilation,
+        dwelling_height(&geometry, dwelling),
+        double_glazed,
+    );
     if !ctx.errors.is_empty() {
         return None;
     }
@@ -3293,7 +3306,7 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
 }
 
 /// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs and its air
-/// test. Without an air test the conversion stops (DESNZ question E17).
+/// test, or with none the inputs of HEMIE's leakage estimate (`leakage_estimate_inputs`).
 /// Derived from the model: the height from the dwelling's base to the top of its highest heated
 /// storey or room in the roof, over every building part (DESNZ question E46 on roof rooms).
 fn dwelling_height(geometry: &Map<String, Value>, dwelling: Option<f64>) -> f64 {
@@ -3319,7 +3332,12 @@ fn dwelling_height(geometry: &Map<String, Value>, dwelling: Option<f64>) -> f64 
         .fold(0.0, f64::max)
 }
 
-fn infiltration(ctx: &mut Ctx, full: &Value, drawn_height: f64) -> Option<Value> {
+fn infiltration(
+    ctx: &mut Ctx,
+    full: &Value,
+    drawn_height: f64,
+    double_glazed: bool,
+) -> Option<Value> {
     let mut iv = Map::new();
     iv.insert("model_type".into(), json!("hemie"));
     // The assessor's values: an existing building's absent shield class, noise nuisance and air
@@ -3361,19 +3379,12 @@ fn infiltration(ctx: &mut Ctx, full: &Value, drawn_height: f64) -> Option<Value>
     let leaks = &full["Leaks"];
     let stated = |key: &str| leaks.get(key).filter(|v| !v.is_null());
     let mut out = Map::new();
-    let tested = stated("test_result").is_some();
-    if tested {
+    if stated("test_result").is_some() {
         // Derived from the model: the measured air test the assessor stated.
-        for key in ["test_result", "test_pressure", "ventilation_zone_height"] {
+        for key in ["test_result", "test_pressure"] {
             match stated(key) {
                 Some(v) => {
                     out.insert(key.into(), v.clone());
-                }
-                // Derived from the model when not stated; a stated height wins.
-                None if key == "ventilation_zone_height" => {
-                    let height = (drawn_height * 1000.0).round() / 1000.0;
-                    out.insert(key.into(), json!(height));
-                    ctx.notices.push(notice("/InfiltrationVentilation/Leaks/ventilation_zone_height", format!("No ventilation zone height is given, so the existing-building EPC uses the drawn height of the dwelling, {height} m. Give it in Global Settings > Ventilation Environment to state it.")));
                 }
                 None => ctx.errors.push(error(
                     "AIR_TEST",
@@ -3386,10 +3397,19 @@ fn infiltration(ctx: &mut Ctx, full: &Value, drawn_height: f64) -> Option<Value>
             }
         }
     } else {
-        // DESNZ-defined: with no air test HEMIE estimates the leakage, but the Orchestrator
-        // rejects every form of its inputs (DESNZ question E17): stop here instead of failing
-        // in the run.
-        ctx.errors.push(error("AIR_TEST", "/InfiltrationVentilation/Leaks".into(), "No air test is stated. HEM:EPC cannot yet run an existing building without one. Enter the air test result in Global Settings.".into()));
+        let properties = leakage_estimate_inputs(ctx, double_glazed);
+        out.insert("infiltration_properties".into(), properties);
+    }
+    // Derived from the model when not stated; a stated height wins.
+    match stated("ventilation_zone_height") {
+        Some(v) => {
+            out.insert("ventilation_zone_height".into(), v.clone());
+        }
+        None => {
+            let height = (drawn_height * 1000.0).round() / 1000.0;
+            out.insert("ventilation_zone_height".into(), json!(height));
+            ctx.notices.push(notice("/InfiltrationVentilation/Leaks/ventilation_zone_height", format!("No ventilation zone height is given, so the existing-building EPC uses the drawn height of the dwelling, {height} m. Give it in Global Settings > Ventilation Environment to state it.")));
+        }
     }
     // Derived from the model: the envelope area of the drawn elements. The schema requires it
     // although HEMIE Geometry can give it (E9).
@@ -3405,6 +3425,77 @@ fn infiltration(ctx: &mut Ctx, full: &Value, drawn_height: f64) -> Option<Value>
     }
     iv.insert("Leaks".into(), Value::Object(out));
     Some(Value::Object(iv))
+}
+
+/// Assumption pending DESNZ E52 (Vulcan's assumption registry lists it): a suspended floor's wind
+/// sheltering level follows the shield class, Shielded to Sheltered, Normal to Average, Open to
+/// Exposed, and the shield class follows the terrain class when not stated. DESNZ's method states
+/// both maps; HEMIE codes only the second and otherwise sends Average. If DESNZ keeps Average,
+/// delete this and the Geometry takes HEMIE's default again.
+fn wind_sheltering_level(ventilation: &Value) -> Option<&'static str> {
+    let shield = match ventilation["shield_class"].as_str() {
+        Some(stated) => stated,
+        None => match ventilation["terrain_class"].as_str()? {
+            "OpenField" | "OpenWater" => "Open",
+            "Suburban" => "Normal",
+            "Urban" => "Shielded",
+            _ => return None,
+        },
+    };
+    match shield {
+        "Shielded" => Some("Sheltered"),
+        "Normal" => Some("Average"),
+        "Open" => Some("Exposed"),
+        _ => None,
+    }
+}
+
+/// Settings rows for the three leakage-estimate inputs the existing-building input cannot derive
+/// from the drawing (HEMIE's `GeometryInfiltrationProperties`).
+pub(crate) const OPEN_FIREPLACES: &str = "HEMIE_number_of_open_fireplaces";
+pub(crate) const DOUBLE_GLAZING_PERIOD: &str = "HEMIE_double_glazing_installation_period";
+pub(crate) const HEAT_LOSS_CORRIDOR: &str = "HEMIE_heat_loss_corridor";
+
+/// Assumption pending DESNZ E17 (Vulcan's assumption registry lists it). With no air test the
+/// assessor gives only the open fireplaces, the double-glazing installation period (when the
+/// windows are double glazed) and, for a flat or maisonette, the heat loss corridor; HEMIE
+/// derives every other infiltration property from the Geometry and estimates a Pulse test. The
+/// pinned Orchestrator cannot pass this form to the wrapper, so the HEM:EPC host resolves it with
+/// HEMIE's own functions before the run. If DESNZ answers differently, only that host step
+/// changes: these inputs are HEMIE's.
+fn leakage_estimate_inputs(ctx: &mut Ctx, double_glazed: bool) -> Value {
+    let mut properties = Map::new();
+    let path = |row: &str| format!("/Metadata/{row}");
+    match ctx.settings.raw(OPEN_FIREPLACES).map(|v| match v {
+        Value::String(s) => s.trim().parse::<u64>().ok(),
+        other => other.as_u64(),
+    }) {
+        Some(Some(count)) => {
+            properties.insert("number_of_open_fireplaces".into(), json!(count));
+        }
+        _ => ctx.errors.push(error("AIR_TEST", path(OPEN_FIREPLACES), "No air test is stated, so HEM:EPC estimates the airtightness. Enter the number of open fireplaces (0 or more) in Global Settings > Air tightness, or enter the air test result.".into())),
+    }
+    if double_glazed {
+        match ctx.settings.raw(DOUBLE_GLAZING_PERIOD).and_then(Value::as_str) {
+            Some(period) => {
+                properties.insert("double_glazing_installation_period".into(), json!(period));
+            }
+            None => ctx.errors.push(error("AIR_TEST", path(DOUBLE_GLAZING_PERIOD), "No air test is stated and the windows are double glazed. Enter when the double glazing was installed in Global Settings > Air tightness (unknown is an option).".into())),
+        }
+    }
+    if matches!(
+        ctx.model["General"]["build_type"].as_str(),
+        Some("flat" | "maisonette")
+    ) {
+        match ctx.settings.raw(HEAT_LOSS_CORRIDOR).and_then(Value::as_str) {
+            Some(corridor) => {
+                properties.insert("heat_loss_corridor".into(), json!(corridor));
+            }
+            None => ctx.errors.push(error("AIR_TEST", path(HEAT_LOSS_CORRIDOR), "No air test is stated. For a flat or maisonette, enter the heat loss corridor in Global Settings > Air tightness.".into())),
+        }
+    }
+    ctx.notices.push(notice("/InfiltrationVentilation/Leaks", "Airtightness: estimated (no air test). HEM:EPC estimates it from the dwelling's construction, age, glazing and open fireplaces.".into()));
+    Value::Object(properties)
 }
 
 #[cfg(test)]
@@ -4110,7 +4201,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
-    fn with_no_air_test_preparation_stops_and_desnz_defaults_are_reported() {
+    fn with_no_air_test_the_leakage_is_estimated_and_desnz_defaults_are_reported() {
         let mut model = full_input();
         model["InfiltrationVentilation"]
             .as_object_mut()
@@ -4128,16 +4219,97 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         for key in ["shield_class", "noise_nuisance"] {
             assert!(notices.iter().any(|n| n.path.ends_with(key)), "{key}");
         }
-        // No air test does not run yet (a DESNZ issue): one error says so, and nothing asks
-        // for the leakage-estimate inputs.
+        // No air test: HEMIE estimates the leakage from the assessor's open fireplaces (E17);
+        // without them, one error names the row.
         model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
-        let (_, errors, _) = run_on(&house(gable_roof()), model);
+        let (_, errors, _) = run_on(&house(gable_roof()), model.clone());
         assert!(
-            errors.len() == 1
-                && errors[0].path == "/InfiltrationVentilation/Leaks"
-                && errors[0].message.starts_with("No air test is stated."),
+            errors.len() == 1 && errors[0].path == format!("/Metadata/{OPEN_FIREPLACES}"),
             "{errors:#?}"
         );
+        let with_fireplace = house(gable_roof()).replace(
+            "HEMIE_age_band,I",
+            &format!("HEMIE_age_band,I\n{OPEN_FIREPLACES},1"),
+        );
+        let (estimated, errors, notices) = run_on(&with_fireplace, model);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let leaks = &estimated["InfiltrationVentilation"]["Leaks"];
+        assert_eq!(
+            leaks["infiltration_properties"],
+            json!({"number_of_open_fireplaces": 1})
+        );
+        assert!(leaks.get("test_result").is_none() && leaks["ventilation_zone_height"].is_number());
+        assert!(notices
+            .iter()
+            .any(|n| n.message.starts_with("Airtightness: estimated (no air test).")));
+    }
+
+    #[test]
+    fn with_no_air_test_double_glazing_and_a_flat_ask_for_their_estimate_inputs() {
+        let mut model = full_input();
+        model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
+        model["General"]["build_type"] = json!("flat");
+        let csv = house(gable_roof()).replace(
+            "HEMIE_age_band,I",
+            &format!("HEMIE_age_band,I\n{OPEN_FIREPLACES},0"),
+        );
+        let paths = |errors: &[ValidationError]| {
+            errors
+                .iter()
+                .filter(|e| e.code == "E_EPC_HEMIE_AIR_TEST")
+                .map(|e| e.path.clone())
+                .collect::<Vec<_>>()
+        };
+        let (_, errors, _) = run_on(&csv, model.clone());
+        assert_eq!(paths(&errors), [format!("/Metadata/{HEAT_LOSS_CORRIDOR}")]);
+        let flat = csv.replace(
+            "HEMIE_age_band,I",
+            &format!("HEMIE_age_band,I\n{HEAT_LOSS_CORRIDOR},unheated_corridor"),
+        );
+        let (converted, errors, _) = run_on(&flat, model);
+        assert!(paths(&errors).is_empty(), "{errors:#?}");
+        assert_eq!(
+            converted["InfiltrationVentilation"]["Leaks"]["infiltration_properties"]
+                ["heat_loss_corridor"],
+            "unheated_corridor"
+        );
+        // A double-glazed window needs the installation period.
+        let mut ctx_model = full_input();
+        ctx_model["General"]["build_type"] = json!("detached");
+        let rows: Rows = BTreeMap::new();
+        let snapshot = ctx_model.clone();
+        let mut ctx = Ctx {
+            settings: Settings {
+                csv: &rows,
+                missing: BTreeMap::new(),
+            },
+            constructions: Constructions::default(),
+            errors: Vec::new(),
+            notices: Vec::new(),
+            model: &snapshot,
+            unshaded_windows: Vec::new(),
+        };
+        leakage_estimate_inputs(&mut ctx, true);
+        assert!(ctx
+            .errors
+            .iter()
+            .any(|e| e.path == format!("/Metadata/{DOUBLE_GLAZING_PERIOD}")));
+    }
+
+    #[test]
+    fn wind_sheltering_follows_the_shield_class_or_the_terrain() {
+        for (ventilation, level) in [
+            (json!({"shield_class": "Shielded", "terrain_class": "OpenField"}), Some("Sheltered")),
+            (json!({"terrain_class": "Urban"}), Some("Sheltered")),
+            (json!({"terrain_class": "Suburban"}), Some("Average")),
+            (json!({"terrain_class": "OpenWater"}), Some("Exposed")),
+            (json!({}), None),
+        ] {
+            assert_eq!(wind_sheltering_level(&ventilation), level, "{ventilation}");
+        }
+        let (model, errors, _) = run(&house(gable_roof()));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(model["Zone"]["wind_sheltering_level"], "Average");
     }
 
     #[test]

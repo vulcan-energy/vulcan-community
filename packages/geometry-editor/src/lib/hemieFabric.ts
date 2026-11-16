@@ -75,7 +75,7 @@ export const FABRIC_PRESET_TYPES: ReadonlySet<string> = new Set(['BuildingElemen
 export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
   HEMIE_region: 'The region setting was removed: it now comes from the postcode. For a postcode area that spans two nations, choose the Nation next to the Postcode in Global Settings.',
   HEMIE_front_door: 'The front door setting was removed: mark the front door on the door itself.',
-  HEMIE_infiltration_properties: 'The infiltration setting was removed: an existing building needs an air test. Enter the air test result in Global Settings.',
+  HEMIE_infiltration_properties: 'The infiltration setting was removed. With no air test, enter the open fireplaces and glazing date in Global Settings > Air tightness.',
 };
 
 const HEAT_CAPACITY_BANDS = ['Very light', 'Light', 'Medium', 'Heavy', 'Very heavy'] as const;
