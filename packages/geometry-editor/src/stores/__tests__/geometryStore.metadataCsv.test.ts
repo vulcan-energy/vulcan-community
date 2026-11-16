@@ -129,6 +129,35 @@ Partition,Living,BuildingElementAdjacentConditionedSpace,10,90,4,2.5,90,0,FALSE,
   expect(extra('Partition').vulcan_assembly_v1.arealHeatCapacityWrittenToElement_J_m2K).toBe(75000);
 });
 
+it('keeps an existing wall\'s build-up through save and load: the converter sends it as layers', () => {
+  const envelope = {
+    schemaVersion: 1, assemblyId: 'calculator:layered', appliedAt: '2026-11-16T00:00:00Z',
+    assemblySnapshot: { elementMode: 'BuildingElementOpaque', pitchDegrees: 90, layers: [
+      { kind: 'solid', materialId: 'brick', thickness_m: 0.1025 },
+      { kind: 'cavity', ventilation: 'unventilated', gap_thickness_m: 0.05 },
+      { kind: 'solid', materialId: 'pir', thickness_m: 0.1 },
+    ] },
+    correctedU_W_m2K: 0.2, uValueWrittenToElement_W_m2K: 0.2, thermalResistanceConstruction_m2K_W: 4.83, arealHeatCapacity_J_m2K: 190000,
+  };
+  const extra = JSON.stringify({ u_value: 0.2, vulcan_assembly_v1: envelope }).replace(/"/g, '""');
+  const csv = `Metadata,,
+IsExistingBuilding,TRUE
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Front,Living,BuildingElementOpaque,10,90,4,2.5,180,0,FALSE,FALSE,,"0,0,0|4,0,0","${extra}"
+`;
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  store.getState().loadFromCSV(csv);
+  store.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
+  const front = Object.values(store.getState().elementsById).find((e) => e.name === 'Front')!;
+  expect((front.extra_json as Record<string, unknown>).vulcan_assembly_v1).toEqual(envelope);
+});
+
 it('keeps the HEMIE_ model settings as typed through load and save', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   store.getState().loadFromCSV('Metadata,,\nHEMIE_age_band,D\nHEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"\n');

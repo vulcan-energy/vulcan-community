@@ -27,6 +27,8 @@ mod shading;
 pub use shading::{HemieQuadrant, HemieShading};
 #[path = "hemie_bundles.rs"]
 mod bundles;
+#[path = "hemie_layers.rs"]
+mod layers;
 
 type Row = BTreeMap<String, Value>;
 type Rows = BTreeMap<String, Vec<Row>>;
@@ -724,6 +726,8 @@ impl<'a> Settings<'a> {
 struct Constructions {
     by_name: Map<String, Value>,
     documented: BTreeSet<String>,
+    /// Walls whose applied build-up goes as their layers (`hemie_layers.rs`).
+    layered: BTreeSet<String>,
     /// Windows that state their own g-value or frame area fraction.
     stated_glazing: BTreeSet<String>,
     /// Elements that state their own heat capacity, mass distribution class or solar absorption.
@@ -924,8 +928,12 @@ impl Ctx<'_> {
             .filter_map(|e| e.num("u_value"))
             .map(|u| u.to_string())
             .collect();
+        // A wall's applied build-up goes as its layers, in place of the U-value it wrote.
+        let build_up = first.get("vulcan_assembly_v1").filter(|_| walls);
         if construction_type == "party_wall" {
             // DESNZ-defined: a party wall's resistance is fixed; only its cavity and lining count.
+        } else if build_up.is_some() {
+            stated_u = true;
         } else if u_values.len() > 1 {
             self.errors.push(error("CONSTRUCTION", first.path(), format!("The existing-building EPC gives {} one construction, but their U-values differ ({}). Give them one U-value, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
         } else if let Some(u) = first.num("u_value") {
@@ -1009,6 +1017,28 @@ impl Ctx<'_> {
         if let Some(capacity) = self.heat_capacity(construction_type, elements) {
             c.insert("areal_heat_capacity".into(), json!(capacity));
             stated_mass.push(format!("areal heat capacity {} kJ/m²K", capacity / 1000.0));
+        }
+        if let Some(envelope) = build_up {
+            let stated = c.get("areal_heat_capacity").and_then(Value::as_f64);
+            match layers::wall_layer(envelope, stated) {
+                Ok(layer) => {
+                    self.constructions.layered.insert(format!(
+                        "'{}' ({} mm, R {} m²K/W)",
+                        first.name,
+                        layer["thickness_mm"].as_f64().unwrap_or_default(),
+                        layer["thermal_resistance_construction"]
+                    ));
+                    c.insert("layers".into(), json!([layer]));
+                }
+                Err(what) => self.errors.push(error(
+                    "CONSTRUCTION",
+                    first.path(),
+                    format!(
+                        "'{}' has a build-up with no {what}, so the existing-building EPC cannot take its layers. Open the build-up and apply it again, or state the missing value.",
+                        first.name
+                    ),
+                )),
+            }
         }
         if !stated_mass.is_empty() {
             let names = quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>());
@@ -1534,6 +1564,12 @@ fn convert_existing_building(
         .collect();
     if !documented.is_empty() {
         notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so the existing-building EPC takes it as a documented U-value from the element: {}.", documented.join("; "))));
+    }
+    let layered: Vec<String> = std::mem::take(&mut ctx.constructions.layered)
+        .into_iter()
+        .collect();
+    if !layered.is_empty() {
+        notices.push(notice("/Zone/constructions", format!("These walls take their layers from their build-up, so the existing-building EPC works out their U-value from the layers: {}.", layered.join("; "))));
     }
     let stated_glazing: Vec<String> = std::mem::take(&mut ctx.constructions.stated_glazing)
         .into_iter()
@@ -4956,6 +4992,58 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             errors
                 .iter()
                 .any(|e| e.message == "'W00' has colour \"Blue\". Use Light, Intermediate or Dark."),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn an_applied_build_up_on_a_wall_goes_as_its_layers() {
+        let envelope = json!({"schemaVersion": 1, "assemblyId": "calculator:layered", "appliedAt": "2026-11-16T00:00:00Z",
+            "assemblySnapshot": {"elementMode": "BuildingElementOpaque", "pitchDegrees": 90, "layers": [
+                {"kind": "solid", "materialId": "brick", "thickness_m": 0.2},
+                {"kind": "solid", "materialId": "pir", "thickness_m": 0.1}]},
+            "correctedU_W_m2K": 0.2, "uValueWrittenToElement_W_m2K": 0.2,
+            "thermalResistanceConstruction_m2K_W": 4.83,
+            "arealHeatCapacity_J_m2K": 300_000.0, "arealHeatCapacityWrittenToElement_J_m2K": 300_000.0});
+        let extra = json!({"u_value": 0.2, "thermal_resistance_construction": 4.83,
+            "areal_heat_capacity": 300_000.0, "vulcan_assembly_v1": envelope});
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[0] = exposed[0].replace(
+            "\",",
+            &format!("\",\"{}\"", extra.to_string().replace('"', "\"\"")),
+        );
+        exposed.extend(gable_roof());
+        let (model, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let constructions = &model["Zone"]["constructions"];
+        let layered = constructions
+            .as_object()
+            .unwrap()
+            .values()
+            .find(|c| c.get("layers").is_some())
+            .expect("a construction with layers");
+        assert_eq!(
+            layered["layers"],
+            json!([{"thickness_mm": 300.0, "thermal_resistance_construction": 4.83, "areal_heat_capacity": 300_000.0}])
+        );
+        assert!(layered.get("u_value").is_none());
+        // The wall type stays: HEMIE reads it beyond the layers.
+        assert_eq!(layered["wall_construction_type"], "cavity");
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("'W00' (300 mm, R 4.83 m²K/W)")));
+        assert!(!notices
+            .iter()
+            .any(|n| n.message.contains("documented U-value")));
+        // A build-up with a layer of no thickness stops, naming the wall.
+        let broken = exposed[0].replace("thickness_m\"\":0.1}", "kind\"\":\"\"solid\"\"}");
+        assert_ne!(broken, exposed[0]);
+        exposed[0] = broken;
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(
+            errors.iter().any(|e| e
+                .message
+                .starts_with("'W00' has a build-up with no thickness for every layer")),
             "{errors:#?}"
         );
     }
