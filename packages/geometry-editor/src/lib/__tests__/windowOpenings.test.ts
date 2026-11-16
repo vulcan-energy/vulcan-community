@@ -140,6 +140,20 @@ describe('window opening write path', () => {
       .toEqual({ note: 'keep', _host_style: 'top_hung', window_part_list: [legacy(2)] });
   });
 
+  it('moves the window\'s own opening keys onto part 1 when a second part is added, and back when one is left', () => {
+    const keys = ['_host_style', '_host_area'];
+    const single = { ...columns, extra_json: { window_part_list: [legacy(1.65)], note: 'keep', _host_style: 'side_hung', _host_area: 0.3, _host_kind: 'window' } };
+    const added = buildAddWindowOpeningPatch(single, keys);
+    expect(added.extra_json).toEqual({ note: 'keep', _host_kind: 'window',
+      window_part_list: [{ ...columns, _host_style: 'side_hung', _host_area: 0.3 }, {}] });
+    // Part 2 gets its values, then is removed: the window is as it was.
+    const parts = added.extra_json!.window_part_list as Record<string, unknown>[];
+    const removed = buildRemainingOpeningPatch({ ...single, ...added }, parts[0] as never);
+    expect(removed).toEqual({ ...columns, extra_json: single.extra_json });
+    // Without keys to move, or with none set, nothing moves.
+    expect(buildAddWindowOpeningPatch(single).extra_json).toMatchObject({ _host_style: 'side_hung', window_part_list: [columns, {}] });
+  });
+
   it('clears what the remaining opening leaves blank, so the removed one leaves nothing behind', () => {
     expect(buildRemainingOpeningPatch(withList([part(1.2), { free_area_height: 0.3 }]), { free_area_height: 0.3 })).toEqual({
       free_area_height: 0.3, mid_height: '', max_window_open_area: '', extra_json: { note: 'keep' },

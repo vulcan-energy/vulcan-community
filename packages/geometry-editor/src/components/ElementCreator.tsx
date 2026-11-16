@@ -4222,6 +4222,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             }}
           />
         ) : null,
+      openingPartKeys: inspectorContributions.openingPartFields?.openingKeys ?? [],
       hemDatabaseProducts,
       existingBuilding,
       systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),

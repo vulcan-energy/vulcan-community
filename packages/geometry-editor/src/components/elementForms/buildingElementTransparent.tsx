@@ -545,6 +545,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       renderLinearDimensionsFields,
       openingFields,
       renderOpeningPartFields,
+      openingPartKeys,
     } = ctx;
 
     // ElementCreator's getCurrentElementData has one OTHER call site (the
@@ -731,7 +732,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
         {openingNote ? <div className="field-source-note">{openingNote}</div> : null}
         {windowSource && state.windowPartsPhysical && !state.constructionBands && (
           <WindowOpeningParts source={windowSource} commit={(patch) => commitExistingElementDraft(patch as Partial<Element>)}
-            renderPartFields={renderOpeningPartFields} />
+            renderPartFields={renderOpeningPartFields} openingKeys={openingPartKeys} />
         )}
         {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>

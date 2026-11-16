@@ -299,6 +299,8 @@ export interface ElementFormRenderCtx {
   thermalValues: ReactNode;
   /** Host fields for one row of the selected window's opening parts; null when the host has none. */
   renderOpeningPartFields: ((partIndex: number) => ReactNode) | null;
+  /** Window keys the host's part fields move onto part 1 when a second part is added. */
+  openingPartKeys: readonly string[];
   /** The selected System row has a product slot: its picker chooses the system's product, so
    * the sample Category and Preset do not show. */
   systemHasProductSlot: boolean;

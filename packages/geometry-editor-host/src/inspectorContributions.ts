@@ -247,6 +247,11 @@ export type GeometryInspectorOpeningPartFieldsContext = Readonly<{
  */
 export type GeometryInspectorOpeningPartFieldsContribution = Readonly<{
   render: ComponentType<GeometryInspectorOpeningPartFieldsContext>;
+  /**
+   * Window extra_json keys that describe its one opening. Adding a second part moves them onto part 1; when one part
+   * is left, its `_` keys move back onto the window.
+   */
+  openingKeys?: readonly string[];
 }>;
 
 /** A host's one-line note under a window's Blinds / curtains, from its saved treatment; null for none. */

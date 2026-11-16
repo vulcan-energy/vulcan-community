@@ -346,6 +346,16 @@ describe('main-form window opening inputs', () => {
     });
   });
 
+  it('moves the host\'s opening keys onto part 1 when a second opening is added', () => {
+    const host = defineGeometryInspectorContributions({ openingPartFields: { render: () => null, openingKeys: ['_host_style'] } });
+    const store = renderForm(windowElement({ window_part_list: [{ mid_height_air_flow_path: 1.65 }], _host_style: 'side_hung', _host_kind: 'w' }),
+      canonicalGeometrySchemaPort, host);
+    fireEvent.click(screen.getByRole('button', { name: 'Add openable part' }));
+    expect(stored(store).extra_json).toMatchObject({ _host_kind: 'w',
+      window_part_list: [{ free_area_height: 0.95, mid_height: 1.65, max_window_open_area: 0.8, _host_style: 'side_hung' }, {}] });
+    expect(stored(store).extra_json).not.toHaveProperty('_host_style');
+  });
+
   it('writes the normal form when a removal leaves one part', () => {
     const store = renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove opening 1' }));

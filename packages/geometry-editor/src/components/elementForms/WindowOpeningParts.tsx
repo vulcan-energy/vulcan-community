@@ -38,10 +38,12 @@ const partValue = (part: unknown, key: WindowOpeningField): number | undefined =
  * part, and the button that adds one. One opening stays in the three main-form inputs above; removing down to one
  * part writes it back there.
  */
-export function WindowOpeningParts({ source, commit, renderPartFields }: Readonly<{
+export function WindowOpeningParts({ source, commit, renderPartFields, openingKeys }: Readonly<{
   source: WindowOpeningSource;
   commit: (patch: WindowOpeningPatch) => void;
   renderPartFields?: ((partIndex: number) => ReactNode) | null;
+  /** Window keys that describe its one opening: they move onto part 1 when a second part is added. */
+  openingKeys?: readonly string[];
 }>) {
   const openings = classifyWindowOpenings(source);
   // A list this HEM version cannot read is repaired in Advanced Fields ("Convert to a single opening").
@@ -92,7 +94,7 @@ export function WindowOpeningParts({ source, commit, renderPartFields }: Readonl
     ))}
     <div style={FULL_ROW}>
       <button type="button" className="btn btn-small btn-secondary"
-        onClick={() => commit(parts ? { extra_json: { ...extra, window_part_list: [...parts, {}] } } : buildAddWindowOpeningPatch(source))}>
+        onClick={() => commit(parts ? { extra_json: { ...extra, window_part_list: [...parts, {}] } } : buildAddWindowOpeningPatch(source, openingKeys))}>
         Add openable part
       </button>
     </div>

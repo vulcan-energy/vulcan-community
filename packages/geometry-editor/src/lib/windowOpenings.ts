@@ -304,8 +304,12 @@ export function buildWindowOpeningFieldPatch(
   return { ...patch, extra_json: extraJsonWithHeight(row, height) };
 }
 
-/** Adds a second opening. A closed window becomes one opening that the main form can complete. */
-export function buildAddWindowOpeningPatch(row: WindowOpeningSource): WindowOpeningPatch {
+/**
+ * Adds a second opening. A closed window becomes one opening that the main form can complete. The window's one
+ * opening becomes part 1 and takes `openingKeys` (host keys that describe that opening) off the window; the new part
+ * starts empty. The reverse of buildRemainingOpeningPatch.
+ */
+export function buildAddWindowOpeningPatch(row: WindowOpeningSource, openingKeys: readonly string[] = []): WindowOpeningPatch {
   const openings = classifyWindowOpenings(row);
   if (openings.kind === 'closed') {
     return {
@@ -319,12 +323,14 @@ export function buildAddWindowOpeningPatch(row: WindowOpeningSource): WindowOpen
     : openings.kind === 'needs_input'
       ? openings.row
       : Array.isArray(parts) && parts.length === 1 && hasOnlyPartFields(parts[0]) ? partRow(parts[0]) : {};
-  return {
-    extra_json: {
-      ...(isRecord(row.extra_json) ? row.extra_json : {}),
-      window_part_list: [first, {}],
-    },
-  };
+  const extra: Record<string, unknown> = { ...(isRecord(row.extra_json) ? row.extra_json : {}) };
+  const moved: Record<string, unknown> = {};
+  for (const key of openingKeys) {
+    if (!(key in extra)) continue;
+    moved[key] = extra[key];
+    delete extra[key];
+  }
+  return { extra_json: { ...extra, window_part_list: [{ ...first, ...moved }, {}] } };
 }
 
 /** A list that still follows the window's mid height keeps following it. */
