@@ -14,9 +14,11 @@ import {
 import { useGeometryStore } from '../../stores/geometryStore';
 import type { GeometrySpaceLabelFieldsContribution } from '../../../../geometry-editor-host/src/inspectorContributions';
 import { StandardDropdown } from '../StandardDropdown';
+import { roomTypeLabel } from '../../lib/spaceLabelNaming';
 import { ValidationPill } from '../ValidationIndicator';
 
-const ROOM_TYPE_OPTIONS = ['', ...Object.keys(DEFAULT_SPACE_LABEL_ROOM_REGISTRY).sort()];
+const ROOM_TYPE_OPTIONS = [{ value: '', label: roomTypeLabel('') }, ...Object.keys(DEFAULT_SPACE_LABEL_ROOM_REGISTRY)
+  .map((value) => ({ value, label: roomTypeLabel(value) })).sort((a, b) => a.label.localeCompare(b.label))];
 
 /** Trash bin — matches ConfigCard / BatchConfigBuilder delete stroke icons */
 const DeleteSpaceIcon = () => (
@@ -335,7 +337,7 @@ function SpaceLabelCompactRow({
           selectRef={roomTypeSelectRef}
           value={label.room_type || ''}
           onChange={(value) => updateSpaceLabel(label.id, { room_type: value })}
-          options={ROOM_TYPE_OPTIONS.map((k) => ({ value: k, label: k === '' ? '(none)' : k }))}
+          options={ROOM_TYPE_OPTIONS}
           variant="ghost"
           size="sm"
         />

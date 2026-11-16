@@ -9,6 +9,7 @@ import { calculateDerivedFloorArea, getVolumeCalculationBreakdown, partyElementP
 import {
   aggregateSpaceLabelsForZone,
   applySpaceLabelsToZonesAndCompliance,
+  canSpaceLabelBeMarkedOpenToLivingRoom,
   formatDwellingCountMismatchWarnings,
   fullDwellingCountsCompliancePatch,
   getDwellingCountSpaceLabelMismatchState,
@@ -137,6 +138,21 @@ describe('spaceLabelDerivation', () => {
     expect(agg.livingAreaM2).toBe(0);
     expect(agg.restAreaM2).toBe(9);
     expect(agg.dwellingCounts.NumberOfHabitableRooms).toBe(1);
+  });
+
+  it('counts the TM59 room types: a studio, a home office and a communal corridor', () => {
+    const labels: SpaceLabel[] = [
+      { id: 's', name: 'Studio', zoneId: 'zp', storey: 0, room_type: 'studio', coordinates: rect(0, 0, 5, 5) },
+      { id: 'o', name: 'Home office', zoneId: 'zp', storey: 0, room_type: 'home_office', coordinates: rect(5, 0, 7, 2) },
+      { id: 'c', name: 'Corridor', zoneId: 'zp', storey: 0, room_type: 'communal', coordinates: rect(0, 5, 7, 7) },
+    ];
+    const agg = aggregateSpaceLabelsForZone(labels, 'zp');
+    expect(agg.totalFloorAreaM2).toBe(29);
+    expect(agg.livingAreaM2).toBe(25);
+    expect(agg.restAreaM2).toBe(4);
+    expect(agg.dwellingCounts).toMatchObject({ NumberOfBedrooms: 1, NumberOfHabitableRooms: 2,
+      NumberOfWetRooms: 1, NumberOfHotTappedRooms: 1 });
+    expect(labels.map(canSpaceLabelBeMarkedOpenToLivingRoom)).toEqual([false, true, false]);
   });
 
   it('excludes overlapping space-label area from floor total and rest-of-dwelling', () => {
