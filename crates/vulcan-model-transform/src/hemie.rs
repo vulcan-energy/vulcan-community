@@ -3482,6 +3482,87 @@ fn placed_windows<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
     }
 }
 
+/// Assumption pending DESNZ E7 (Vulcan's assumption registry lists it): the dwelling inputs the
+/// pinned Orchestrator hides from its schema and otherwise sets to 1 (building length and width,
+/// ground floor area, storeys in dwelling), which the EPC wrapper sizes the hot water pipework
+/// from. Length and width are the sides of the footprint's minimum rectangle and the ground floor
+/// area its lowest floor, as HEMIE's later Geometry derives them: on an existing building from
+/// each building part's first storey, on a new build from the drawn ground floors. Storeys come
+/// from the model. The host adds only a field the job input lacks, after validation. None when
+/// the drawing gives no footprint. If DESNZ exposes or derives them, delete this.
+pub(crate) fn hidden_dwelling_inputs(model: &Value, csv: &Rows) -> Option<Value> {
+    let (points, ground_floor_area) = if model["Zone"]["model_type"] == "hemie" {
+        let firsts: Vec<(f64, Vec<P>)> = model["Zone"]["building_parts"]
+            .as_object()?
+            .values()
+            .filter_map(|part| {
+                let base = part["base_height"].as_f64().unwrap_or(f64::MIN);
+                Some((
+                    base,
+                    linear_ring(part["storeys"][0]["floorplan"].as_str()?)?,
+                ))
+            })
+            .collect();
+        let lowest = firsts
+            .iter()
+            .map(|(base, _)| *base)
+            .fold(f64::MAX, f64::min);
+        let area = firsts
+            .iter()
+            .filter(|(base, _)| *base == lowest)
+            .map(|(_, ring)| signed_area(ring).abs())
+            .sum::<f64>();
+        (
+            firsts
+                .into_iter()
+                .flat_map(|(_, ring)| ring)
+                .collect::<Vec<P>>(),
+            area,
+        )
+    } else {
+        let grounds: Vec<Vec<P>> = elements(csv)
+            .into_iter()
+            .filter(|e| e.ty == "BuildingElementGround" && e.pts.len() >= 3)
+            .map(|e| e.pts)
+            .collect();
+        let area = grounds
+            .iter()
+            .map(|ring| signed_area(ring).abs())
+            .sum::<f64>();
+        (grounds.concat(), area)
+    };
+    if points.len() < 3 || ground_floor_area <= 0.0 {
+        return None;
+    }
+    let rect = min_rectangle(&points);
+    let (a, b) = (dist(rect[0], rect[1]), dist(rect[1], rect[2]));
+    let mut inputs = json!({
+        "building_length": a.max(b),
+        "building_width": a.min(b),
+        "ground_floor_area": ground_floor_area,
+    });
+    if let Some(storeys) = crate::epc_mappings::storeys(csv) {
+        inputs["General"] = json!({"storeys_in_dwelling": storeys});
+    }
+    Some(inputs)
+}
+
+/// The points of a `LINEARRING (x y, ...)` floorplan, without the closing point.
+fn linear_ring(wkt: &str) -> Option<Vec<P>> {
+    let inner = wkt.strip_prefix("LINEARRING (")?.strip_suffix(')')?;
+    let mut ring: Vec<P> = inner
+        .split(',')
+        .map(|p| {
+            let mut v = p.split_whitespace().map(str::parse::<f64>);
+            Some([v.next()?.ok()?, v.next()?.ok()?])
+        })
+        .collect::<Option<_>>()?;
+    if ring.len() > 1 && ring.first() == ring.last() {
+        ring.pop();
+    }
+    Some(ring)
+}
+
 /// Settings rows for the three leakage-estimate inputs the existing-building input cannot derive
 /// from the drawing (HEMIE's `GeometryInfiltrationProperties`).
 pub(crate) const OPEN_FIREPLACES: &str = "HEMIE_number_of_open_fireplaces";
@@ -4348,6 +4429,30 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .map(|w| w["construction"].as_str().unwrap())
             .collect();
         assert_eq!(names, ["w1", "w2"]);
+    }
+
+    #[test]
+    fn hidden_dwelling_inputs_take_the_footprints_minimum_rectangle_and_lowest_floor() {
+        let text = house(gable_roof());
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(&text)
+            .expect("csv");
+        let (existing, errors, _) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let expected =
+            json!({"building_length": 8.0, "building_width": 6.0, "ground_floor_area": 48.0});
+        // Existing: from the building parts' first storeys; new build: from the drawn ground floor.
+        assert_eq!(
+            hidden_dwelling_inputs(&existing, &rows),
+            Some(expected.clone())
+        );
+        assert_eq!(hidden_dwelling_inputs(&json!({}), &rows), Some(expected));
+        // No footprint: nothing, so the run keeps the Orchestrator's own values.
+        assert_eq!(hidden_dwelling_inputs(&json!({}), &Rows::new()), None);
+        assert_eq!(
+            linear_ring("LINEARRING (0 0, 2 0, 2 1, 0 0)"),
+            Some(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0]])
+        );
     }
 
     #[test]
