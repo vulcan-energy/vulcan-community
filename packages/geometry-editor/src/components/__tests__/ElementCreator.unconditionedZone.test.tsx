@@ -109,3 +109,27 @@ it('asks nothing about zones on an existing building', () => {
   renderSelected([wall({})], 'wall', { existing: true });
   expect(screen.queryByText('Unheated space from')).not.toBeInTheDocument();
 });
+
+it('fills a zone window in order, with its area from width × height and shading as rows, never JSON', async () => {
+  const store = renderSelected([garage({ method: 'Calculated', building_element: { Window: { type: 'BuildingElementZoneUnconditionedTransparent' } } })], 'garage');
+  expect(screen.getByRole('button', { name: 'Element type' })).toHaveTextContent('Unconditioned zone');
+  // Area (from width × height) first, then the fields as a user fills them, then shading.
+  const order = ['u_value', 'g_value', 'frame_area_fraction', 'orientation360', 'pitch', 'width', 'height', 'base_height'];
+  const keys = [...document.querySelectorAll('[data-field-key]')].map((n) => n.getAttribute('data-field-key'));
+  expect(keys.filter((key) => order.includes(key ?? ''))).toEqual(['u_value', 'g_value', 'frame_area_fraction', 'orientation360', 'pitch', 'width', 'height', 'base_height']);
+  expect(screen.getByText('Orientation')).toBeInTheDocument();
+  expect(screen.getByText('from width × height')).toBeInTheDocument();
+  const user = userEvent.setup();
+  const window = () => (store.getState().elementsById.garage.extra_json as any).ZoneUnconditioned.Garage.building_element.Window;
+  const field = (key: string) => within(document.querySelector<HTMLElement>(`[data-field-key="${key}"]`)!).getByRole('textbox');
+  await user.type(field('width'), '1.2');
+  await user.type(field('height'), '1.5');
+  await user.tab();
+  expect(window()).toMatchObject({ width: 1.2, height: 1.5, area: 1.8 });
+  await user.click(screen.getByRole('button', { name: 'Add shading' }));
+  expect(window().shading).toEqual([{ type: 'overhang' }]);
+  expect(document.querySelector('[data-field-key="depth"]')).not.toBeNull();
+  expect(document.body.textContent).not.toMatch(/\{"type"/);
+  await user.click(screen.getByRole('button', { name: 'Remove shading 1' }));
+  expect(window()).not.toHaveProperty('shading');
+});

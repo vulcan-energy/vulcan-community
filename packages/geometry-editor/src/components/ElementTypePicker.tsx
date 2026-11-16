@@ -15,6 +15,8 @@ import './ElementTypePicker.css';
 type ElementTypePickerProps = {
   value: ElementType;
   options: readonly ElementType[];
+  /** Shown on the trigger in place of the type's own name (a Systems row that is not a plant). */
+  valueLabel?: string;
   onChange: (type: ElementType) => void;
   disabled?: boolean;
   placeholder?: string;
@@ -43,6 +45,7 @@ export function ElementTypePicker({
   ariaLabel = 'Element type',
   className,
   triggerClassName,
+  valueLabel,
 }: ElementTypePickerProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -196,7 +199,7 @@ export function ElementTypePicker({
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={`${selectedOption.label}: ${selectedOption.subtitle}`}
+        title={valueLabel ?? `${selectedOption.label}: ${selectedOption.subtitle}`}
         onClick={() => {
           if (disabled) return;
           if (!open) setExpandedSectionId(selectedSection?.id ?? fallbackSectionId);
@@ -204,7 +207,7 @@ export function ElementTypePicker({
         }}
       >
         <span className="element-type-picker__trigger-label">
-          {selectedOption?.label || placeholder}
+          {valueLabel ?? (selectedOption?.label || placeholder)}
         </span>
       </button>
       {menu}

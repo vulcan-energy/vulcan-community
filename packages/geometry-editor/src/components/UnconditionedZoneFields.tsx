@@ -20,6 +20,8 @@ import { useGeometryStore } from '../stores/geometryStore';
 import { CompactSegmentedControl } from './WindowDetailControls';
 import { DirectAdvancedFields } from './DirectAdvancedFields';
 import { StandardDropdown } from './StandardDropdown';
+import { Readout, SourceNote } from './FieldSource';
+import { WINDOW_SHADING_TYPE_LABELS } from '../lib/windowOpenings';
 
 const NEW_ZONE = '\u0000new-zone';
 const OPAQUE = 'BuildingElementZoneUnconditionedOpaque';
@@ -130,14 +132,92 @@ export function UnheatedSpaceFrom({ element, commit, editElement }: {
   );
 }
 
-/** The schema form of one entry under `$defs`, without the `type` the editor fixes. */
-function formOf(root: unknown, def: string, extraRequired: readonly string[] = [], omit: readonly string[] = []): Record<string, unknown> {
+/**
+ * The schema form of one entry under `$defs`, without the `type` the editor fixes and the keys in
+ * `omit`; the keys in `order` come first, as a user fills them, and any others after.
+ */
+function formOf(root: unknown, def: string, extraRequired: readonly string[] = [], omit: readonly string[] = [], order: readonly string[] = []): Record<string, unknown> {
   const defs = readRecord(readRecord(root).$defs);
   const form = readRecord(defs[def]);
-  const properties = { ...readRecord(form.properties) };
+  const all = readRecord(form.properties);
+  const properties = Object.fromEntries([...order, ...Object.keys(all)].flatMap((key) => (key in all ? [[key, all[key]]] : [])));
   for (const key of ['type', ...omit]) delete properties[key];
   const required = [...(Array.isArray(form.required) ? form.required as string[] : []), ...extraRequired].filter((key) => key in properties);
   return { type: 'object', properties, required, $defs: defs };
+}
+
+// A window as a user fills it: its thermal values, then where it is, then its shading.
+const WINDOW_ORDER = ['u_value', 'g_value', 'frame_area_fraction', 'orientation360', 'pitch', 'width', 'height', 'base_height'];
+const OPAQUE_ORDER = ['area', 'u_value'];
+const OBSTACLE = 'obstacle';
+
+/** A zone window's area is its width × height, written with them (HEM takes all three). */
+function withWindowArea(next: Record<string, unknown>): Record<string, unknown> {
+  const { width, height } = next;
+  if (typeof width !== 'number' || typeof height !== 'number') return next;
+  return { ...next, area: Math.round(width * height * 1000) / 1000 };
+}
+
+const shadingLabel = (kind: string) => (kind === OBSTACLE ? WINDOW_SHADING_TYPE_LABELS.object : WINDOW_SHADING_TYPE_LABELS[kind as keyof typeof WINDOW_SHADING_TYPE_LABELS] ?? kind);
+
+/**
+ * The shading of a zone window (`shading`: overhangs, fins, reveals and obstacles), one row each,
+ * with the fields the schema gives that kind. None is the default.
+ */
+function ShadingRows({ value, onChange, root, config }: {
+  value: unknown;
+  onChange: (next: Record<string, unknown>[] | undefined) => void;
+  root: unknown;
+  config: Record<string, unknown>;
+}) {
+  const rows = Array.isArray(value) ? value.map(readRecord) : [];
+  const defs = readRecord(readRecord(root).$defs);
+  const kinds = [...((readRecord(defs.WindowShadingType).enum as string[] | undefined) ?? []), OBSTACLE];
+  const set = (next: Record<string, unknown>[]) => onChange(next.length ? next : undefined);
+  // Rows have no name: each is keyed by its kind and its count among that kind, which an edit keeps.
+  const seen: Record<string, number> = {};
+  const keys = rows.map((row) => {
+    const kind = String(row.type ?? '');
+    seen[kind] = (seen[kind] ?? 0) + 1;
+    return `${kind}-${seen[kind]}`;
+  });
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <div className="element-label">Shading</div>
+      {rows.map((row, index) => (
+        <div key={keys[index]} style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+              <StandardDropdown
+                aria-label={`Shading ${index + 1}`}
+                value={String(row.type ?? '')}
+                // Another kind keeps only the distance, which every kind takes.
+                onChange={(kind) => set(rows.map((r, i) => (i === index ? { type: kind, ...(r.distance !== undefined ? { distance: r.distance } : {}) } : r)))}
+                options={kinds.map((kind) => ({ value: kind, label: shadingLabel(kind) }))}
+                variant="ghost"
+                size="md"
+              />
+            </div>
+            <button type="button" className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action" aria-label={`Remove shading ${index + 1}`}
+              onClick={() => set(rows.filter((_, i) => i !== index))}>
+              Remove
+            </button>
+          </div>
+          <DirectAdvancedFields
+            schema={formOf(root, row.type === OBSTACLE ? 'WindowShadingObstacle' : 'WindowShadingObject')}
+            data={row}
+            config={config}
+            onDataChange={(next) => set(rows.map((r, i) => (i === index ? { ...next, type: row.type } : r)))}
+          />
+        </div>
+      ))}
+      <div>
+        <button type="button" className="btn editor-action-btn editor-action-btn--secondary" onClick={() => set([...rows, { type: kinds[0] ?? 'overhang' }])}>
+          Add shading
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -165,6 +245,7 @@ export function UnconditionedZoneFields({ row, commit }: {
     else delete z.building_element;
     write(z);
   };
+  const setPart = (part: string, next: Record<string, unknown>) => setEnvelope({ ...readRecord(zone.building_element), [part]: next });
   const addPart = (type: string, label: string) => {
     const taken = envelope.map(([key]) => key);
     setEnvelope({ ...readRecord(zone.building_element), [generateUniqueElementName(label, taken)]: { type } });
@@ -221,12 +302,36 @@ export function UnconditionedZoneFields({ row, commit }: {
                     Remove
                   </button>
                 </div>
+                {transparent && (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                      <span className="element-label">Area</span>
+                      <SourceNote>from width × height</SourceNote>
+                    </div>
+                    <Readout value={typeof p.area === 'number' ? p.area : null} unit="m²" label={`${part} area`} />
+                  </>
+                )}
                 <DirectAdvancedFields
-                  schema={formOf(root, transparent ? TRANSPARENT : OPAQUE, ['u_value'])}
+                  schema={transparent
+                    ? formOf(root, TRANSPARENT, ['u_value'], ['area', 'shading'], WINDOW_ORDER)
+                    : formOf(root, OPAQUE, ['u_value'], [], OPAQUE_ORDER)}
                   data={p}
                   config={config(transparent ? 'BuildingElementTransparent' : 'BuildingElementOpaque')}
-                  onDataChange={(next) => setEnvelope({ ...readRecord(zone.building_element), [part]: { ...next, type: p.type } })}
+                  onDataChange={(next) => setPart(part, transparent ? withWindowArea({ ...p, ...next }) : { ...next, type: p.type })}
                 />
+                {transparent && (
+                  <ShadingRows
+                    value={p.shading}
+                    root={root}
+                    config={config('BuildingElementTransparent')}
+                    onChange={(shading) => {
+                      const next = { ...p };
+                      if (shading) next.shading = shading;
+                      else delete next.shading;
+                      setPart(part, next);
+                    }}
+                  />
+                )}
               </div>
             );
           })}

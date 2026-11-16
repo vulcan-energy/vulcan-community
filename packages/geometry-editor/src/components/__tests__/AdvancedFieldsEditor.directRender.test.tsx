@@ -1109,7 +1109,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'position_intake | Position Intake | textbox | - | - | {"orientation360":0,"pitch":0,"mid_height_air_flow_path":1} | tip',
     'position_exhaust | Position Exhaust | textbox | - | - | {"orientation360":0,"pitch":0,"mid_height_air_flow_path":1} | tip',
     'mid_height_air_flow_path | Mid Height Air Flow Path | textbox | 0 | - | - | tip',
-    'orientation360 | Orientation 360 | textbox | 0 | 360 | - | tip',
+    'orientation360 | Orientation | textbox | 0 | 360 | - | tip',
     'pitch | Pitch | textbox | 0 | 180 | - | tip',
   ],
   'core/OnSiteGeneration [every subtype]': [
@@ -1339,7 +1339,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'design_outdoor_air_flow_rate | Design Outdoor Air Flow Rate | textbox | 0 | - | - | tip',
     'SFP_in_use_factor | SFP In-Use Factor | textbox | 1 | - | - | tip',
     'mid_height_air_flow_path | Mid Height Air Flow Path | textbox | 1 | 60 | - | tip',
-    'orientation360 | Orientation 360 | textbox | 0 | 360 | - | tip',
+    'orientation360 | Orientation | textbox | 0 | 360 | - | tip',
     'pitch | Pitch | textbox | 0 | 180 | - | tip',
   ],
   'fhs/OnSiteGeneration [every subtype]': [
@@ -1927,7 +1927,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         // NumberControl. These two are the compass/tilt fields the main element form
         // renders as proper bounded numbers elsewhere in the editor; only the Core
         // MechanicalVentilation Advanced Fields copies were free-text.
-        row('orientation360', 'Orientation 360', TEXT('0')),
+        row('orientation360', 'Orientation', TEXT('0')),
         row('pitch', 'Pitch', TEXT('0')),
       ],
     );

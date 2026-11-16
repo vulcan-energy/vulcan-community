@@ -972,6 +972,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'cm²',
   },
   'orientation360': {
+    label: 'Orientation',
     description: 'Orientation angle of the inclined surface, expressed as the geographical azimuth angle of the horizontal projection of the inclined surface normal (unit: degrees, range: 0-360, where 0°=North, 90°=East, 180°=South, 270°=West).',
     type: 'number',
     units: 'degrees',

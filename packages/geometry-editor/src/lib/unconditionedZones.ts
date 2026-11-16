@@ -53,7 +53,9 @@ export function unconditionedZoneIssues(zone: unknown, root: unknown): string[] 
     const p = readRecord(value);
     const form = readRecord(defs[String(p.type)]);
     // Calculated sums U-value × area over the envelope, so every part needs its U-value.
-    const required = [...(Array.isArray(form.required) ? form.required as string[] : []), 'u_value'];
+    // A window's area comes from its width and height, which are asked for themselves.
+    const required = [...(Array.isArray(form.required) ? form.required as string[] : []), 'u_value']
+      .filter((key) => !(key === 'area' && p.type === 'BuildingElementZoneUnconditionedTransparent'));
     return required.flatMap((key) => (key === 'type' || (p[key] !== undefined && p[key] !== null && p[key] !== '')
       ? []
       : [`Enter the ${resolveFieldLabelContent(key, readRecord(readRecord(form.properties)[key]).title)} of '${part}'.`]));
