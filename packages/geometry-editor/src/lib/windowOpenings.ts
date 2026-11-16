@@ -69,8 +69,11 @@ const legacyHeight = (entry: unknown): number | undefined =>
 export const isPhysicalPart = (entry: unknown): boolean =>
   isRecord(entry) && OPENING_FIELDS.some((key) => key in entry);
 
+/** A part's `_`-prefixed keys are host metadata (how it opens, say); the converter drops them. */
+const isPartMetadataKey = (key: string): boolean => key.startsWith('_');
+
 const hasOnlyPartFields = (entry: unknown): entry is Record<string, unknown> =>
-  isRecord(entry) && Object.keys(entry).every((key) => OPENING_FIELDS.includes(key as WindowOpeningField));
+  isRecord(entry) && Object.keys(entry).every((key) => OPENING_FIELDS.includes(key as WindowOpeningField) || isPartMetadataKey(key));
 
 function isConsistentLegacy(parts: unknown): parts is unknown[] {
   if (!Array.isArray(parts) || parts.length === 0) return false;
@@ -241,14 +244,18 @@ function buildSingleOpeningPatch(
   return patch;
 }
 
-/** The one opening left when a list goes down to one replaces the window's: a value it leaves blank is cleared. */
+/**
+ * The one opening left when a list goes down to one replaces the window's: a value it leaves blank is cleared.
+ * Its host metadata moves onto the window, where a single opening keeps it.
+ */
 export function buildRemainingOpeningPatch(
   row: WindowOpeningSource,
-  opening: WindowOpeningRow,
+  opening: WindowOpeningRow & Record<string, unknown>,
 ): WindowOpeningPatch {
   const patch: WindowOpeningPatch = {};
   for (const key of OPENING_FIELDS) patch[key] = opening[key] ?? '';
-  patch.extra_json = extraJsonWithHeight(row, opening.mid_height);
+  const metadata = Object.fromEntries(Object.entries(opening).filter(([key]) => isPartMetadataKey(key)));
+  patch.extra_json = { ...extraJsonWithHeight(row, opening.mid_height), ...metadata };
   return patch;
 }
 

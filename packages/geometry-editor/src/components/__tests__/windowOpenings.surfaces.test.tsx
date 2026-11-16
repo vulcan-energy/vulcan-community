@@ -368,6 +368,19 @@ describe('main-form window opening inputs', () => {
     expect(after(host, screen.getByText('Frame area fraction'))).toBe(true);
   });
 
+  it('shows the host part fields in each part row and saves them on that part', () => {
+    const hostParts = defineGeometryInspectorContributions({ openingPartFields: { render: ({ partIndex, onPatchPart }) => (
+      <button type="button" onClick={() => onPatchPart((current) => ({ ...current, _host_style: `style ${partIndex + 1}` }))}>
+        Host part {partIndex + 1}</button>) } });
+    const store = renderForm(windowElement({ window_part_list: [part(1.2), part(2)] }), canonicalGeometrySchemaPort, hostParts);
+    expect(after(screen.getByText('Opening 2'), screen.getByText('Host part 2'))).toBe(true);
+    expect(after(screen.getByText('Host part 1'), screen.getByText('Opening 2'))).toBe(true);
+    fireEvent.click(screen.getByText('Host part 2'));
+    expect(stored(store).extra_json).toMatchObject({ window_part_list: [part(1.2), { ...part(2), _host_style: 'style 2' }] });
+    expect(screen.getByLabelText('Mid height', { selector: '#window-opening-1-mid_height' }).closest('[data-host-field-key]'))
+      .toHaveAttribute('data-host-field-key', 'window_part_list.1.mid_height');
+  });
+
   it('asks for Security risk in plain words and saves the same boolean', () => {
     const store = renderForm(windowElement({ security_risk: false }));
     const select = screen.getByLabelText('Security risk');

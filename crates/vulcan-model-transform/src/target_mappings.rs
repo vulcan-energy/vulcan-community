@@ -465,7 +465,21 @@ fn map_window(
                 && p.get("free_area_height").is_some()
                 && p.get("max_window_open_area").is_some()
         }) {
-            element.insert("window_part_list".into(), Value::Array(parts.clone()));
+            // A part's UI metadata (how it opens, for overheating) is not a HEM input.
+            let parts = parts
+                .iter()
+                .map(|part| match part {
+                    Value::Object(fields) => Value::Object(
+                        fields
+                            .iter()
+                            .filter(|(key, _)| !crate::builder::is_ui_only_extra_json_key(key))
+                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .collect(),
+                    ),
+                    other => other.clone(),
+                })
+                .collect();
+            element.insert("window_part_list".into(), Value::Array(parts));
             return;
         }
         let midpoint = parts
@@ -1170,6 +1184,21 @@ mod tests {
         assert_eq!(
             v["window_part_list"],
             json!([{"free_area_height":1.0,"mid_height":2.2,"max_window_open_area":0.8}])
+        );
+    }
+    #[test]
+    fn physical_parts_drop_their_ui_metadata() {
+        let (v, e) = map(
+            json!({"Type":"Transparent","extra_json":{"window_part_list":[
+                {"free_area_height":0.5,"mid_height":1.2,"max_window_open_area":0.4,"_vulcan_overheating_opening_style":"side_hung"},
+                {"free_area_height":0.3,"mid_height":2.0,"max_window_open_area":0.2}]}}),
+            json!({"type":"BuildingElementTransparent"}),
+        );
+        assert!(e.is_empty(), "{e:?}");
+        assert_eq!(
+            v["window_part_list"],
+            json!([{"free_area_height":0.5,"mid_height":1.2,"max_window_open_area":0.4},
+                {"free_area_height":0.3,"mid_height":2.0,"max_window_open_area":0.2}])
         );
     }
     #[test]

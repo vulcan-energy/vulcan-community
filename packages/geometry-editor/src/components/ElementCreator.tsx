@@ -3251,6 +3251,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, [selection?.id, getElementById, selectedElementV]);
   const ElementFieldsRenderer = inspectorContributions.elementFields?.render;
   const OpeningFieldsRenderer = inspectorContributions.openingFields?.render;
+  const OpeningPartFieldsRenderer = inspectorContributions.openingPartFields?.render;
 
   const selectedDormerMetadata = getDormerBundleMetadata(selectedElement);
   const selectedIsDormerAnchor = isDormerAnchorElement(selectedElement);
@@ -4208,6 +4209,19 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         />
       ) : null,
       thermalValues: windowThermalValues,
+      renderOpeningPartFields: OpeningPartFieldsRenderer && selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent'
+        ? (partIndex: number) => (
+          <OpeningPartFieldsRenderer
+            element={selectedElement as unknown as Readonly<Record<string, unknown>>}
+            partIndex={partIndex}
+            onPatchPart={(update) => {
+              const extra = readExtraJsonRecord(getElementById(selection.id)?.extra_json);
+              const parts = Array.isArray(extra.window_part_list) ? extra.window_part_list : [];
+              commitExistingElementDraft({ extra_json: { ...extra, window_part_list: parts.map((part: unknown, index: number) =>
+                index === partIndex ? update({ ...readExtraJsonRecord(part) }) : part) } });
+            }}
+          />
+        ) : null,
       hemDatabaseProducts,
       existingBuilding,
       systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
