@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { GeometryWorkspaceResourcePort } from "../../../../geometry-editor-host/src/index";
@@ -9,17 +9,20 @@ import { GlobalSettingsModal } from "../../components/GlobalSettingsModal";
 import { GeometryEditorServicePortsProvider } from "../../../../geometry-editor-host/src/index";
 import { canonicalGeometrySchemaPort } from "../../lib/geometrySchemaPort";
 import { targetFieldAvailability } from "../../lib/schemaCache";
+import { globalSettingsFieldSection } from "../../lib/globalSettingsValidation";
 import {
   createGeometryStore,
   GeometryStoreProvider,
 } from "../../stores/geometryStore";
+
+const FHS_FILE = '{"Zone":{},"name":"Community defaults"}';
 
 function createResources(
   overrides: Partial<GeometryWorkspaceResourcePort> = {}
 ): GeometryWorkspaceResourcePort {
   return {
     availability: "available",
-    readText: vi.fn(async () => '{"name":"Community defaults"}'),
+    readText: vi.fn(async () => FHS_FILE),
     readFile: vi.fn(),
     writeText: vi.fn(),
     writeBytes: vi.fn(),
@@ -169,7 +172,7 @@ describe("GlobalSettingsModal border postcode", () => {
 });
 
 describe("GlobalSettingsModal", () => {
-  it("uses one public modal for defaults and every core global-values section", async () => {
+  it("uses one public modal for fabric and every core global-values section", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
     const resources = createResources();
@@ -185,7 +188,8 @@ describe("GlobalSettingsModal", () => {
     );
 
     expect(screen.getByText("Global Settings")).toBeInTheDocument();
-    await screen.findByText("input/defaults/defaults_template.json");
+    expect(screen.getByRole("tab", { name: "Fabric" })).toHaveAttribute("aria-selected", "true");
+    await screen.findAllByText("Standard template");
     expect(screen.queryByTitle("Edit")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
@@ -231,36 +235,28 @@ describe("GlobalSettingsModal", () => {
     expect(screen.queryByText(/Fallback heat loss/)).not.toBeInTheDocument();
   });
 
-  it("duplicates defaults through the injected workspace without a private editor", async () => {
+  it("saves the table as a fabric preset through the injected workspace, fabric only", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
     const writeText = vi.fn(async () => undefined);
-    const resources = createResources({
-      exists: vi.fn(async (path) => !path.endsWith("/copy.json")),
-      writeText,
-    });
-    vi.spyOn(window, "prompt").mockReturnValue("copy");
+    const resources = createResources({ exists: vi.fn(async () => false), writeText });
+    vi.spyOn(window, "prompt").mockReturnValue("Our spec");
 
     render(
       <GeometryStoreProvider store={store}>
-        <GlobalSettingsModal
-          isOpen
-          onClose={vi.fn()}
-          workspaceResourcePort={resources}
-        />
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={resources} />
       </GeometryStoreProvider>
     );
 
-    await screen.findByText("input/defaults/defaults_template.json");
-    await user.click(screen.getByTitle("Duplicate"));
-
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(
-        "input/defaults/copy.json",
-        '{"name":"Community defaults"}'
-      );
-    });
-    expect(store.getState().defaultsPath).toBe("input/defaults/copy.json");
+    await screen.findAllByText("Standard template");
+    await user.click(screen.getByRole("button", { name: "Save as a copy" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const [path, text] = writeText.mock.calls[0] as unknown as [string, string];
+    expect(path).toBe("input/fabric_presets/our_spec.json");
+    expect(JSON.parse(text)).toMatchObject({ name: "Our spec", family: "fhs" });
+    // The model's defaults file stays as it was.
+    expect(store.getState().defaultsPath).toBe("input/defaults/defaults_template.json");
+    expect(store.getState().fabricPreset?.name).toBe("Our spec");
   });
 
   it("opens at a focused field: its tab and section open and its control takes focus", async () => {
@@ -312,8 +308,7 @@ describe("GlobalSettingsModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("names a content-hash defaults file as this model's defaults and duplicates the real path", async () => {
-    const user = userEvent.setup();
+  it("names a content-hash defaults file as this model's defaults, in the defaults list of a host that pins no target", async () => {
     const hash = "0123456789abcdef".repeat(4);
     const hashPath = `input/defaults/${hash}.json`;
     const writeText = vi.fn(async () => undefined);
@@ -329,7 +324,6 @@ describe("GlobalSettingsModal", () => {
           : []
       ),
     });
-    vi.spyOn(window, "prompt").mockReturnValue("copy");
     const store = createGeometryStore();
     store.getState().setDefaultsPath(hashPath);
 
@@ -339,16 +333,12 @@ describe("GlobalSettingsModal", () => {
       </GeometryStoreProvider>
     );
 
-    const label = await screen.findByText(/This model's defaults/);
-    expect(label).toHaveTextContent(/^This model's defaults$/);
-    expect(screen.queryByText(hashPath)).not.toBeInTheDocument();
-    expect(screen.getByText("input/defaults/defaults_template.json")).toBeInTheDocument();
+    const labels = await screen.findAllByText(/This model's defaults/);
+    for (const label of labels) expect(label).toHaveTextContent(/^This model's defaults$/);
+    expect(screen.queryByText(new RegExp(hash.slice(0, 8)))).not.toBeInTheDocument();
+    expect(await screen.findByText("Standard template")).toBeInTheDocument();
 
-    await user.click(screen.getAllByTitle("Duplicate")[0]!);
-    await waitFor(() => {
-      expect(resources.readText).toHaveBeenCalledWith(hashPath);
-      expect(writeText).toHaveBeenCalledWith("input/defaults/copy.json", '{"name":"Community defaults"}');
-    });
+    expect(screen.getByText("Defaults file")).toBeInTheDocument();
   });
 
   it("keeps global values usable when the Community host has no implicit defaults file", async () => {
@@ -445,4 +435,125 @@ describe("GlobalSettingsModal", () => {
     await user.click(screen.getByRole("tab", { name: /Global values/i }));
     expect(screen.getByText("Dwelling details")).toBeInTheDocument();
   });
+});
+
+describe("GlobalSettingsModal Fabric tab", () => {
+  const EPC_FILE = '{"Zone":{},"IsExistingBuilding":false}';
+  const PART_L = '{"Zone":{"zone 1":{}}}';
+  const files: Record<string, string> = {
+    "input/defaults/defaults_template.json": FHS_FILE,
+    "input/defaults/defaults_template_epc.json": EPC_FILE,
+    "input/defaults/defaults_partyL2021.json": PART_L,
+    "input/defaults/overheating_engineered_empty.json": "{}",
+    "input/defaults/our_spec.json": FHS_FILE,
+  };
+  const resources = () => createResources({
+    readText: vi.fn(async (path: string) => files[path] ?? FHS_FILE),
+    list: vi.fn(async (path) => (path === "input/defaults"
+      ? Object.keys(files).map((file) => ({ name: file.split("/").pop()!, kind: "file" as const }))
+      : [])),
+  });
+  // A host that pins each target to its own defaults, as the Vulcan app does.
+  const pinnedStore = () => {
+    const store = createGeometryStore({
+      defaultsPathForTarget: (id) => (id === "epc" ? "input/defaults/defaults_template_epc.json" : "input/defaults/defaults_template.json"),
+    });
+    store.getState().setTargetBundleId("fhs");
+    return store;
+  };
+  const view = (store: ReturnType<typeof createGeometryStore>, rules: Record<string, unknown>, props: Record<string, unknown> = {}) => {
+    const port = { ...canonicalGeometrySchemaPort, targetRules: () => rules };
+    const ui = (nextRules = rules) => (
+      <GeometryEditorServicePortsProvider schemaPort={{ ...port, targetRules: () => nextRules }} workspaceResourcePort={createResources()}>
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={resources()} fabricSection={<div>Bands table</div>} {...props} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    const result = render(ui());
+    return { ...result, rerenderWith: (nextRules: Record<string, unknown>) => result.rerender(ui(nextRules)) };
+  };
+
+  it("offers fabric presets on a pinned target, never a defaults file of its own", async () => {
+    const user = userEvent.setup();
+    const store = pinnedStore();
+    view(store, {});
+    const sources = await screen.findByRole("group", { name: "Fabric values from" });
+    await waitFor(() => expect(sources).toHaveTextContent("Standard templatebuilt-inPart L 2021built-inHEM case studybuilt-in"));
+    expect(screen.queryByText("Defaults file")).not.toBeInTheDocument();
+    expect(screen.queryByText(/does not run/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Part L 2021/ }));
+    expect(store.getState().fabricPreset?.name).toBe("Part L 2021");
+    expect(store.getState().defaultsPath).toBe("input/defaults/defaults_template.json");
+  });
+
+  it("names a model's file for another target plainly, with the way back to the target's own", async () => {
+    const user = userEvent.setup();
+    const store = pinnedStore();
+    store.getState().setDefaultsPath("input/defaults/defaults_template_epc.json");
+    view(store, {});
+    expect(await screen.findByRole("alert")).toHaveTextContent('The defaults file "EPC template" is for another target, so the model does not run.');
+    await user.click(screen.getByRole("button", { name: "Use the Standard template" }));
+    expect(store.getState().defaultsPath).toBe("input/defaults/defaults_template.json");
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("shows an existing building's bands in Fabric, not Global values, with no file list", async () => {
+    const user = userEvent.setup();
+    const store = pinnedStore();
+    store.getState().setTargetBundleId("epc");
+    view(store, { constructionBands: true, requiredMetadataRows: ["IsExistingBuilding"] });
+    expect(screen.getByText("Bands table")).toBeInTheDocument();
+    expect(screen.queryByText("Fabric values from")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Global values/i }));
+    expect(screen.queryByText("Bands table")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a file for another target", "input/defaults/defaults_template.json", 'The defaults file "Standard template" is for another target'],
+    ["a missing file", "input/defaults/gone.json", 'The defaults file "Gone" is missing.'],
+  ])("offers the EPC template to an existing building with %s", async (_name, path, message) => {
+    const user = userEvent.setup();
+    const store = pinnedStore();
+    store.getState().setTargetBundleId("epc");
+    store.getState().setDefaultsPath(path);
+    files["input/defaults/gone.json"] = undefined as never;
+    const r = resources();
+    r.exists = vi.fn(async (p: string) => p !== "input/defaults/gone.json");
+    view(store, { constructionBands: true, requiredMetadataRows: ["IsExistingBuilding"] }, { workspaceResourcePort: r });
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    await user.click(screen.getByRole("button", { name: "Use the EPC template" }));
+    expect(store.getState().defaultsPath).toBe("input/defaults/defaults_template_epc.json");
+  });
+
+  it("follows a target switch with the modal open: EPC new build lists EPC files, existing shows its bands", async () => {
+    const store = pinnedStore();
+    const { rerenderWith } = view(store, {});
+    expect(await screen.findByRole("button", { name: /Standard template/ })).toBeInTheDocument();
+    act(() => store.getState().setTargetBundleId("epc"));
+    rerenderWith({ requiredMetadataRows: ["IsExistingBuilding"] });
+    // Standard defaults follow the target; HEM:EPC new build has no built-in preset.
+    expect(await screen.findByRole("button", { name: /EPC template/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Part L 2021/ })).not.toBeInTheDocument();
+    rerenderWith({ constructionBands: true, requiredMetadataRows: ["IsExistingBuilding"] });
+    expect(screen.getByText("Bands table")).toBeInTheDocument();
+    rerenderWith({ requiredMetadataRows: ["IsExistingBuilding"] });
+    expect(screen.queryByText("Bands table")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /EPC template/ })).toBeInTheDocument();
+  });
+
+  it.each(["HEMIE_age_band", "HEMIE_construction_external_wall", "DefaultAssemblyWall"])("opens the Fabric tab for %s", async (key) => {
+    const store = pinnedStore();
+    const modal = (focusFieldKey: string) => (
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen focusFieldKey={focusFieldKey} onClose={vi.fn()} workspaceResourcePort={resources()} />
+      </GeometryStoreProvider>
+    );
+    const { rerender } = render(modal("Ventilation_shield_class"));
+    expect(screen.getByRole("tab", { name: /Global values/i })).toHaveAttribute("aria-selected", "true");
+    rerender(modal(key));
+    expect(screen.getByRole("tab", { name: "Fabric" })).toHaveAttribute("aria-selected", "true");
+    expect(globalSettingsFieldSection(key)).toBe("fabric");
+  });
+
 });

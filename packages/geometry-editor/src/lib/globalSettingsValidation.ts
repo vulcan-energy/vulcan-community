@@ -397,7 +397,7 @@ export function collectGlobalSettingsWarnings(args: {
 }
 
 export type GlobalSettingsFieldSection =
-  | "defaults"
+  | "fabric"
   | "target"
   | "dwelling"
   | "airTightness"
@@ -419,7 +419,8 @@ const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
 
 /** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
 export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSection | null {
-  if (key.startsWith("DefaultAssembly")) return "defaults";
+  // The fabric source, the build-ups for new elements, and an existing building's age band and constructions.
+  if (key === "DefaultsPath" || key.startsWith("DefaultAssembly") || key === "HEMIE_age_band" || key.startsWith("HEMIE_construction_")) return "fabric";
   if (key === "TargetBundleId" || key === "IsExistingBuilding" || key.startsWith("HEMIE_")) return "target";
   if (key.startsWith("AirPermeability_test_")) return "airTightness";
   if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";

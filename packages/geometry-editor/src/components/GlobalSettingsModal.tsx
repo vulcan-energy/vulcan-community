@@ -23,7 +23,6 @@ import {
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
 import { targetFieldAvailability } from "../lib/schemaCache";
 import { HEMIE_NATION, NATIONS, postcodeBorderArea, postcodeUnrecognised } from "../lib/hemieFabric";
-import type { AssemblyExample } from "../lib/assemblyTypes";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
@@ -62,6 +61,8 @@ import {
   useGeometryStore,
 } from "../stores/geometryStore";
 import { DerivedNumberField } from "./DerivedNumberField";
+import { FabricTable } from "./FabricTable";
+import { FabricTabCloseContext } from "../lib/fabricPreset";
 import { ModalHeader } from "./ModalHeader";
 import { ResetFieldButton } from "./ResetFieldButton";
 import { StandardDropdown } from "./StandardDropdown";
@@ -98,9 +99,9 @@ export type GlobalSettingsModalProps = Readonly<{
   ) => void;
   evidenceSection?: ReactNode;
   calculationTargetSection?: ReactNode;
-  /** Host groups at the end of the Defaults tab, such as fabric and emitter defaults. */
+  /** Host groups at the end of the Fabric tab, such as emitter defaults. */
   defaultsSection?: ReactNode;
-  /** The existing-building fabric defaults, shown directly after the Existing building row. */
+  /** An existing building's fabric (age band and constructions): the Fabric tab's body under construction bands. */
   fabricSection?: ReactNode;
   renderEvidencePill?: (fieldKey: string, label: string) => ReactNode;
   externalDetailProfileSection?: ReactNode;
@@ -161,15 +162,38 @@ function contentHashDefaultsShortHash(path: string): string | undefined {
   return CONTENT_HASH_DEFAULTS_PATH.exec(path)?.[1]?.slice(0, 8);
 }
 
-/** An EPC defaults file as words: "input/defaults/defaults_template_epc.json" -> "Defaults template EPC". */
-const EPC_FILE_PATTERN = /epc/i;
-function epcDefaultsFileLabel(path: string): string {
-  const words = (path.split('/').pop() ?? path).replace(/\.json$/, '').replace(/_/g, ' ').replace(/\bepc\b/gi, 'EPC');
+/** The files the sample library ships, by the name people know them by. */
+const BUILT_IN_FABRIC_FILES: Readonly<Record<string, string>> = {
+  "input/defaults/defaults_template.json": "Standard template",
+  "input/defaults/defaults_template_epc.json": "EPC template",
+  "input/defaults/defaults_partyL2021.json": "Part L 2021",
+  "input/defaults/defaults_targetHEMCaseStudy.json": "HEM case study",
+};
+
+/** A defaults file as words, never its path or content hash: "my_spec.json" -> "My spec". */
+function defaultsFileLabel(path: string): string {
+  if (BUILT_IN_FABRIC_FILES[path]) return BUILT_IN_FABRIC_FILES[path];
+  if (contentHashDefaultsShortHash(path)) return "This model's defaults";
+  const words = (path.split("/").pop() ?? path).replace(/\.json$/, "").replace(/_/g, " ").replace(/\bepc\b/gi, "EPC");
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function defaultsFileLabel(path: string): string {
-  return contentHashDefaultsShortHash(path) ? "This model's defaults" : path;
+function defaultsFileTag(path: string): string {
+  if (BUILT_IN_FABRIC_FILES[path]) return "built-in";
+  return contentHashDefaultsShortHash(path) ? "shared model" : "your copy";
+}
+
+/** What a defaults file is for, from its content: an HEM:EPC file states IsExistingBuilding. */
+type DefaultsFileFacts = Readonly<{ family?: "epc" | "fhs"; runsOnTarget?: boolean }>;
+function defaultsFileFamily(text: string): DefaultsFileFacts["family"] {
+  try {
+    const json: unknown = JSON.parse(text);
+    if (!json || typeof json !== "object" || Array.isArray(json)) return undefined;
+    if ("IsExistingBuilding" in json) return "epc";
+    return "Zone" in json ? "fhs" : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 
@@ -187,22 +211,6 @@ function DefaultsEditIcon() {
     >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-    </svg>
-  );
-}
-
-function DefaultsDuplicateIcon() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
   );
 }
@@ -584,10 +592,6 @@ export function GlobalSettingsModal({
     spaceLabelIds,
     spaceLabelsById,
     defaultsJson,
-    creationDefaultAssemblyIds,
-    bundledAssemblyLibrary,
-    bundledAssemblyLibraryLoading,
-    bundledAssemblyLibraryError,
   } = useGeometryStore(
     useShallow((state) => ({
       zones: state.zones,
@@ -603,13 +607,10 @@ export function GlobalSettingsModal({
       spaceLabelIds: state.spaceLabelIds,
       spaceLabelsById: state.spaceLabelsById,
       defaultsJson: state.defaultsLoading ? undefined : state.defaultsJson,
-      creationDefaultAssemblyIds: state.creationDefaultAssemblyIds,
-      bundledAssemblyLibrary: state.bundledAssemblyLibrary,
-      bundledAssemblyLibraryLoading: state.bundledAssemblyLibraryLoading,
-      bundledAssemblyLibraryError: state.bundledAssemblyLibraryError,
     }))
   );
   const setDefaultsPath = useGeometryStore((state) => state.setDefaultsPath);
+  const pinnedDefaultsPath = useGeometryStore((state) => state.pinnedDefaultsPath(state.targetBundleId));
   const setPropertyPostcode = useGeometryStore(
     (state) => state.setPropertyPostcode
   );
@@ -618,9 +619,6 @@ export function GlobalSettingsModal({
   );
   const setComplianceSettings = useGeometryStore(
     (state) => state.setComplianceSettings
-  );
-  const setCreationDefaultAssemblyIds = useGeometryStore(
-    (state) => state.setCreationDefaultAssemblyIds
   );
   // Under construction bands the host's fabric defaults replace the default assemblies.
   const { constructionBands, hemDatabaseProducts } = targetRules(schemaPort, complianceSettings);
@@ -671,13 +669,15 @@ export function GlobalSettingsModal({
     return presentation.unit.status === "resolved" ? presentation.unit.display : undefined;
   };
 
-  const [activeTab, setActiveTab] = useState<"defaults" | "settings">(
-    "defaults"
+  const [activeTab, setActiveTab] = useState<"fabric" | "settings">(
+    "fabric"
   );
-  const [availableDefaults, setAvailableDefaults] = useState<string[]>([]);
-  const [compatibilityMap, setCompatibilityMap] = useState(
-    new Map<string, GlobalSettingsDefaultsCompatibility>()
-  );
+  const [defaultsList, setDefaultsList] = useState<{
+    available: string[];
+    compatibility: Map<string, GlobalSettingsDefaultsCompatibility>;
+    facts: Map<string, DefaultsFileFacts>;
+  }>({ available: [], compatibility: new Map(), facts: new Map() });
+  const { available: availableDefaults, compatibility: compatibilityMap, facts: defaultsFacts } = defaultsList;
   const [complianceSettingsExpanded, setComplianceSettingsExpanded] =
     useState(false);
   const [thermalBridgingExpanded, setThermalBridgingExpanded] = useState(false);
@@ -697,10 +697,6 @@ export function GlobalSettingsModal({
   const [selectedExists, setSelectedExists] = useKeyedState<boolean | null>(
     `${effectiveDefaultsPath}\0${defaultsCheckReady ? "ready" : "unavailable"}`,
     null
-  );
-  const [defaultsSearchQuery, setDefaultsSearchQuery] = useKeyedState(
-    isOpen ? "open" : "closed",
-    ""
   );
   const primaryZoneForSpaceLabels = useMemo(
     () => zones.find((zone) => !zone.isPlaceholder)?.id,
@@ -861,49 +857,13 @@ export function GlobalSettingsModal({
   const isVentBaseHeightManualOverride =
     complianceSettings.Ventilation_ventilation_zone_base_height !== undefined;
 
-  const assemblyOptions = useCallback(
-    (elementType: AssemblyExample["elementType"], current: string) => {
-      const base =
-        bundledAssemblyLibrary?.examples
-          .filter((example) => example.elementType === elementType)
-          .map((example) => ({
-            value: example.id,
-            label: example.name || example.id,
-          })) ?? [];
-      const options = [{ value: "", label: "None" }, ...base];
-      if (current && !options.some((option) => option.value === current)) {
-        options.push({
-          value: current,
-          label: `${current} (missing from library)`,
-        });
-      }
-      return options;
-    },
-    [bundledAssemblyLibrary]
-  );
-  const defaultAssemblyWallOptions = useMemo(
-    () => assemblyOptions("wall", creationDefaultAssemblyIds.wall ?? ""),
-    [assemblyOptions, creationDefaultAssemblyIds.wall]
-  );
-  const defaultAssemblyRoofOptions = useMemo(
-    () => assemblyOptions("roof", creationDefaultAssemblyIds.roof ?? ""),
-    [assemblyOptions, creationDefaultAssemblyIds.roof]
-  );
-  const defaultAssemblyGroundOptions = useMemo(
-    () =>
-      assemblyOptions(
-        "ground_floor",
-        creationDefaultAssemblyIds.ground_floor ?? ""
-      ),
-    [assemblyOptions, creationDefaultAssemblyIds.ground_floor]
-  );
-
   const loadDefaultsList = useCallback(async (): Promise<{
     available: string[];
     compatibility: Map<string, GlobalSettingsDefaultsCompatibility>;
+    facts: Map<string, DefaultsFileFacts>;
   }> => {
     if (!defaultsCheckReady) {
-      return { available: [], compatibility: new Map() };
+      return { available: [], compatibility: new Map(), facts: new Map() };
     }
     try {
       const fromDefaultsDirectory = await listJsonFilesRecursively(
@@ -939,66 +899,56 @@ export function GlobalSettingsModal({
         string,
         GlobalSettingsDefaultsCompatibility
       >();
-      if (inspectDefaultsCompatibility) {
-        for (const path of sorted) {
-          try {
-            nextCompatibility.set(
-              path,
-              inspectDefaultsCompatibility(
-                await workspaceResourcePort.readText(path)
-              )
-            );
-          } catch {
+      const facts = new Map<string, DefaultsFileFacts>();
+      // A pinned target runs only its own defaults, byte for byte (target preparation checks the hash).
+      const pinnedText = pinnedDefaultsPath
+        ? await workspaceResourcePort.readText(pinnedDefaultsPath).catch(() => undefined)
+        : undefined;
+      for (const path of sorted) {
+        let text: string;
+        try {
+          text = await workspaceResourcePort.readText(path);
+        } catch {
+          if (inspectDefaultsCompatibility) {
             nextCompatibility.set(path, {
               warnings: ["File cannot be read"],
               foundTypes: [],
               hasRequiredRootSections: false,
             });
           }
+          continue;
         }
+        if (inspectDefaultsCompatibility) nextCompatibility.set(path, inspectDefaultsCompatibility(text));
+        facts.set(path, {
+          family: defaultsFileFamily(text),
+          runsOnTarget: pinnedText === undefined ? undefined : text === pinnedText,
+        });
       }
-      return { available: sorted, compatibility: nextCompatibility };
+      return { available: sorted, compatibility: nextCompatibility, facts };
     } catch (error) {
       console.warn("[GlobalSettingsModal] refresh defaults failed", error);
-      return { available: [], compatibility: new Map() };
+      return { available: [], compatibility: new Map(), facts: new Map() };
     }
   }, [
     defaultsCheckReady,
     effectiveDefaultsPath,
     fallbackDefaultsPath,
     inspectDefaultsCompatibility,
+    pinnedDefaultsPath,
     workspaceResourcePort,
   ]);
 
-  const refreshDefaultsList = useCallback(async () => {
-    const next = await loadDefaultsList();
-    setAvailableDefaults(next.available);
-    setCompatibilityMap(next.compatibility);
-  }, [loadDefaultsList]);
-
+  // The target's fabric files: an EPC target lists HEM:EPC files, any other the FHS ones. Files for
+  // another target, and files with no model in them, are left out; the file in use always shows, first.
   const defaultsListForDisplay = useMemo(() => {
-    const query = defaultsSearchQuery.toLowerCase().trim();
     const effective = (selectedDefaults || effectiveDefaultsPath).trim();
-    // An EPC model lists only EPC defaults: the file in use, shared-model copies and EPC templates.
-    let filtered = availableDefaults.filter((path) =>
-      `${path} ${defaultsFileLabel(path)}`.toLowerCase().includes(query)
-      && (!epcTarget || path === effective || !!contentHashDefaultsShortHash(path) || EPC_FILE_PATTERN.test(path))
-    );
-    if (
-      effective &&
-      !filtered.includes(effective) &&
-      (!query || effective.toLowerCase().includes(query))
-    ) {
-      filtered = [effective, ...filtered];
-    }
-    if (effective && filtered.includes(effective)) {
-      return [effective, ...filtered.filter((path) => path !== effective)];
-    }
-    return filtered;
+    const family = epcTarget ? "epc" : "fhs";
+    const filtered = availableDefaults.filter((path) => path !== effective && defaultsFacts.get(path)?.family === family);
+    return effective ? [effective, ...filtered] : filtered;
   }, [
     availableDefaults,
+    defaultsFacts,
     effectiveDefaultsPath,
-    defaultsSearchQuery,
     selectedDefaults,
     epcTarget,
   ]);
@@ -1030,10 +980,7 @@ export function GlobalSettingsModal({
     if (!isOpen) return;
     let cancelled = false;
     void loadDefaultsList().then((next) => {
-      if (!cancelled) {
-        setAvailableDefaults(next.available);
-        setCompatibilityMap(next.compatibility);
-      }
+      if (!cancelled) setDefaultsList(next);
     });
     return () => {
       cancelled = true;
@@ -1060,6 +1007,19 @@ export function GlobalSettingsModal({
       ],
     };
   }, [effectiveDefaultsPath, selectedDefaults, selectedExists]);
+
+  // The defaults file a model cannot run with, in words, with the way back to the target's own file.
+  const defaultsFileProblem = !defaultsCheckReady
+    ? undefined
+    : !effectiveDefaultsPath
+      ? "This model has no defaults file."
+      : selectedExists === false
+        ? `The defaults file "${defaultsFileLabel(effectiveDefaultsPath)}" is missing.`
+        : defaultsFacts.get(effectiveDefaultsPath)?.runsOnTarget === false
+          ? defaultsFacts.get(effectiveDefaultsPath)?.family === (epcTarget ? "epc" : "fhs")
+            ? `The defaults file "${defaultsFileLabel(effectiveDefaultsPath)}" differs from the one this HEM version runs, so the model does not run.`
+            : `The defaults file "${defaultsFileLabel(effectiveDefaultsPath)}" is for another target, so the model does not run.`
+          : undefined;
 
   const fhsComplianceRequiredIssues = useMemo(() => {
     const issues: string[] = [];
@@ -1229,7 +1189,7 @@ export function GlobalSettingsModal({
     setFocusRequestOpened(true);
     const section = globalSettingsFieldSection(focusRequest);
     if (section) {
-      setActiveTab(section === "defaults" ? "defaults" : "settings");
+      setActiveTab(section === "fabric" ? "fabric" : "settings");
       if (section === "dwelling") setComplianceSettingsExpanded(true);
       if (section === "airTightness") setAirTightnessExpanded(true);
       if (section === "ventilation") setVentilationEnvExpanded(true);
@@ -1440,8 +1400,8 @@ export function GlobalSettingsModal({
             <button
               type="button"
               role="tab"
-              aria-selected={activeTab === "defaults"}
-              onClick={() => setActiveTab("defaults")}
+              aria-selected={activeTab === "fabric"}
+              onClick={() => setActiveTab("fabric")}
               style={{
                 flex: "1 1 0",
                 minWidth: 0,
@@ -1453,11 +1413,11 @@ export function GlobalSettingsModal({
                 border: "none",
                 background: "transparent",
                 borderBottom:
-                  activeTab === "defaults"
+                  activeTab === "fabric"
                     ? "2px solid var(--accent-primary)"
                     : "2px solid transparent",
                 color:
-                  activeTab === "defaults"
+                  activeTab === "fabric"
                     ? "var(--text-primary)"
                     : "var(--text-secondary)",
                 fontWeight: 500,
@@ -1469,7 +1429,7 @@ export function GlobalSettingsModal({
                   "color var(--transition-normal), border-color var(--transition-normal)",
               }}
             >
-              <span>Defaults</span>
+              <span>Fabric</span>
               <span
                 aria-hidden
                 style={{
@@ -1558,360 +1518,163 @@ export function GlobalSettingsModal({
             alignItems: "stretch",
           }}
         >
-          {/* Defaults tab: merge targets + default assemblies */}
-          {activeTab === "defaults" && (
-            <>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-subtle)",
-                  fontWeight: 500,
-                  padding: "4px 0 0",
-                }}
-              >
-                Pick a defaults file
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.45,
-                  padding: "0 0 2px",
-                }}
-              >
-                What you draw is the building shape. The defaults file supplies
-                the other details the model needs. The file in use is
-                highlighted at the top.
-              </div>
-
-              {/* Search input */}
-              <StandardInput
-                type="text"
-                value={defaultsSearchQuery}
-                onChange={(e) => setDefaultsSearchQuery(e.target.value)}
-                placeholder="Search default files..."
-                variant="ghost"
-                size="md"
-              />
-
-              <div
-                role="listbox"
-                aria-label="Default JSON files in workspace"
-                style={{
-                  minHeight: 100,
-                  maxHeight: 168,
-                  flexShrink: 0,
-                  overflow: "auto",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: 4,
-                  background: "var(--bg-secondary)",
-                }}
-              >
-                {!defaultsCheckReady ? (
+          {/* Fabric tab: what an element takes when it states no fabric of its own. */}
+          {activeTab === "fabric" && (
+            <FabricTabCloseContext value={onClose}>
+              {defaultsFileProblem ? (
+                <div
+                  role="alert"
+                  data-field-key="DefaultsPath"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    padding: "8px 10px",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: 4,
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                    color: "var(--error-text)",
+                  }}
+                >
+                  <span style={{ flex: "1 1 220px" }}>{defaultsFileProblem}</span>
+                  {pinnedDefaultsPath && pinnedDefaultsPath !== effectiveDefaultsPath ? (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-small"
+                      onClick={() => {
+                        setSelectedDefaults(pinnedDefaultsPath);
+                        setDefaultsPath(pinnedDefaultsPath);
+                      }}
+                    >
+                      Use the {defaultsFileLabel(pinnedDefaultsPath)}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {constructionBands ? (
+                // An existing building's fabric is its age band and constructions; its defaults file has none.
+                fabricSection
+              ) : (
+                <>
+                  {/* A host that pins no target lets the model pick its defaults file; a pinned target runs only its own. */}
+                  {pinnedDefaultsPath ? null : (
+                  <>
                   <div
                     style={{
-                      padding: 8,
                       fontSize: 12,
                       color: "var(--text-subtle)",
+                      fontWeight: 500,
+                      padding: "4px 0 0",
                     }}
                   >
-                    Use Files to choose or reconnect a workspace folder and list
-                    default JSON files.
+                    Defaults file
                   </div>
-                ) : defaultsListForDisplay.length === 0 ? (
                   <div
+                    role="listbox"
+                    aria-label="Defaults files"
                     style={{
-                      padding: 8,
-                      fontSize: 12,
-                      color: "var(--text-subtle)",
+                      maxHeight: 168,
+                      flexShrink: 0,
+                      overflow: "auto",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: 4,
+                      background: "var(--bg-secondary)",
                     }}
                   >
-                    {defaultsSearchQuery.trim()
-                      ? "No files match your search"
-                      : "No JSON files found under input/defaults/"}
-                  </div>
-                ) : (
-                  defaultsListForDisplay.map((p) => {
-                    const selected = p === selectedDefaults;
-                    const shortHash = contentHashDefaultsShortHash(p);
-                    const compat = compatibilityMap.get(p);
-                    const hasWarnings = !!compat?.warnings?.length;
-                    return (
-                      <div
-                        key={p}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          padding: 10,
-                          cursor: "pointer",
-                          background: selected
-                            ? "var(--row-highlight-bg)"
-                            : "transparent",
-                          borderBottom: "1px solid var(--border-subtle)",
-                          boxShadow: selected
-                            ? "inset 3px 0 0 var(--row-highlight-border)"
-                            : "none",
-                          minWidth: 0,
-                        }}
-                        onClick={async () => {
-                          setSelectedDefaults(p);
-                          const ok = await workspaceResourcePort
-                            .exists(p)
-                            .catch(() => false);
-                          setSelectedExists(!!ok);
-                          if (ok) {
-                            setDefaultsPath(p);
-                            onClose();
-                          }
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            minWidth: 0,
-                            overflow: "hidden",
-                            flex: "1 1 0",
-                          }}
-                        >
+                    {!defaultsCheckReady ? (
+                      <div style={{ padding: 8, fontSize: 12, color: "var(--text-subtle)" }}>
+                        Use Files to choose or reconnect a workspace folder and list
+                        default JSON files.
+                      </div>
+                    ) : defaultsListForDisplay.length === 0 ? (
+                      <div style={{ padding: 8, fontSize: 12, color: "var(--text-subtle)" }}>
+                        No JSON files found under input/defaults/
+                      </div>
+                    ) : (
+                      defaultsListForDisplay.map((p) => {
+                        const selected = p === selectedDefaults;
+                        const compat = compatibilityMap.get(p);
+                        const hasWarnings = !!compat?.warnings?.length;
+                        return (
                           <div
+                            key={p}
+                            data-fabric-file={p}
+                            title={p}
                             style={{
-                              width: 10,
-                              height: 10,
-                              borderRadius: 9999,
-                              background: selected
-                                ? "var(--accent-primary)"
-                                : "transparent",
-                              border: "1px solid var(--accent-secondary)",
-                              flexShrink: 0,
-                            }}
-                          />
-                          <span
-                            title={shortHash || epcTarget ? p : undefined}
-                            style={{
-                              fontWeight: 600,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              flex: "1 1 0",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 10,
+                              padding: "8px 10px",
+                              cursor: "pointer",
+                              background: selected ? "var(--row-highlight-bg)" : "transparent",
+                              borderBottom: "1px solid var(--border-subtle)",
+                              boxShadow: selected ? "inset 3px 0 0 var(--row-highlight-border)" : "none",
                               minWidth: 0,
                             }}
-                          >
-                            {shortHash ? (
-                              defaultsFileLabel(p)
-                            ) : epcTarget ? (
-                              epcDefaultsFileLabel(p)
-                            ) : (
-                              p
-                            )}
-                          </span>
-                          {selected && selectedExists === false ? (
-                            <span
-                              style={{
-                                color: "var(--error-text)",
-                                fontSize: 12,
-                                flexShrink: 0,
-                              }}
-                            >
-                              (not found)
-                            </span>
-                          ) : null}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            marginLeft: "auto",
-                            flexShrink: 0,
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {hasWarnings && (
-                            <span
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 4,
-                                padding: "2px 6px",
-                                background: "rgba(255, 165, 0, 0.15)",
-                                border: "1px solid rgba(255, 165, 0, 0.3)",
-                                borderRadius: 4,
-                                fontSize: 10,
-                                color: "var(--warning-text, #ff8c00)",
-                                cursor: "default",
-                                fontWeight: 500,
-                                flexShrink: 0,
-                              }}
-                              title={`Template coverage only; the merged model determines compatibility: ${(
-                                compat?.warnings ?? []
-                              ).join("; ")}`}
-                            >
-                              ⚠️
-                            </span>
-                          )}
-                          {onEditDefaults ? (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-small"
-                              title="Edit"
-                              style={{ padding: "2px 6px" }}
-                              onClick={() => onEditDefaults(p, compat)}
-                            >
-                              <DefaultsEditIcon />
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-small"
-                            title="Duplicate"
-                            style={{ padding: "2px 6px" }}
                             onClick={async () => {
-                              try {
-                                const name = prompt(
-                                  "New file name (without extension):",
-                                  "default"
-                                );
-                                if (!name) return;
-                                const content =
-                                  await workspaceResourcePort.readText(p);
-                                const target = `input/defaults/${name}.json`;
-                                const exists =
-                                  await workspaceResourcePort.exists(target);
-                                if (
-                                  exists &&
-                                  !confirm("File exists. Overwrite?")
-                                )
-                                  return;
-                                await workspaceResourcePort.writeText(
-                                  target,
-                                  content
-                                );
-                                await refreshDefaultsList();
-                                setSelectedDefaults(target);
-                                setSelectedExists(true);
-                                setDefaultsPath(target);
-                              } catch (error: unknown) {
-                                alert(
-                                  `Duplicate failed: ${
-                                    error instanceof Error
-                                      ? error.message
-                                      : String(error)
-                                  }`
-                                );
-                              }
+                              if (selected) return;
+                              setSelectedDefaults(p);
+                              const ok = await workspaceResourcePort.exists(p).catch(() => false);
+                              setSelectedExists(!!ok);
+                              if (ok) setDefaultsPath(p);
                             }}
                           >
-                            <DefaultsDuplicateIcon />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {constructionBands ? null : (
-              <div
-                style={{
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTop: "1px solid var(--border-subtle)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-subtle)",
-                    fontWeight: 500,
-                    marginBottom: 6,
-                  }}
-                >
-                  Default assemblies for new fabric elements
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    marginBottom: 8,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Choose a construction to apply when you add new walls, roofs,
-                  or ground floors. Leave as None to use only the defaults file
-                  you picked above. These choices are saved with this model.
-                </div>
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
-                >
-                  <StandardDropdown
-                    label={<span data-field-key="DefaultAssemblyWall">Walls (and wall-like adjacent)</span>}
-                    value={creationDefaultAssemblyIds.wall ?? ""}
-                    onChange={(v) =>
-                      setCreationDefaultAssemblyIds({ wall: v || undefined })
-                    }
-                    options={defaultAssemblyWallOptions}
-                    variant="ghost"
-                    size="md"
-                    disabled={!bundledAssemblyLibrary}
-                  />
-                  <StandardDropdown
-                    label={<span data-field-key="DefaultAssemblyRoof">Roofs (and roof-like adjacent)</span>}
-                    value={creationDefaultAssemblyIds.roof ?? ""}
-                    onChange={(v) =>
-                      setCreationDefaultAssemblyIds({ roof: v || undefined })
-                    }
-                    options={defaultAssemblyRoofOptions}
-                    variant="ghost"
-                    size="md"
-                    disabled={!bundledAssemblyLibrary}
-                  />
-                  <StandardDropdown
-                    label={<span data-field-key="DefaultAssemblyGroundFloor">Ground floors</span>}
-                    value={creationDefaultAssemblyIds.ground_floor ?? ""}
-                    onChange={(v) =>
-                      setCreationDefaultAssemblyIds({
-                        ground_floor: v || undefined,
+                            <span
+                              style={{
+                                fontWeight: 500,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                flex: "1 1 0",
+                                minWidth: 0,
+                              }}
+                            >
+                              {defaultsFileLabel(p)}
+                              {selected && selectedExists === false ? (
+                                <span style={{ color: "var(--error-text)", fontSize: 12, fontWeight: 400 }}> (not found)</span>
+                              ) : null}
+                            </span>
+                            <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>{defaultsFileTag(p)}</span>
+                            {hasWarnings && (
+                              <span
+                                style={{ fontSize: 10, color: "var(--warning-text, #ff8c00)", flexShrink: 0 }}
+                                title={`Template coverage only; the merged model determines compatibility: ${(compat?.warnings ?? []).join("; ")}`}
+                              >
+                                ⚠️
+                              </span>
+                            )}
+                            {onEditDefaults ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-small"
+                                title="Edit"
+                                style={{ padding: "2px 6px", flexShrink: 0 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEditDefaults(p, compat);
+                                }}
+                              >
+                                <DefaultsEditIcon />
+                              </button>
+                            ) : null}
+                          </div>
+                        );
                       })
-                    }
-                    options={defaultAssemblyGroundOptions}
-                    variant="ghost"
-                    size="md"
-                    disabled={!bundledAssemblyLibrary}
+                    )}
+                  </div>
+                  </>
+                  )}
+                  <FabricTable
+                    workspaceResourcePort={workspaceResourcePort}
+                    family={epcTarget ? "epc" : "fhs"}
+                    fileLabel={effectiveDefaultsPath ? defaultsFileLabel(effectiveDefaultsPath) : "Defaults file"}
                   />
-                </div>
-                {bundledAssemblyLibraryLoading && !bundledAssemblyLibrary ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-subtle)",
-                      marginTop: 8,
-                    }}
-                  >
-                    Loading assembly library…
-                  </div>
-                ) : bundledAssemblyLibraryError ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--error-text)",
-                      marginTop: 8,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    Could not load{" "}
-                    <code style={{ fontSize: 10 }}>
-                      input/assembly_library/
-                    </code>
-                    : {bundledAssemblyLibraryError}
-                  </div>
-                ) : null}
-              </div>
+                </>
               )}
               {defaultsSection}
-            </>
+            </FabricTabCloseContext>
           )}
 
           {/* Global Settings Tab */}
@@ -1938,7 +1701,6 @@ export function GlobalSettingsModal({
                   <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
                 </div>
               )}
-              {constructionBands ? fabricSection : null}
 
               {/* Evidence linking for global settings */}
               {evidenceSection}

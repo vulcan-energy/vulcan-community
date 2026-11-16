@@ -12,6 +12,7 @@ import {
 import type { GeometryState } from '../../geometryStore';
 import type { BundledAssemblyLibrary } from '../../../lib/assemblyLibrary';
 import type { CreationDefaultAssemblyIds } from '../../../lib/multiSelectAssemblyApply';
+import type { FabricPreset } from '../../../lib/fabricPreset';
 import type { ExternalDetailProfileLink } from '../../../lib/assemblyTypes';
 import { parseJunctionPsiDefaultsCsv } from '../../../lib/junctionPsiDefaultsCsv';
 import type { GeometryWorkspaceResourcePort } from '../../../../../geometry-editor-host/src/workspaceResourcePort';
@@ -66,6 +67,8 @@ export interface MetadataSlice {
   setCreationDefaultAssemblyIds: (
     patch: Partial<Record<'wall' | 'roof' | 'ground_floor', string | undefined>>,
   ) => void;
+  /** The fabric preset the Fabric tab picked (Metadata row FabricPreset); null for the defaults file's own fabric. */
+  fabricPreset: FabricPreset | null;
   bundledAssemblyLibrary: BundledAssemblyLibrary | null;
   setBundledAssemblyLibrary: (lib: BundledAssemblyLibrary | null) => void;
   bundledAssemblyLibraryLoading: boolean;
@@ -101,6 +104,7 @@ export const createMetadataSlice = (
   defaultsJson: null,
   defaultsLoading: false,
   creationDefaultAssemblyIds: {} as CreationDefaultAssemblyIds,
+  fabricPreset: null,
   bundledAssemblyLibrary: null as BundledAssemblyLibrary | null,
   bundledAssemblyLibraryLoading: false,
   bundledAssemblyLibraryError: null as string | null,

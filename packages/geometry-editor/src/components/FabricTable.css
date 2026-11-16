@@ -1,0 +1,186 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* One row per construction type, in the Fabric tab (FHS and the HEM:EPC tables). */
+.fabric-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.fabric-table th {
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.fabric-table td:first-child {
+  white-space: nowrap;
+}
+
+.fabric-table td {
+  padding: 6px 8px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+}
+
+.fabric-table__note {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.fabric-table__help {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.fabric-table__help--error {
+  color: var(--error-text);
+}
+
+.fabric-table__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.fabric-table__preview ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* The build-up control keeps its label for assistive technology and focus requests only. */
+.fabric-table__dropdown .standard-dropdown-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* A row that opens in place: its name reads as text, with a disclosure arrow. */
+.fabric-table__row-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fabric-table__row-arrow {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.fabric-table__label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-subtle);
+}
+
+/* "Fabric values from": one choice per row, the picked one highlighted. */
+.fabric-sources {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.fabric-source {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fabric-source:last-child {
+  border-bottom: none;
+}
+
+.fabric-source[aria-pressed="true"] {
+  background: var(--row-highlight-bg);
+  box-shadow: inset 3px 0 0 var(--row-highlight-border);
+  cursor: default;
+}
+
+.fabric-source__name {
+  flex: 1 1 0;
+  min-width: 0;
+  font-weight: 500;
+}
+
+/* A count that selects its elements on the drawing. */
+.fabric-table__count {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* A value cell edited in place: reads as text until hovered or focused. */
+.fabric-table__values {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fabric-table__value-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fabric-table__value {
+  field-sizing: content;
+  min-width: 4ch;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.fabric-table__value:hover {
+  border-color: var(--border-subtle);
+}
+
+.fabric-table__value:focus {
+  border-color: var(--accent-primary);
+  background: var(--bg-primary);
+  outline: none;
+}

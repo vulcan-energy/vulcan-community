@@ -1545,6 +1545,8 @@ pub struct JSONBuilder {
     opaque_template_roof: Option<Value>,
     /// Indexed from defaults: last opaque with `is_external_door` true.
     opaque_template_external_door: Option<Value>,
+    /// The model's fabric preset for this conversion (`FabricPreset` Metadata row), read by `build_json`.
+    fabric_preset: Option<crate::fabric_preset::FabricPreset>,
     /// Model profile the output targets; every profile-dependent step asks it a
     /// capability question (see `ModelProfile`).
     profile: ModelProfile,
@@ -1652,6 +1654,7 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
+            fabric_preset: None,
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
@@ -1695,6 +1698,7 @@ impl JSONBuilder {
             opaque_template_wall: None,
             opaque_template_roof: None,
             opaque_template_external_door: None,
+            fabric_preset: None,
             cold_water_source: COLD_WATER_SOURCE_DEFAULT.to_string(),
             non_fatal_errors: RefCell::new(Vec::new()),
             csv_rows: RefCell::new(Vec::new()),
@@ -2080,6 +2084,11 @@ impl JSONBuilder {
         )?;
         let csv_data = &sanitized_csv_data;
 
+        let existing_building =
+            metadata_field_value(csv_data, "IsExistingBuilding").is_some_and(|v| {
+                v == Value::Bool(true) || v.as_str().is_some_and(|s| s.eq_ignore_ascii_case("true"))
+            });
+        self.fabric_preset = crate::fabric_preset::read(csv_data, self.profile, existing_building)?;
         self.parse_cold_water_source_from_metadata(csv_data);
         if self.profile.references_products() {
             let mut errors = Vec::new();
@@ -3015,6 +3024,31 @@ impl JSONBuilder {
                                 element_obj[&storage_key] = processed_value;
                                 csv_set_keys.insert(storage_key);
                             }
+                        }
+                    }
+
+                    // An element with no fabric value of its own takes the fabric preset's for its
+                    // type, over the defaults file's.
+                    let preset_values = self.fabric_preset.as_ref().and_then(|preset| {
+                        let row = crate::fabric_preset::FabricRow::of_element(
+                            &schema_element_type,
+                            is_external_door_flag,
+                            opaque_pitch_for_seed
+                                .is_some_and(Self::pitch_degrees_matches_roof_variant),
+                        )?;
+                        preset.values_for(row, element_row)
+                    });
+                    if let (Some(values), Some(element_obj_map)) =
+                        (&preset_values, element_obj.as_object_mut())
+                    {
+                        for (key, value) in values {
+                            if allowed_building_element_props.contains(key) {
+                                element_obj_map.insert(key.clone(), value.clone());
+                            }
+                        }
+                        // A U-value replaces a construction resistance the defaults file gives.
+                        if values.contains_key("u_value") {
+                            element_obj_map.remove("thermal_resistance_construction");
                         }
                     }
 

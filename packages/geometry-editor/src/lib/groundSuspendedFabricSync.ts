@@ -467,6 +467,7 @@ export function syncGroundExposedPerimetersFromWalls(
   constructionBands: boolean,
   previous?: Record<string, Element>,
   copySources?: ReadonlyMap<string, string>,
+  inherited: InheritedGroundValues = NO_INHERITED_VALUES,
 ): void {
   const groundsOf = (byId: Record<string, Element>) => Object.values(byId).filter(
     (element): element is GroundElement => element.type === 'BuildingElementGround' && !element.isPlaceholder,
@@ -525,14 +526,14 @@ export function syncGroundExposedPerimetersFromWalls(
     }
 
     if (extra[GROUND_U_VALUE_MANUAL_KEY] !== true) {
-      const u = groundUValueFromDrawing(ground, extra, { totalArea: totalArea ?? ground.area, perimeter }, constructionBands);
+      const u = groundUValueFromDrawing(ground, { ...inherited(ground), ...extra }, { totalArea: totalArea ?? ground.area, perimeter }, constructionBands);
       const prevExtra = prevGround ? readExtraJsonRecord(prevGround.extra_json) : {};
       const beforeU = prevGround
         ? {
             stored: readFinite(prevExtra.u_value),
             derived: groundUValueFromDrawing(
               prevGround,
-              prevExtra,
+              { ...inherited(prevGround), ...prevExtra },
               { totalArea: readFinite(prevGround.total_area) ?? prevGround.area, perimeter: readFinite(prevGround.perimeter) },
               constructionBands,
             ),
@@ -545,6 +546,42 @@ export function syncGroundExposedPerimetersFromWalls(
 
     if (Object.keys(patch).length > 0) {
       updateElement(ground.id, patch);
+    }
+  }
+}
+
+/**
+ * Values a ground takes from elsewhere, under its own: the fabric preset's construction resistance
+ * (`presetValueFor`), which the floor calculation works the U-value out from.
+ */
+export type InheritedGroundValues = (ground: Element) => Record<string, unknown>;
+const NO_INHERITED_VALUES: InheritedGroundValues = () => ({});
+
+/**
+ * After the fabric preset changes, a ground U-value the floor calculation worked out from the old
+ * preset's values follows the new ones; with no resistance left to work from, it goes, so the
+ * defaults file's pair applies. A U-value the user stated stays (see `takesDerivedValue`).
+ */
+export function followGroundUValueOnPresetChange(
+  elementsById: Record<string, Element>,
+  updateElement: (id: string, patch: Partial<Element>) => void,
+  constructionBands: boolean,
+  before: InheritedGroundValues,
+  after: InheritedGroundValues,
+): void {
+  for (const ground of Object.values(elementsById)) {
+    if (ground.type !== 'BuildingElementGround' || ground.isPlaceholder) continue;
+    const extra = readExtraJsonRecord(ground.extra_json);
+    if (extra[GROUND_U_VALUE_MANUAL_KEY] === true) continue;
+    const inputs = { totalArea: readFinite(ground.total_area) ?? ground.area, perimeter: readFinite(ground.perimeter) };
+    const stored = readFinite(extra.u_value);
+    const old = groundUValueFromDrawing(ground, { ...before(ground), ...extra }, inputs, constructionBands);
+    const next = groundUValueFromDrawing(ground, { ...after(ground), ...extra }, inputs, constructionBands);
+    if (takesDerivedValue({ stored, derived: old }, stored, next, 5e-5)) {
+      updateElement(ground.id, { extra_json: { ...extra, u_value: next } });
+    } else if (next == null && stored != null && old != null && numbersClose(stored, old, 5e-5)) {
+      const { u_value: _derived, ...rest } = extra;
+      updateElement(ground.id, { extra_json: rest });
     }
   }
 }
@@ -653,7 +690,7 @@ export function followGroundFabricOnEdit<
   },
 >(
   store: { subscribe: (listener: (state: S, previous: S) => void) => () => void; getState: () => S },
-  rules: { constructionBands: (state: S) => boolean; acceptsShieldLocation: () => boolean },
+  rules: { constructionBands: (state: S) => boolean; acceptsShieldLocation: () => boolean; inherited: (state: S) => InheritedGroundValues },
 ): GroundFabricFollower {
   let copySources: ReadonlyMap<string, string> | undefined;
   let syncing = false;
@@ -670,7 +707,7 @@ export function followGroundFabricOnEdit<
         // Defaults first: the wall U and the U-value of a new suspended floor read them.
         fillSuspendedFloorDefaults(state.elementsById, updateElement, rules.acceptsShieldLocation(), before, copySources);
         syncSuspendedGroundFabricFromWalls(store.getState().elementsById, updateElement, state.getDefaultsLookup(), before, copySources);
-        syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources);
+        syncGroundExposedPerimetersFromWalls(store.getState().elementsById, updateElement, rules.constructionBands(state), before, copySources, rules.inherited(state));
       });
     } finally {
       syncing = false;

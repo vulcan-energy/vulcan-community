@@ -2425,6 +2425,22 @@
       "classification": "public_candidate_structured_fabric_defaults_editor"
     },
     {
+      "path": "packages/geometry-editor/src/components/FabricTable.css",
+      "source_path": "packages/geometry-editor/src/components/FabricTable.css",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/FabricTable.tsx",
+      "source_path": "packages/geometry-editor/src/components/FabricTable.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/FancoilTestDataFields.tsx",
       "source_path": "packages/geometry-editor/src/components/FancoilTestDataFields.tsx",
       "license": "AGPL-3.0-only",
@@ -4976,6 +4992,14 @@
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
       "classification": "public_candidate_fabric_defaults_templates"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/fabricPreset.ts",
+      "source_path": "packages/geometry-editor/src/lib/fabricPreset.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
     },
     {
       "path": "packages/geometry-editor/src/lib/fabricUWrites.ts",

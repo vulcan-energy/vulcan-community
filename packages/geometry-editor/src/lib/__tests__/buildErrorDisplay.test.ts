@@ -97,7 +97,7 @@ describe('displayBuildErrorRows', () => {
       [{ source: 'schema', code: 'E_EPC_HEMIE_SETTINGS', path: '/Metadata/HEMIE_construction_external_wall', message: 'The external wall fabric default states no wall construction type.' }],
       (path) => resolveIssueTarget(path, model),
     );
-    expect(row?.location).toBe('Global Settings > Defaults > Fabric > External wall');
+    expect(row?.location).toBe('Global Settings > Fabric > External wall');
   });
 
   it('places air test, ventilation and dwelling rows where Global Settings shows them', () => {

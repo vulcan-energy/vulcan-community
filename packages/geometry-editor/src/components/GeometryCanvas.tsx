@@ -231,7 +231,7 @@ import {
 import type { GeometryCanvas3DProps } from './canvas/GeometryCanvas3D';
 import { useElementCategoryGhost } from '../hooks/useElementCategoryGhost';
 import { useTargetRules } from '../hooks/useTargetRules';
-import { FABRIC_PRESET_TYPES, hemieFabricGroups, statedBuildType } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES } from '../lib/hemieFabric';
 import { useHiddenElementIds } from '../hooks/useHiddenElementIds';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { elementIsHiddenFromView } from '../lib/elementCategoryVisibility';
@@ -2322,7 +2322,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const setBundledAssemblyLibraryLoading = useGeometryStore((s) => s.setBundledAssemblyLibraryLoading);
   const setBundledAssemblyLibraryError = useGeometryStore((s) => s.setBundledAssemblyLibraryError);
   const { elementCategoryGhostState, toggleCategoryGhost } = useElementCategoryGhost();
-  const [colourByFabric, setColourByFabric] = useState(false);
   const { hiddenElementIds, toggleElementsHidden, unhideElement } = useHiddenElementIds(
     documentFileName,
     elementIds,
@@ -6466,20 +6465,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ) * (element.type === 'ContextShading' && unusedContextShading.has(element.name) ? 0.4 : 1),
   [thermalBridgePreview.active, thermalBridgePreview.kind, thermalBridgePreview.highlightedHostIds, unusedContextShading]);
 
-  const buildType = statedBuildType(complianceSettings);
-  const fabricGroups = useMemo(
-    () => (constructionBands && colourByFabric ? hemieFabricGroups(Object.values(elementsById), complianceSettings.hemieSettings, buildType) : []),
-    [constructionBands, colourByFabric, elementsById, complianceSettings.hemieSettings, buildType],
-  );
-  const fabricColouring = useMemo(
-    () => (constructionBands ? { on: colourByFabric, onToggle: () => setColourByFabric((on) => !on) } : undefined),
-    [constructionBands, colourByFabric],
-  );
-  const fabricColourById = useMemo(
-    () => new Map(fabricGroups.flatMap((group) => group.ids.map((id) => [id, group.color] as const))),
-    [fabricGroups],
-  );
-
   const buildElementRendererNodes = useCallback((rows: typeof sortedElementCanvasData) => {
     return rows.map(({ element, canvasCoords }) => {
       const isHighlighted = rendererHighlightedIds.has(element.id);
@@ -6519,17 +6504,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           vertexSnapMode={vertexSnapMode}
           commitVertexPositionUpdates={commitVertexPositionUpdates}
           selection={selection}
-          // Colour by fabric: elements with no fabric fade, so the bands read.
-          previewOpacity={fabricColourById.size > 0 && !fabricColourById.has(element.id) ? 0.25 : elementPreviewOpacity(element)}
+          previewOpacity={elementPreviewOpacity(element)}
           spaceLabellerSuppressFabricInteraction={spaceLabellerOpen}
           snappedVertices={selectedVertexGuidance.get(element.id)?.snapped}
           mvhrBadgeInline={inlineMvhrBadgeIds.has(element.id)}
-          fabricColor={fabricColourById.get(element.id)}
         />
       );
     });
   }, [
-    fabricColourById,
     rendererHighlightedIds,
     selectedVertexGuidance,
     inlineMvhrBadgeIds,
@@ -8858,34 +8840,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             unhideElement={unhideElement}
             cmdASelectIdsRef={elementsPanelCmdASelectIdsRef}
             people={panelPeople}
-            fabricColouring={fabricColouring}
             remoteSelections={remoteSelections}
           />,
         )
-      )}
-
-      {fabricGroups.length > 0 && (
-        // Its own card at the canvas's lower left, clear of the panels; an entry selects its elements.
-        <div className="glass-panel fabric-legend" role="region" aria-label="Colour by fabric">
-          <div className="fabric-legend-title">Colour by fabric</div>
-          {fabricGroups.map((group) => (
-            <button
-              key={group.label}
-              type="button"
-              className="fabric-legend-entry"
-              title={`Select the ${group.ids.length} elements with this fabric`}
-              onClick={() => {
-                clearElementSelection();
-                setSelectedElementIds([...group.ids]);
-                setSelection({ type: 'element', id: group.ids[0]! });
-              }}
-            >
-              <span className="fabric-legend-swatch" style={{ background: group.color }} />
-              <span className="fabric-legend-label">{group.label}</span>
-              <span className="fabric-legend-count">{group.ids.length}</span>
-            </button>
-          ))}
-        </div>
       )}
 
       <ThermalBridgePreviewControls preview={thermalBridgePreview} width={stageSize.width}
