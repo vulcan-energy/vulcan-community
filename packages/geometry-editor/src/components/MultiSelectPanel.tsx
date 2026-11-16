@@ -67,7 +67,9 @@ import {
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import type { GeometryInspectorContributions } from '../../../geometry-editor-host/src/inspectorContributions';
-import { HEMIE_CONSTRUCTION_FIELDS, hemieConstructionType, hemieHeatCapacityBands, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
+import { GroupAccordion } from './jsonformsRenderers';
+import { hemieConstructionKeys, hemieConstructionSetting, hemieConstructionType, hemieHeatCapacityBands, hemieMoreLabels, parseHemieConstruction, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
+import { inferThermalMethod } from '../lib/thermalMethod';
 import { useTargetRules } from '../hooks/useTargetRules';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -1617,6 +1619,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   // none (a door or window among them, or one that takes no heat capacity) leaves it to each element.
   const { constructionBands, arealHeatCapacity } = useTargetRules();
   const buildType = useGeometryStore((s) => statedBuildType(s.complianceSettings));
+  const hemieSettings = useGeometryStore((s) => s.complianceSettings.hemieSettings);
   const arealBandOptions = useMemo(() => {
     if (!constructionBands) return AREAL_HEAT_CAPACITY_ENUM;
     const all = Object.values(elementsById) as Element[];
@@ -1642,9 +1645,14 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     const roof = sharedRoofPlanes(first!, all, buildType);
     const oneRoof = rest.length > 0 && rest.every((el) => roof.some((plane) => plane.id === el.id));
     const type = hemieConstructionType(first!, all, buildType) ?? '';
-    const roofFields = new Set(['age_band', 'u_value', 'thermal_resistance_construction', 'mass_distribution_class', 'solar_absorption_coeff', 'thatched', ...(HEMIE_CONSTRUCTION_FIELDS[type] ?? [])]);
-    return { element: { ...first!, extra_json: shared } as Element, mixed, oneRoofMixed: oneRoof && mixed.some((key) => roofFields.has(key)) };
-  }, [ElementFieldsRenderer, activeElements, buildType, constructionBands, elementsById, inspectorContributions]);
+    const roofFields = new Set(['age_band', 'u_value', 'thermal_resistance_construction', 'mass_distribution_class', 'solar_absorption_coeff', 'thatched', ...hemieConstructionKeys(type)]);
+    // The thermal method they share; mixed methods show no details (they apply under the age band only).
+    const methods = new Set(activeElements.map((el) => inferThermalMethod(el, true)));
+    const thermalMethod = methods.size === 1 ? [...methods][0] : undefined;
+    const location = shared.insulation_location ?? parseHemieConstruction(hemieSettings?.[hemieConstructionSetting(type)])?.insulation_location;
+    return { element: { ...first!, extra_json: shared } as Element, mixed, oneRoofMixed: oneRoof && mixed.some((key) => roofFields.has(key)),
+      thermalMethod, more: hemieMoreLabels(type, thermalMethod === 'band', location).length > 0 };
+  }, [ElementFieldsRenderer, activeElements, buildType, constructionBands, elementsById, hemieSettings, inspectorContributions]);
   const patchActiveExtraJson = useCallback((update: (current: Record<string, unknown>) => Record<string, unknown>) => {
     const patches: Record<string, Record<string, unknown>> = {};
     for (const el of activeElements) {
@@ -3867,7 +3875,14 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             {sharedFabricElement.oneRoofMixed && (
               <p className="field-source-note" data-shared-roof>One roof: the values must match.</p>
             )}
-            <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>} onPatchExtraJson={patchActiveExtraJson} />
+            <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
+              thermalMethod={sharedFabricElement.thermalMethod} onPatchExtraJson={patchActiveExtraJson} />
+            {sharedFabricElement.more && (
+              <GroupAccordion label="More">
+                <ElementFieldsRenderer multiple section="more" mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
+                  thermalMethod={sharedFabricElement.thermalMethod} onPatchExtraJson={patchActiveExtraJson} />
+              </GroupAccordion>
+            )}
           </div>
         )}
 

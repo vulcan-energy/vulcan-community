@@ -58,18 +58,84 @@ const RETIRED_SETTINGS: [(&str, &str); 3] = [
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
     ("HEMIE_infiltration_properties", "An existing building needs an air test. Remove the row and enter the air test result in Global Settings."),
 ];
-/// Construction fields an element may state for itself, over the model's construction setting
-/// (derived from the model).
-const ELEMENT_OVERRIDE_KEYS: [&str; 5] = [
-    "wall_construction_type",
-    "glazing_type",
-    "frame_material",
-    "glazing_gap",
-    "insulation_location",
+/// HEMIE's roof detail inputs (DESNZ-defined; `roof_construction.py`): the ceiling, the joists
+/// and the insulation's conductivity.
+const ROOF_DETAILS: [&str; 5] = [
+    "ceiling_thickness",
+    "ceiling_thermal_conductivity",
+    "joist_depth",
+    "percentage_area_of_timber_joists",
+    "insulation_thermal_conductivity",
 ];
+/// An unheated pitched roof's further details (DESNZ-defined; `roof_construction.py`).
+const LOFT_DETAILS: [&str; 4] = [
+    "roof_characteristics",
+    "rafter_depth",
+    "percentage_area_of_timber_rafters",
+    "air_gap_thermal_resistance",
+];
+/// A heated pitched roof's details (DESNZ-defined; `HeatedPitchedRoofConstruction`).
+const HEATED_ROOF_DETAILS: [&str; 5] = [
+    "internal_finish_thickness",
+    "internal_finish_thermal_conductivity",
+    "rafter_depth",
+    "percentage_area_of_timber_rafters",
+    "insulation_thermal_conductivity",
+];
+/// A floor's insulation details (DESNZ-defined; `AbstractFloorConstruction`).
+const FLOOR_DETAILS: [&str; 3] = [
+    "insulation_thickness",
+    "insulation_type",
+    "insulation_thermal_conductivity",
+];
+/// The outside surface by material and finish (DESNZ-defined): HEMIE takes both together.
+const SURFACE: [&str; 2] = ["surface_material", "finish"];
+
+/// Construction fields an element may state for itself, over the model's construction setting,
+/// by construction type: HEMIE rejects a field its construction type does not take
+/// (`hemie/models/constructions`). Derived from the model.
+fn element_override_keys(construction_type: &str) -> Vec<&'static str> {
+    let roof = |more: &[&'static str]| {
+        let mut keys = vec!["insulation_location", "insulation_thickness"];
+        keys.extend(ROOF_DETAILS);
+        keys.extend(more);
+        keys.extend(SURFACE);
+        keys
+    };
+    match construction_type {
+        "external_wall" => vec![
+            "wall_construction_type",
+            "retrofit_insulation",
+            SURFACE[0],
+            SURFACE[1],
+        ],
+        "sheltered_wall" => vec!["wall_construction_type", "retrofit_insulation"],
+        "window" => vec!["glazing_type", "frame_material", "glazing_gap"],
+        "external_door" | "park_home_wall" | "park_home_flat_roof" | "park_home_pitched_roof" => {
+            SURFACE.to_vec()
+        }
+        "flat_roof" | "mini_flat_roof" => roof(&[]),
+        "unheated_pitched_roof" | "mini_pitched_roof" => roof(&LOFT_DETAILS),
+        "heated_pitched_roof" => {
+            let mut keys = vec!["insulation_thickness"];
+            keys.extend(HEATED_ROOF_DETAILS);
+            keys.extend(SURFACE);
+            keys
+        }
+        "thatched_roof" => vec!["insulation_thickness", "insulation_thermal_conductivity"],
+        "suspended_floor"
+        | "not_edge_insulated_ground_attached_floor"
+        | "edge_insulated_ground_attached_floor"
+        | "heated_basement_floor"
+        | "unheated_basement_floor"
+        | "above_external_area_floor"
+        | "above_internal_unconditioned_area_floor" => FLOOR_DETAILS.to_vec(),
+        _ => Vec::new(),
+    }
+}
 /// Fields only this converter reads from an element row; no HEM input takes them, so the
 /// full-input build leaves them out of the HEM element.
-pub(crate) const ELEMENT_ONLY_KEYS: [&str; 14] = [
+pub(crate) const ELEMENT_ONLY_KEYS: [&str; 28] = [
     "age_band",
     "thatched",
     "is_front_door",
@@ -84,6 +150,20 @@ pub(crate) const ELEMENT_ONLY_KEYS: [&str; 14] = [
     "adjacent_space_type",
     "basement_depth_descriptor",
     "basement_air_volume",
+    "insulation_type",
+    "insulation_thermal_conductivity",
+    "ceiling_thickness",
+    "ceiling_thermal_conductivity",
+    "joist_depth",
+    "percentage_area_of_timber_joists",
+    "roof_characteristics",
+    "rafter_depth",
+    "percentage_area_of_timber_rafters",
+    "air_gap_thermal_resistance",
+    "internal_finish_thickness",
+    "internal_finish_thermal_conductivity",
+    "surface_material",
+    "finish",
 ];
 
 #[path = "hemie_systems.rs"]
@@ -736,38 +816,47 @@ impl Ctx<'_> {
         let mut c = self.settings.construction(construction_type);
         c.insert("construction_type".into(), json!(construction_type));
         let first = elements[0];
-        // A park home construction takes none of these (HEMIE rejects them).
-        let park_home = construction_type.starts_with("park_home");
-        // A thatched roof takes no insulation location (HEMIE rejects it).
-        let thatched = construction_type == "thatched_roof";
-        for key in ELEMENT_OVERRIDE_KEYS
-            .into_iter()
-            .filter(|k| !(park_home || thatched && *k == "insulation_location"))
-        {
-            if let Some(value) = self.agreed(elements, key) {
-                c.insert(key.into(), value.clone());
+        // DESNZ-defined: an outside surface is described one way, by its coefficient, its
+        // material and finish, or its colour. Elements that describe their own replace the
+        // setting's description, which HEMIE would otherwise rank over theirs.
+        let surface = outside_surface(construction_type);
+        for e in elements {
+            if SURFACE.iter().any(|key| e.get(key).is_some())
+                && !surface.iter().any(|(key, _)| *key == SURFACE[0])
+            {
+                let fix = if surface.is_empty() {
+                    "Remove them"
+                } else {
+                    "Describe its outside surface by its colour or solar absorption coefficient"
+                };
+                self.errors.push(error("CONSTRUCTION", e.path(), format!("'{}' states a surface material or finish, which the existing-building EPC does not take for a {}. {fix}.", e.name, construction_type.replace('_', " "))));
             }
         }
-        // Derived from the model: the simpler insulation inputs, on the construction types
-        // that take them (HEMIE rejects a field its construction type does not take).
-        let walls = matches!(construction_type, "external_wall" | "sheltered_wall");
-        let insulated = construction_type.ends_with("_floor")
-            && !construction_type.starts_with("party")
-            && !park_home
-            || matches!(
-                construction_type,
-                "flat_roof"
-                    | "unheated_pitched_roof"
-                    | "heated_pitched_roof"
-                    | "mini_flat_roof"
-                    | "mini_pitched_roof"
-                    | "thatched_roof"
-            );
-        for (key, takes) in [
-            ("retrofit_insulation", walls),
-            ("insulation_thickness", insulated),
-        ] {
-            if let Some(value) = takes.then(|| self.agreed(elements, key)).flatten() {
+        if elements
+            .iter()
+            .any(|e| surface.iter().any(|(key, _)| e.get(key).is_some()))
+        {
+            for (_, field) in surface {
+                c.remove(*field);
+            }
+        }
+        // A construction detail its type does not take would be dropped silently: name the element.
+        let taken = element_override_keys(construction_type);
+        for e in elements {
+            for key in ["insulation_location", "insulation_thickness"]
+                .iter()
+                .chain(&ROOF_DETAILS)
+                .chain(&LOFT_DETAILS)
+                .chain(&HEATED_ROOF_DETAILS)
+                .chain(&FLOOR_DETAILS)
+            {
+                if e.get(key).is_some() && !taken.contains(key) {
+                    self.errors.push(error("CONSTRUCTION", e.path(), format!("'{}' states {key}, which the existing-building EPC does not take for a {}. Remove it.", e.name, construction_type.replace('_', " "))));
+                }
+            }
+        }
+        for key in taken {
+            if let Some(value) = self.agreed(elements, key) {
                 c.insert(key.into(), value.clone());
             }
         }
@@ -797,7 +886,7 @@ impl Ctx<'_> {
                 )),
             }
         }
-        if takes_outside_surface(construction_type) {
+        if !surface.is_empty() {
             match self.agreed(elements, "colour") {
                 Some(colour)
                     if ["Light", "Intermediate", "Dark"]
@@ -955,6 +1044,28 @@ impl Ctx<'_> {
                 self.errors.push(error("CONSTRUCTION", first.path(), format!("{names} {verb} an insulation thickness but no insulation location, so the thickness would not be used. Give the insulation location, or 'unknown' if it is not known.")));
             } else {
                 self.notices.push(notice(&first.path(), format!("{names} {verb} no insulation location, so the existing-building EPC models no roof insulation. If the roof is insulated, give the location, or 'unknown' to take the age-band thickness.")));
+            }
+        }
+        // HEMIE takes a surface material and its finish together (`_validate_finish_matches_surface_material`).
+        if stated(SURFACE[0]) != stated(SURFACE[1]) {
+            let missing = if stated(SURFACE[0]) {
+                "finish"
+            } else {
+                "surface material"
+            };
+            let fix = format!("give its {missing} too, or describe the surface by its colour");
+            if elements
+                .iter()
+                .any(|e| SURFACE.iter().any(|key| e.get(key).is_some()))
+            {
+                self.errors.push(error(
+                    "CONSTRUCTION",
+                    first.path(),
+                    format!("{names} {verb} only part of the outside surface: {fix}."),
+                ));
+            } else {
+                // The half-stated pair is the fabric default's.
+                self.errors.push(error("CONSTRUCTION", format!("/Metadata/{SETTING}construction_{construction_type}"), format!("The {} fabric default states only part of the outside surface: {fix}, in Global Settings > Defaults > Fabric.", construction_type.replace('_', " "))));
             }
         }
         self.require(construction_type, &mut c);
@@ -1158,17 +1269,22 @@ fn heat_capacity_rule(construction_type: &str) -> HeatCapacity {
     }
 }
 
-/// HEMIE construction types with an outside surface: they take a colour and a solar absorption
-/// coefficient.
-fn takes_outside_surface(construction_type: &str) -> bool {
-    matches!(
-        construction_type,
-        "external_wall"
-            | "park_home_wall"
-            | "external_door"
-            | "above_external_area_floor"
-            | "park_home_floor"
-    ) || construction_type.ends_with("_roof")
+/// The outside surface fields a HEMIE construction type takes, as (element key, construction
+/// field): a colour and a solar absorption coefficient, and on most a surface material and its
+/// finish; none without an outside surface.
+fn outside_surface(construction_type: &str) -> &'static [(&'static str, &'static str)] {
+    const ALL: [(&str, &str); 4] = [
+        ("colour", "colour"),
+        ("solar_absorption_coeff", "solar_absorption_coefficient"),
+        (SURFACE[0], SURFACE[0]),
+        (SURFACE[1], SURFACE[1]),
+    ];
+    match construction_type {
+        "above_external_area_floor" | "park_home_floor" | "thatched_roof" => &ALL[..2],
+        "external_wall" | "park_home_wall" | "external_door" => &ALL,
+        t if t.ends_with("_roof") => &ALL,
+        _ => &[],
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4503,6 +4619,210 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 && e.message
                     .contains("state an insulation thickness but no insulation location")),
             "{errors:#?}"
+        );
+    }
+
+    fn orchestrator_schema() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../data/schemas/hem_epc_orchestrator_input.schema.json"
+        ))
+        .unwrap()
+    }
+
+    /// The fields of a HEMIE construction type, from the schema's construction definitions.
+    fn construction_fields(schema: &Value, construction_type: &str) -> BTreeSet<String> {
+        let mapping = &schema["$defs"]["Geometry"]["properties"]["constructions"]
+            ["additionalProperties"]["discriminator"]["mapping"];
+        let name = mapping[construction_type]
+            .as_str()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap();
+        schema["$defs"][name]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn an_element_states_every_detail_its_construction_type_takes_and_no_other() {
+        let schema = orchestrator_schema();
+        let mapping = schema["$defs"]["Geometry"]["properties"]["constructions"]
+            ["additionalProperties"]["discriminator"]["mapping"]
+            .as_object()
+            .unwrap()
+            .clone();
+        let details: BTreeSet<&str> = ROOF_DETAILS
+            .iter()
+            .chain(&LOFT_DETAILS)
+            .chain(&HEATED_ROOF_DETAILS)
+            .chain(&FLOOR_DETAILS)
+            .chain(&SURFACE)
+            .copied()
+            .collect();
+        for construction_type in mapping.keys() {
+            let fields = construction_fields(&schema, construction_type);
+            let keys = element_override_keys(construction_type);
+            // HEMIE rejects a field its construction type does not take.
+            for key in &keys {
+                assert!(
+                    fields.contains(*key),
+                    "{construction_type} does not take {key}"
+                );
+            }
+            // Every roof, floor and outside surface detail HEMIE takes can be stated.
+            for key in fields.iter().filter(|f| details.contains(f.as_str())) {
+                assert!(
+                    keys.contains(&key.as_str()),
+                    "{construction_type} takes {key}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn roof_floor_and_outside_surface_details_reach_their_constructions() {
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"insulation_location\"\":\"\"at_joists\"\",\"\"joist_depth\"\":100,\"\"percentage_area_of_timber_joists\"\":12,\"\"ceiling_thickness\"\":15,\"\"roof_characteristics\"\":\"\"Lined with boards and felt\"\",\"\"insulation_thermal_conductivity\"\":0.035,\"\"surface_material\"\":\"\"Slate\"\",\"\"finish\"\":\"\"Dense, dark slate\"\"}}\""))
+            .collect();
+        let mut text = house(roof).replace(
+            "IsExistingBuilding,TRUE",
+            // The setting's colour gives way where an element describes its own surface.
+            "IsExistingBuilding,TRUE\nHEMIE_construction_unheated_pitched_roof,\"{\"\"colour\"\":\"\"Dark\"\"}\"",
+        );
+        text = text.replace(
+            "Name,Zone,Type,area,floor_type,coords\nFloor,Z,BuildingElementGround,48,Slab_no_edge_insulation,\"0,0,0|8,0,0|8,6,0|0,6,0\"",
+            "Name,Zone,Type,area,floor_type,coords,extra_json\nFloor,Z,BuildingElementGround,48,Slab_no_edge_insulation,\"0,0,0|8,0,0|8,6,0|0,6,0\",\"{\"\"insulation_type\"\":\"\"retrofitted\"\",\"\"insulation_thermal_conductivity\"\":0.022}\"",
+        );
+        text = text.replacen(
+            "W00,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,\"0,0,0|8,0,0\",",
+            "W00,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,\"0,0,0|8,0,0\",\"{\"\"surface_material\"\":\"\"Brick\"\",\"\"finish\"\":\"\"Light buff\"\"}\"",
+            1,
+        );
+        let (model, errors, _) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let schema = orchestrator_schema();
+        let geometry = json!({"$ref": "#/$defs/Geometry", "$defs": schema["$defs"]});
+        let validator = jsonschema::validator_for(&geometry).unwrap();
+        let invalid: Vec<String> = validator
+            .iter_errors(&model["Zone"])
+            .map(|e| format!("{}: {e}", e.instance_path()))
+            .collect();
+        assert!(invalid.is_empty(), "{invalid:#?}");
+        let constructions = model["Zone"]["constructions"].as_object().unwrap();
+        let of = |kind: &str| {
+            constructions
+                .values()
+                .filter(|c| c["construction_type"] == kind)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let roof = &of("unheated_pitched_roof")[0];
+        assert_eq!(roof["joist_depth"], 100.0);
+        assert_eq!(roof["percentage_area_of_timber_joists"], 12.0);
+        assert_eq!(roof["ceiling_thickness"], 15.0);
+        assert_eq!(roof["roof_characteristics"], "Lined with boards and felt");
+        assert_eq!(roof["insulation_thermal_conductivity"], 0.035);
+        assert_eq!(
+            (&roof["surface_material"], &roof["finish"]),
+            (&json!("Slate"), &json!("Dense, dark slate"))
+        );
+        assert!(roof.get("colour").is_none(), "{roof:#?}");
+        let floor = &of("not_edge_insulated_ground_attached_floor")[0];
+        assert_eq!(floor["insulation_type"], "retrofitted");
+        assert_eq!(floor["insulation_thermal_conductivity"], 0.022);
+        let walls = of("external_wall");
+        assert!(
+            walls
+                .iter()
+                .any(|w| w["surface_material"] == "Brick" && w["finish"] == "Light buff"),
+            "{walls:#?}"
+        );
+    }
+
+    #[test]
+    fn a_surface_material_without_its_finish_stops_naming_the_element() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[0] = exposed[0].replace("\",", "\",\"{\"\"surface_material\"\":\"\"Brick\"\"}\"");
+        exposed.extend(gable_roof());
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(
+            errors.iter().any(|e| e.path.ends_with("/W00")
+                && e.message
+                    .contains("only part of the outside surface: give its finish too")),
+            "{errors:#?}"
+        );
+        // On the fabric default, the error names the row.
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        let settings = SETTINGS.replace(
+            r#"{""wall_construction_type"":""cavity""}"#,
+            r#"{""wall_construction_type"":""cavity"",""finish"":""Light buff""}"#,
+        );
+        let (_, errors, _) = run(&csv(&settings, &exposed, &ground(&BOX)));
+        assert!(
+            errors.iter().any(|e| e.path == "/Metadata/HEMIE_construction_external_wall"
+                && e.message.starts_with(
+                    "The external wall fabric default states only part of the outside surface: give its surface material too"
+                )),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_detail_the_construction_type_does_not_take_names_the_element() {
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"thatched\"\":true,\"\"joist_depth\"\":100}}\""))
+            .collect();
+        let (_, errors, _) = run(&house(roof));
+        assert!(
+            errors.iter().any(|e| e.path.ends_with("/Roof S")
+                && e.message.contains("states joist_depth, which the existing-building EPC does not take for a thatched roof")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_thatched_roofs_material_and_finish_stop_naming_the_plane_and_keep_the_colour() {
+        // A thatched roof takes no surface material: its planes' material and finish used to
+        // be dropped, with the setting's colour cleared.
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"thatched\"\":true,\"\"surface_material\"\":\"\"Slate\"\",\"\"finish\"\":\"\"Dense, dark slate\"\"}}\""))
+            .collect();
+        let text = house(roof).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_construction_thatched_roof,\"{\"\"colour\"\":\"\"Dark\"\"}\"",
+        );
+        let (_, errors, _) = run(&text);
+        for plane in ["Roof S", "Roof N"] {
+            assert!(
+                errors.iter().any(|e| e.path.ends_with(&format!("/{plane}"))
+                    && e.message.contains("states a surface material or finish, which the existing-building EPC does not take for a thatched roof")),
+                "{errors:#?}"
+            );
+        }
+        // A colour of its own is taken over the setting's.
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"thatched\"\":true,\"\"colour\"\":\"\"Light\"\"}}\""))
+            .collect();
+        let (model, errors, _) = run(&house(roof).replace(
+            "IsExistingBuilding,TRUE",
+            "IsExistingBuilding,TRUE\nHEMIE_construction_thatched_roof,\"{\"\"solar_absorption_coefficient\"\":0.5}\"",
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let roof = &model["Zone"]["building_parts"]["Main"]["roof"];
+        let construction = &model["Zone"]["constructions"][roof["construction"].as_str().unwrap()];
+        assert_eq!(construction["colour"], "Light");
+        assert!(
+            construction.get("solar_absorption_coefficient").is_none(),
+            "{construction:#?}"
         );
     }
 

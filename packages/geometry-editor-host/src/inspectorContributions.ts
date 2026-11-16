@@ -216,6 +216,8 @@ export type GeometryInspectorElementFieldsContext = Readonly<{
    * Absent: no method applies, so all show.
    */
   thermalMethod?: 'band' | 'calculation' | 'u_value';
+  /** 'more': render only the fields that go under the editor's "More" group. Absent: the others. */
+  section?: 'more';
 }>;
 
 export type GeometryInspectorElementFieldsContribution = Readonly<{

@@ -130,7 +130,7 @@ import { inferThermalMethod, thermalMethodElementType, thermalMethods, thermalMe
 import { ThermalMethodControl } from './ThermalMethodControl';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
 import { isExistingBuilding } from '../lib/windowOpenings';
-import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieConstructionSetting, hemieConstructionType, hemieHeatCapacityBands, hemieMoreKeys, hemieMoreLabels, hemieOutsideSurface, parseHemieConstruction, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -532,6 +532,8 @@ const intentPrefetchHandlers = (prefetch: () => void) => ({
 /** A window's U- and g-value, shown with its other thermal values. */
 const WINDOW_THERMAL_FIELDS = ['u_value', 'g_value'] as const;
 const WINDOW_BAND_THERMAL_FIELDS = ['u_value'] as const;
+/** An existing building's outside surface: the host's "Outside surface from" shows the coefficient. */
+const HOSTED_OUTSIDE_SURFACE_FIELDS = ['solar_absorption_coeff'] as const;
 
 const AdvancedFieldsEditor = React.lazy(async () => {
   const module = await loadAdvancedFieldsEditor();
@@ -3273,6 +3275,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     : thermalMethodChosen && thermalMethodOptions.some((option) => option.value === thermalMethodChosen)
       ? thermalMethodChosen
       : inferThermalMethod(thermalElement, constructionBands, thermalGroundU);
+  // An existing building's construction type: its details and outside surface sit under More.
+  const thermalConstructionType = constructionBands && thermalElement ? hemieConstructionType(thermalElement, allElements, buildType) : undefined;
+  // The host describes the outside surface (by colour, material and finish, or coefficient), so the coefficient field is its.
+  const outsideSurfaceHosted = !!hemieOutsideSurface(thermalConstructionType);
   // A roof plane that shares its construction with others: their stated values must match.
   const sharedRoof = useMemo(() => (constructionBands && thermalElement ? sharedRoofPlanes(thermalElement, allElements, buildType) : []),
     [constructionBands, thermalElement, allElements, buildType]);
@@ -3281,7 +3287,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     setThermalMethodChosen(to);
     const patch = thermalMethodSwitchPatch(thermalElement, thermalMethod, to, {
       constructionBands,
-      constructionType: constructionBands ? hemieConstructionType(thermalElement, allElements, buildType) : undefined,
+      constructionType: thermalConstructionType,
       groundComputedU: thermalGroundU,
     });
     const { extra_json: nextExtra, ...top } = patch;
@@ -4096,7 +4102,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // Host fields for the selected element (EPC: age band and construction); under a thermal
   // method they show only what that method uses.
-  const renderHostElementFields = (method?: ThermalMethod) => (
+  const renderHostElementFields = (method?: ThermalMethod, section?: 'more') => (
     selection?.type === 'element' &&
     !selection.isPlaceholder &&
     selectedElement &&
@@ -4106,6 +4112,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         <ElementFieldsRenderer
           element={selectedElement as unknown as Readonly<Record<string, unknown>>}
           thermalMethod={method}
+          section={section}
           onPatchExtraJson={(update) => {
             const currentElement = getElementById(selection.id);
             const currentExtra = readExtraJsonRecord(currentElement?.extra_json);
@@ -4125,6 +4132,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   ) : null;
   const hostElementFieldsForMethod = thermalMethod ? renderHostElementFields(thermalMethod) : null;
   const hostElementFieldsPlain = thermalMethod ? null : renderHostElementFields();
+  // Under More: the details and outside surface, open when the element states one. Under a
+  // U-value or calculation the details do not apply (`bandOnlyFields`); a roof shows the beams
+  // its insulation location reads. Nothing to show, no More.
+  const thermalExtra = readExtraJsonRecord(thermalElement?.extra_json);
+  const hostMoreLabels = thermalMethod && thermalConstructionType ? hemieMoreLabels(thermalConstructionType, thermalMethod === 'band',
+    thermalExtra.insulation_location ?? parseHemieConstruction(modelSettings.hemieSettings?.[hemieConstructionSetting(thermalConstructionType)])?.insulation_location) : [];
+  const hostMoreFields = thermalMethod && thermalConstructionType && hostMoreLabels.length ? {
+    fields: renderHostElementFields(thermalMethod, 'more'),
+    labels: hostMoreLabels,
+    stated: hemieMoreKeys(thermalConstructionType).some((key) => thermalExtra[key] !== undefined && thermalExtra[key] !== null && thermalExtra[key] !== ''),
+  } : undefined;
   const thermalMethodControl = thermalMethod && thermalMethodOptions.length > 1 ? (
     <ThermalMethodControl methods={thermalMethodOptions} value={thermalMethod} onChange={switchThermalMethod} />
   ) : null;
@@ -5317,7 +5335,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           className="advanced-fields-section"
                           thermalMethod={thermalMethod}
                           hostFields={elementType !== 'BuildingElementTransparent' ? hostElementFieldsForMethod : undefined}
-                          omitFields={thermalMethod && elementType === 'BuildingElementTransparent' ? (thermalMethod === 'band' ? WINDOW_BAND_THERMAL_FIELDS : WINDOW_THERMAL_FIELDS) : undefined}
+                          hostMoreFields={elementType !== 'BuildingElementTransparent' ? hostMoreFields : undefined}
+                          omitFields={thermalMethod && elementType === 'BuildingElementTransparent' ? (thermalMethod === 'band' ? WINDOW_BAND_THERMAL_FIELDS : WINDOW_THERMAL_FIELDS)
+                            : outsideSurfaceHosted ? HOSTED_OUTSIDE_SURFACE_FIELDS : undefined}
                         />
                       </React.Suspense>
                     )}
