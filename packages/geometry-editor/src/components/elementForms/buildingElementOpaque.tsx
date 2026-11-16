@@ -38,6 +38,7 @@
 // has many other consumers unrelated to this module (name-editing guards,
 // profile-top gating, the assembly-calculator bridge, etc.).
 
+import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import { useState } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { isExternalLineWall } from '../../geometry/thermalBridge/proposeExternalCorners';
@@ -514,7 +515,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
           )}
         </div>
         {renderFieldLabel(
-          'Base Height (m):',
+          `${resolveFieldLabelContent('base_height')} (m):`,
           elementType,
           'base_height',
           <DerivedSource
@@ -612,7 +613,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
         ) : null}
         {canMarkExternalDoor ? (
           <>
-            {renderFieldLabel('External Door', elementType)}
+            {renderFieldLabel(resolveFieldLabelContent('is_external_door'), elementType)}
             <div className="element-input">
               <label className="checkbox-container">
                 <input

@@ -801,10 +801,10 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(screen.getByText('Assembly')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Loading assemblies…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
-    expect(input('U Value')).not.toBeDisabled();
-    expect(input('U Value')).toHaveValue('');
-    expect(input('Thermal Resistance Construction')).not.toBeDisabled();
-    expect(input('Thermal Resistance Construction')).toHaveValue('');
+    expect(input('U-Value')).not.toBeDisabled();
+    expect(input('U-Value')).toHaveValue('');
+    expect(input('Construction thermal resistance')).not.toBeDisabled();
+    expect(input('Construction thermal resistance')).toHaveValue('');
     expect(screen.getByRole('combobox', { name: 'Mass distribution' }))
       .not.toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Heat capacity per area' }))

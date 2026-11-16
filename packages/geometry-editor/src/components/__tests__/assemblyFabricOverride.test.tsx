@@ -109,7 +109,7 @@ function editSingleElementU(store: GeometryStoreApi, value: string) {
 
 function editMultiSelectU(store: GeometryStoreApi, value: string) {
   render(providers(store, <MultiSelectPanel selectedElementIds={['wall']} onDelete={vi.fn()} />));
-  fireEvent.change(screen.getByLabelText('U Value'), { target: { value } });
+  fireEvent.change(screen.getByLabelText('U-Value'), { target: { value } });
 }
 
 describe('assembly versus U-value edits', () => {

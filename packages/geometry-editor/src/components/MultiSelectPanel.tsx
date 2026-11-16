@@ -2959,7 +2959,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         {selectionKinds.has('BuildingElementOpaque') && (
           <div className="multi-select-field-group">
             {renderSelectRow(
-              'External Door',
+              resolveFieldLabelContent('is_external_door'),
               opaqueExternalDoorSummary,
               activeOpaqueSurfaceIds.length > 0,
               BOOLEAN_SELECT_OPTIONS,
@@ -3820,7 +3820,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               constructionFieldScopeKey,
               constructionTargetIds,
               'u',
-              'U Value',
+              resolveFieldLabelContent('u_value'),
               constructionUValueSummary,
               'Set U',
               (_el, value) => ({ u_value: value }),
@@ -3830,7 +3830,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               constructionFieldScopeKey,
               constructionTargetIds,
               'r',
-              'Thermal Resistance Construction',
+              resolveFieldLabelContent('thermal_resistance_construction'),
               constructionResistanceSummary,
               'Set R',
               (el, value) => ({

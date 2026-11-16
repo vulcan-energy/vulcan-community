@@ -150,6 +150,7 @@
 //    already a no-op today, independent of this reset gap.
 // Preserved verbatim in reset() below; not fixed speculatively.
 
+import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import {
   decimalInputProps,
   formatConditionalDecimals,
@@ -446,7 +447,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
           })
         )}
         {renderFieldLabel(
-          'Base Height:',
+          `${resolveFieldLabelContent('base_height')}:`,
           elementType,
           '_base_height',
           <DerivedSource
