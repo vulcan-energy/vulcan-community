@@ -150,6 +150,7 @@
 //    already a no-op today, independent of this reset gap.
 // Preserved verbatim in reset() below; not fixed speculatively.
 
+import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import {
   decimalInputProps,
   formatConditionalDecimals,
@@ -171,6 +172,8 @@ import { StandardInput } from '../StandardInput';
 import type { Element } from '../../geometry/types';
 import { renderWallPitchField } from './wallPitchField';
 import { useTargetRules } from '../../hooks/useTargetRules';
+import { adjacentUnconditionedZone, ZONE_UNCONDITIONED } from '../../lib/unconditionedZones';
+import { UnheatedSpaceFrom } from '../UnconditionedZoneFields';
 import type {
   ElementFormModule,
   ElementFormSelection,
@@ -207,6 +210,8 @@ export interface AdjacentLikeElementFormState {
    * line-shape width derivation — same precedent as OnSiteGeneration's
    * canvas-sync / wallShared.tsx's getGlobalOrientationOffset threading. */
   getGlobalOrientationOffset: () => number;
+  /** An unheated-space element next to an unconditioned zone takes the zone element form. */
+  zoneSubtype: string | undefined;
 }
 
 function useFormState(ctx: ElementFormStateCtx): AdjacentLikeElementFormState {
@@ -281,6 +286,7 @@ function useFormState(ctx: ElementFormStateCtx): AdjacentLikeElementFormState {
   const partyWallConstructionRInput = useDecimalInput('', commitPartyWallFabric('thermal_resistance_construction'), { commitOnChange: true, formatOnBlur: 'preserve' });
 
   const { constructionBands } = useTargetRules();
+  const selected = ctx.elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && ctx.selection ? ctx.getElementById(ctx.selection.id) : undefined;
 
   return {
     partyWallCavityResistanceInput,
@@ -300,6 +306,7 @@ function useFormState(ctx: ElementFormStateCtx): AdjacentLikeElementFormState {
     setPitch: ctx.shared.setPitch,
     pitchDraftInput: ctx.shared.pitchDraftInput,
     getGlobalOrientationOffset: ctx.getGlobalOrientationOffset,
+    zoneSubtype: selected && adjacentUnconditionedZone(selected) ? ZONE_UNCONDITIONED : undefined,
   };
 }
 
@@ -440,7 +447,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
           })
         )}
         {renderFieldLabel(
-          'Base Height:',
+          `${resolveFieldLabelContent('base_height')}:`,
           elementType,
           '_base_height',
           <DerivedSource
@@ -615,7 +622,18 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
             )}
           </>
         )}
+        {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && selectedElement && selection?.type === 'element' && !selection.isPlaceholder && (
+          <UnheatedSpaceFrom
+            element={selectedElement}
+            commit={(extraJson) => updateElement(selectedElement.id, { extra_json: extraJson } as Partial<Element>)}
+            editElement={(id) => ctx.setSelection({ type: 'element', id })}
+          />
+        )}
       </>
     );
+  },
+
+  subtype(state) {
+    return state.zoneSubtype;
   },
 };

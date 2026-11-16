@@ -215,8 +215,8 @@ describe('validateElement window rules', () => {
 
   it('keeps blank columns in force with no schema', () => {
     expect(messages(windowElement(undefined, blankColumns as never), unavailableGeometrySchemaPort)).toEqual([
-      'Free Area Height is required',
-      'Mid Height is required',
+      'Free area height is required',
+      'Mid height is required',
       'Open area is required',
     ]);
   });
@@ -242,22 +242,22 @@ describe('validateElement window rules', () => {
 
   it('calls a blank free height required, not zero, beside an old automatic zero area', () => {
     expect(messages(windowElement(undefined, { free_area_height: undefined, max_window_open_area: 0 } as never), port(physicalItems)))
-      .toEqual(['Free Area Height is required']);
+      .toEqual(['Free area height is required']);
   });
 
   it('keeps a7 required-value errors on a closed or zero window', () => {
     expect(messages(windowElement(undefined, { free_area_height: 0, mid_height: 0, max_window_open_area: 0 }), port(legacyItems))).toEqual([
-      'Free Area Height should not be 0',
-      'Mid Height should not be 0',
+      'Free area height should not be 0',
+      'Mid height should not be 0',
       'Open area should not be 0',
     ]);
     expect(messages(windowElement({ window_part_list: [] }, { free_area_height: 0, mid_height: 1, max_window_open_area: 0.4 }), port(legacyItems)))
-      .toEqual(['Free Area Height should not be 0']);
+      .toEqual(['Free area height should not be 0']);
   });
 
   it('keeps zero free height flagged on a7 and accepted on a8/a9', () => {
     const zeroFree = { free_area_height: 0, mid_height: 1, max_window_open_area: 0.4 };
-    expect(messages(windowElement(undefined, zeroFree), port(legacyItems))).toEqual(['Free Area Height should not be 0']);
+    expect(messages(windowElement(undefined, zeroFree), port(legacyItems))).toEqual(['Free area height should not be 0']);
     expect(messages(windowElement(undefined, { ...zeroFree, mid_height: 1.5 }), port(physicalItems))).toEqual([]);
   });
 
@@ -271,14 +271,14 @@ describe('validateElement window rules', () => {
     });
 
     it('rejects a free height above the window height', () => {
-      expect(messages(windowElement(undefined, opening({ free_area_height: 1.1 })), port(physicalItems))[0]).toContain('Free Area Height');
+      expect(messages(windowElement(undefined, opening({ free_area_height: 1.1 })), port(physicalItems))[0]).toContain('Free area height');
       expect(messages(windowElement({ window_part_list: [opening({}), opening({ free_area_height: 1.1 })] }), port(physicalItems))[0]).toContain('Part 2');
       expect(messages(windowElement(undefined, opening({ free_area_height: 1 })), port(physicalItems))).toEqual([]);
     });
 
     it('rejects a mid height outside the glazed span, ground-relative in the editor', () => {
-      expect(messages(windowElement(undefined, opening({ mid_height: 2.1 })), port(physicalItems))[0]).toContain('Mid Height');
-      expect(messages(windowElement({ window_part_list: [opening({ mid_height: 0.9 })] }), port(physicalItems))[0]).toContain('Mid Height');
+      expect(messages(windowElement(undefined, opening({ mid_height: 2.1 })), port(physicalItems))[0]).toContain('Mid height');
+      expect(messages(windowElement({ window_part_list: [opening({ mid_height: 0.9 })] }), port(physicalItems))[0]).toContain('Mid height');
       expect(messages(windowElement(undefined, opening({ mid_height: 1 })), port(physicalItems))).toEqual([]);
       expect(messages(windowElement(undefined, opening({ mid_height: 2 })), port(physicalItems))).toEqual([]);
     });

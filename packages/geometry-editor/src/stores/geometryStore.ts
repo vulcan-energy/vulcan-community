@@ -232,6 +232,7 @@ import {
   createElementNameLookup,
   createParentElementLookup,
 } from '../lib/elementNameRemap';
+import { keyZoneByRowName } from '../lib/unconditionedZones';
 import { collectDuplicateElementNameWarnings } from '../lib/elementNameDuplicates';
 import { elementFieldSource } from '../lib/fieldDefault';
 import type { FieldSourceOf } from '../lib/provenance';
@@ -7210,14 +7211,14 @@ const createGeometryState = (
     const newId = generateId();
     copySources.set(newId, src.id);
     const translatedCoords = (src.coordinates || []).map(c => ({ x: c.x + dx, y: c.y + dy, z: c.z }));
-    const dup: Element = {
+    const dup: Element = keyZoneByRowName({
       ...(src as Element),
       id: newId,
       name: newName,
       coordinates: translatedCoords,
       _nameAutoSync: newNameAutoSync,
       _v: (src._v ?? 0) + 1,
-    };
+    });
 
     const attachedWindowShading =
       src.type === 'BuildingElementTransparent' && src.name

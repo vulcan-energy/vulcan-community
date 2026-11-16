@@ -14,6 +14,8 @@
  * (not every legacy / SAP field name is batch-editable here).
  */
 
+import { resolveFieldLabelContent } from '../lib/schemaDescriptionOverrides';
+
 export type JsonValueKind = 'number' | 'string' | 'boolean';
 
 export interface FieldTarget {
@@ -97,7 +99,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   // ── Airtightness & Thermal Bridging (Metadata key-value fields) ──
   {
     id: 'air_permeability_test_result',
-    label: 'Air Permeability Test Result',
+    label: resolveFieldLabelContent('AirPermeability_test_result'),
     field: 'AirPermeability_test_result',
     sections: ['Metadata'],
     category: 'Airtightness & bridging',
@@ -109,7 +111,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'air_permeability_test_pressure',
-    label: 'Air Permeability Test Pressure',
+    label: resolveFieldLabelContent('AirPermeability_test_pressure'),
     field: 'AirPermeability_test_pressure',
     sections: ['Metadata'],
     category: 'Airtightness & bridging',
@@ -120,7 +122,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'ventilation_terrain_class',
-    label: 'Ventilation Terrain Class',
+    label: resolveFieldLabelContent('Ventilation_terrain_class'),
     field: 'Ventilation_terrain_class',
     sections: ['Metadata'],
     category: 'Airtightness & bridging',
@@ -131,7 +133,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'ventilation_shield_class',
-    label: 'Ventilation Shield Class',
+    label: resolveFieldLabelContent('Ventilation_shield_class'),
     field: 'Ventilation_shield_class',
     sections: ['Metadata'],
     category: 'Airtightness & bridging',
@@ -154,7 +156,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'heating_control_type',
-    label: 'Heating Control Type',
+    label: resolveFieldLabelContent('HeatingControlType'),
     field: 'HeatingControlType',
     sections: ['Metadata'],
     category: 'Heating & controls',
@@ -167,7 +169,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   // ── Walls / Roofs / Doors (Opaque) ──
   {
     id: 'u_value_opaque',
-    label: 'U Value',
+    label: resolveFieldLabelContent('u_value'),
     field: 'u_value',
     sections: ['Exposed Elements'],
     typeFilter: 'BuildingElementOpaque',
@@ -178,7 +180,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'thermal_resistance_opaque',
-    label: 'Thermal Resistance Construction',
+    label: resolveFieldLabelContent('thermal_resistance_construction'),
     field: 'thermal_resistance_construction',
     sections: ['Exposed Elements'],
     typeFilter: 'BuildingElementOpaque',
@@ -189,7 +191,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'surface_colour_opaque',
-    label: 'Colour',
+    label: resolveFieldLabelContent('colour'),
     field: 'colour',
     sections: ['Exposed Elements'],
     typeFilter: 'BuildingElementOpaque',
@@ -201,7 +203,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'areal_heat_capacity_opaque',
-    label: 'Areal Heat Capacity',
+    label: resolveFieldLabelContent('areal_heat_capacity'),
     field: 'areal_heat_capacity',
     sections: ['Exposed Elements'],
     typeFilter: 'BuildingElementOpaque',
@@ -212,7 +214,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'mass_distribution_class_opaque',
-    label: 'Mass Distribution Class',
+    label: resolveFieldLabelContent('mass_distribution_class'),
     field: 'mass_distribution_class',
     sections: ['Exposed Elements'],
     typeFilter: 'BuildingElementOpaque',
@@ -225,7 +227,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   // ── Windows / Transparent ──
   {
     id: 'u_value_window',
-    label: 'U Value',
+    label: resolveFieldLabelContent('u_value'),
     field: 'u_value',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',
@@ -236,7 +238,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'g_value',
-    label: 'G Value',
+    label: resolveFieldLabelContent('g_value'),
     field: 'g_value',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',
@@ -247,7 +249,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'frame_area_fraction',
-    label: 'Frame Area Fraction',
+    label: resolveFieldLabelContent('frame_area_fraction'),
     field: 'frame_area_fraction',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',
@@ -258,7 +260,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'free_area_height',
-    label: 'Free Area Height',
+    label: resolveFieldLabelContent('free_area_height'),
     field: 'free_area_height',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',
@@ -282,7 +284,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'window_security_risk',
-    label: 'Security risk',
+    label: resolveFieldLabelContent('security_risk'),
     field: 'security_risk',
     sections: ['Window Elements'],
     typeFilter: 'BuildingElementTransparent',
@@ -296,7 +298,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   // ── Ground Elements ──
   {
     id: 'u_value_ground',
-    label: 'U Value',
+    label: resolveFieldLabelContent('u_value'),
     field: 'u_value',
     sections: ['Ground Elements'],
     typeFilter: 'BuildingElementGround',
@@ -307,7 +309,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'thermal_resistance_floor_ground',
-    label: 'Thermal Resistance Floor Construction',
+    label: resolveFieldLabelContent('thermal_resistance_floor_construction'),
     field: 'thermal_resistance_floor_construction',
     sections: ['Ground Elements'],
     typeFilter: 'BuildingElementGround',
@@ -318,7 +320,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'psi_wall_floor_junc',
-    label: 'Psi Wall Floor Junc',
+    label: resolveFieldLabelContent('psi_wall_floor_junc'),
     field: 'psi_wall_floor_junc',
     sections: ['Ground Elements'],
     category: 'Ground',
@@ -328,7 +330,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'height_upper_surface',
-    label: 'Height Upper Surface',
+    label: resolveFieldLabelContent('height_upper_surface'),
     field: 'height_upper_surface',
     sections: ['Ground Elements'],
     category: 'Ground',
@@ -338,7 +340,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'thermal_resist_insul_ground',
-    label: 'Thermal Resist Insul',
+    label: resolveFieldLabelContent('thermal_resist_insul'),
     field: 'thermal_resist_insul',
     sections: ['Ground Elements'],
     category: 'Ground',
@@ -348,7 +350,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'areal_heat_capacity_ground',
-    label: 'Areal Heat Capacity',
+    label: resolveFieldLabelContent('areal_heat_capacity'),
     field: 'areal_heat_capacity',
     sections: ['Ground Elements'],
     typeFilter: 'BuildingElementGround',
@@ -359,7 +361,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'mass_distribution_class_ground',
-    label: 'Mass Distribution Class',
+    label: resolveFieldLabelContent('mass_distribution_class'),
     field: 'mass_distribution_class',
     sections: ['Ground Elements'],
     typeFilter: 'BuildingElementGround',
@@ -372,7 +374,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   // ── Non-Exposed Elements (see `Non-Exposed Elements` + Type column in CSV) ──
   {
     id: 'u_value_adjacent_conditioned',
-    label: 'U Value',
+    label: resolveFieldLabelContent('u_value'),
     field: 'u_value',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementAdjacentConditionedSpace',
@@ -383,7 +385,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'u_value_adjacent_unconditioned',
-    label: 'U Value',
+    label: resolveFieldLabelContent('u_value'),
     field: 'u_value',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementAdjacentUnconditionedSpace_Simple',
@@ -394,7 +396,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'u_value_party_wall',
-    label: 'U Value',
+    label: resolveFieldLabelContent('u_value'),
     field: 'u_value',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementPartyWall',
@@ -405,7 +407,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'areal_heat_party_wall',
-    label: 'Areal Heat Capacity',
+    label: resolveFieldLabelContent('areal_heat_capacity'),
     field: 'areal_heat_capacity',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementPartyWall',
@@ -416,7 +418,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'mass_distribution_party_wall',
-    label: 'Mass Distribution Class',
+    label: resolveFieldLabelContent('mass_distribution_class'),
     field: 'mass_distribution_class',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementPartyWall',
@@ -427,7 +429,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'thermal_resistance_nonexposed',
-    label: 'Thermal Resistance Construction',
+    label: resolveFieldLabelContent('thermal_resistance_construction'),
     field: 'thermal_resistance_construction',
     sections: ['Non-Exposed Elements'],
     category: 'Non-exposed',
@@ -438,7 +440,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'areal_heat_capacity_adjacent_unconditioned',
-    label: 'Areal Heat Capacity',
+    label: resolveFieldLabelContent('areal_heat_capacity'),
     field: 'areal_heat_capacity',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementAdjacentUnconditionedSpace_Simple',
@@ -449,7 +451,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'mass_distribution_class_adjacent_unconditioned',
-    label: 'Mass Distribution Class',
+    label: resolveFieldLabelContent('mass_distribution_class'),
     field: 'mass_distribution_class',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementAdjacentUnconditionedSpace_Simple',
@@ -460,7 +462,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   },
   {
     id: 'thermal_resistance_unconditioned',
-    label: 'Thermal Resistance Unconditioned Space',
+    label: resolveFieldLabelContent('thermal_resistance_unconditioned_space'),
     field: 'thermal_resistance_unconditioned_space',
     sections: ['Non-Exposed Elements'],
     typeFilter: 'BuildingElementAdjacentUnconditionedSpace_Simple',
@@ -473,7 +475,7 @@ export const FIELD_TARGETS: readonly FieldTarget[] = [
   // ── Lighting ──
   {
     id: 'lighting_efficacy',
-    label: 'Efficacy',
+    label: resolveFieldLabelContent('efficacy'),
     field: 'efficacy',
     sections: ['Lighting'],
     category: 'Lighting',

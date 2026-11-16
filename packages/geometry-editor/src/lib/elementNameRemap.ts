@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element } from '../geometry/types';
+import { keyZoneByRowName, ZONE_UNCONDITIONED } from './unconditionedZones';
 
 /** Resolve a unique name within the requested zone, or globally for unscoped links. */
 export function createElementNameLookup(elements: Iterable<Element>) {
@@ -361,6 +362,14 @@ export const buildUnambiguousElementNameMap = (
   return { nameMap, skippedAmbiguousNameCount };
 };
 
+/** An element next to an unconditioned zone names the zone's row, which only a zone row's rename moves. */
+const remapUnconditionedZoneReference = (element: Element, zoneRenames: Map<string, string>): Element => {
+  const extra = element.extra_json as Record<string, unknown> | undefined;
+  const to = typeof extra?.[ZONE_UNCONDITIONED] === 'string' ? zoneRenames.get(extra[ZONE_UNCONDITIONED] as string) : undefined;
+  if (to === undefined) return element;
+  return { ...element, extra_json: { ...extra, [ZONE_UNCONDITIONED]: to }, _v: ((element as ElementWithNameRefs)._v ?? 0) + 1 } as Element;
+};
+
 export const applyElementRenamePlanToElementsById = (
   elementsById: Record<string, Element>,
   elementIds: string[],
@@ -378,6 +387,10 @@ export const applyElementRenamePlanToElementsById = (
   const renameTargetById = new Map(
     normalizedRenameEntries(renamePlan).map((entry) => [entry.elementId, entry.to]),
   );
+  const zoneRenames = new Map(normalizedRenameEntries(renamePlan).flatMap((entry) => {
+    const row = elementsById[entry.elementId];
+    return row?.type === 'System' && row.subcategory === ZONE_UNCONDITIONED ? [[entry.from, entry.to] as const] : [];
+  }));
   const resolveOldParent = createParentElementLookup(Object.values(oldElementsById));
   const resolveOldHost = createElementNameLookup(
     Object.values(oldElementsById).filter((candidate) =>
@@ -395,12 +408,13 @@ export const applyElementRenamePlanToElementsById = (
     const host = oldElement.type === 'MechanicalVentilationTerminal'
       ? resolveOldHost(oldElement.host_element)
       : undefined;
-    const nextElement = remapElementNameReferences(
+    const remapped = remapUnconditionedZoneReference(remapElementNameReferences(
       element,
       scopedNameMap,
       parent ? renameTargetById.get(parent.id) ?? parent.name : element.parent_element,
       host ? renameTargetById.get(host.id) ?? host.name : (element as ElementWithNameRefs).host_element,
-    );
+    ), zoneRenames);
+    const nextElement = renameTargetById.has(elementId) ? keyZoneByRowName(remapped) : remapped;
     if (nextElement === element) continue;
 
     if (!changed) {

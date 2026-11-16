@@ -4466,6 +4466,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   }}
                   // An existing element keeps its type when the target does not take it; it is not offered for others.
                   options={elementTypeOptions}
+                  // An unconditioned zone is a Systems row but not a plant: it reads as what it is.
+                  valueLabel={elementType === 'System' && systemFormState.systemSubcategory === 'ZoneUnconditioned' ? 'Unconditioned zone' : undefined}
                   placeholder="Select element type..."
                   ariaLabel="Element type"
                   className="element-editor-type-picker"
@@ -5292,7 +5294,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           dormerThermalRepresentatives.window,
                         )}
                       </div>
-                    ) : hasAppliedPcdbSystemData ? (
+                    ) : hasAppliedPcdbSystemData || (elementType === 'System' && systemFormState.systemSubcategory === 'ZoneUnconditioned') ? (
+                      // An unconditioned zone's fields are its panel's own (UnconditionedZoneFields).
                       null
                     ) : (
                       <React.Suspense fallback={<LazyInlineFallback label="Opening advanced fields..." />}>

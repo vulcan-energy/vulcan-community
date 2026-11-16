@@ -7313,6 +7313,30 @@ impl JSONBuilder {
                                 if let Some(extra_json) =
                                     row.get("extra_json").and_then(|v| v.as_object())
                                 {
+                                    // A zone is one row's: merging a second row's zone of the same
+                                    // name would silently join two envelopes (E060).
+                                    if subcategory == "ZoneUnconditioned" {
+                                        let owned = csv_owned
+                                            .entry("ZoneUnconditioned".to_string())
+                                            .or_default();
+                                        for name in extra_json
+                                            .get("ZoneUnconditioned")
+                                            .and_then(Value::as_object)
+                                            .into_iter()
+                                            .flat_map(|zones| zones.keys())
+                                        {
+                                            if let Some(previous_row) = owned.get(name) {
+                                                return Err(BuildError::new(
+                                                    "E060",
+                                                    &format!(
+                                                        "Systems rows '{previous_row}' and '{element_name}' both define \
+                                                         unconditioned zone '{name}'. Rename one of the zones, remove one row, or move both rows' parts into one row."
+                                                    ),
+                                                ));
+                                            }
+                                            owned.insert(name.clone(), element_name.to_string());
+                                        }
+                                    }
                                     Self::merge_wrapped_system_fragment(
                                         result_obj,
                                         extra_json,
@@ -11731,6 +11755,69 @@ mod wet_emitter_tests {
                 );
             }
         }
+        // An element next to an unconditioned zone exists on the HEM:EPC schema only.
+        for candidate in names(&editor["epcBuildingAliases"]) {
+            let csv = format!(
+                "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\nNon-Exposed Elements\nName,Zone,Type,area,pitch,extra_json\nR1,Living,{candidate},10,90,\"{{\"\"ZoneUnconditioned\"\":\"\"Garage\"\"}}\"\n"
+            );
+            let mut builder = JSONBuilder::from_json_inputs(
+                include_str!("../../../data/schemas/hem_epc_orchestrator_input.schema.json"),
+                include_str!("../../../data/defaults/defaults_template_epc.json"),
+                ModelProfile::Epc,
+                &crate::VersionMetadata {
+                    hem_core_version: "2.0.0a4".into(),
+                    wrapper_version: Some("0.13.2".into()),
+                },
+            )
+            .expect("EPC builder");
+            builder.set_product_database(
+                crate::epc_products::ProductDatabase::parse(&crate::epc_products::tests::pinned())
+                    .unwrap(),
+            );
+            let model = builder.build_json(&parse_csv(&csv)).expect("EPC build");
+            assert!(
+                !builder
+                    .take_non_fatal_errors()
+                    .iter()
+                    .any(|e| ["E028", "E056", "E065"].contains(&e.code.as_str())),
+                "EPC Non-Exposed Type '{candidate}'"
+            );
+            assert_eq!(
+                model["Zone"]["Living"]["BuildingElement"]["R1"]["type"],
+                candidate
+            );
+        }
+    }
+
+    #[test]
+    fn two_systems_rows_defining_one_unconditioned_zone_fail_naming_both() {
+        let zone = r#""{""ZoneUnconditioned"":{""Garage"":{""method"":""Calculated""}}}""#;
+        let csv = format!(
+            "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\nSystems\nName,Zone,Type,subcategory,extra_json\nGarage,Living,System,ZoneUnconditioned,{zone}\nGarage 1,Living,System,ZoneUnconditioned,{zone}\n"
+        );
+        let mut builder = JSONBuilder::from_json_inputs(
+            include_str!("../../../data/schemas/hem_epc_orchestrator_input.schema.json"),
+            include_str!("../../../data/defaults/defaults_template_epc.json"),
+            ModelProfile::Epc,
+            &crate::VersionMetadata {
+                hem_core_version: "2.0.0a4".into(),
+                wrapper_version: Some("0.13.2".into()),
+            },
+        )
+        .expect("EPC builder");
+        builder.set_product_database(
+            crate::epc_products::ProductDatabase::parse(&crate::epc_products::tests::pinned())
+                .unwrap(),
+        );
+        let error = builder
+            .build_json(&parse_csv(&csv))
+            .expect_err("two rows defining one zone must not merge");
+        assert_eq!(error.code, "E060");
+        assert!(
+            error.message.contains("'Garage'") && error.message.contains("'Garage 1'"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]

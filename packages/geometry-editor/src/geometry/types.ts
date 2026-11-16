@@ -429,7 +429,8 @@ export type SystemSubcategory =
   | 'InfiltrationVentilation'
   | 'SpaceCoolSystem'
   | 'SpaceHeatSystem'
-  | 'WWHRS';
+  | 'WWHRS'
+  | 'ZoneUnconditioned';
 
 // System element (PCDB MVP) – point-based, global
 export interface System extends BaseElement {

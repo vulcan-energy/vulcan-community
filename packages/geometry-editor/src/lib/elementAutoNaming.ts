@@ -12,6 +12,7 @@ export const SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS: Record<System['subcategory'], 
   SpaceCoolSystem: 'Space cooling',
   SpaceHeatSystem: 'Space heating',
   WWHRS: 'WWHRS',
+  ZoneUnconditioned: 'Unconditioned zone',
 };
 
 const AUTO_NAME_ACRONYM_MAP: Record<string, string> = {
@@ -54,6 +55,7 @@ const SYSTEM_EXTRA_JSON_FAMILY_KEYS: Array<System['subcategory']> = [
   'SpaceCoolSystem',
   'SpaceHeatSystem',
   'WWHRS',
+  'ZoneUnconditioned',
 ];
 
 const extractSystemTypeLabelFromFamilyValue = (value: unknown): string => {

@@ -25,6 +25,7 @@
 // behaviourally equivalent, since ctx is rebuilt fresh every render already
 // and nothing else depends on these functions' identity.
 
+import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { Element } from '../../geometry/types';
@@ -665,7 +666,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                   },
                 )}
               </div>
-              {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
+              {renderFieldLabel(`${resolveFieldLabelContent('base_height')} (m):`, elementType, 'base_height')}
               <div ref={registerBaseFieldRefs('base_height')}>
                 {renderHostResetRow(
                   'base_height',

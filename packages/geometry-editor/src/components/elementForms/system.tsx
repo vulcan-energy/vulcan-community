@@ -139,6 +139,9 @@ import {
   withoutPresetPrimaryPipework,
 } from '../systemEditorUtils';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
+import { takesUnconditionedZones, ZONE_UNCONDITIONED } from '../../lib/unconditionedZones';
+import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
+import { UnconditionedZoneFields } from '../UnconditionedZoneFields';
 
 /** This module's exclusive share of ElementCreator's `PendingSystemAction`
  * local type — moved verbatim, exported for the orchestrator's DeleteConfirmModal
@@ -237,6 +240,8 @@ export interface SystemFormState {
   systemPlantCount: number;
   /** The categories the target schema takes (a warm-air heater only where it has one). */
   systemCategoryOptions: Array<{ value: string; label: string }>;
+  /** The target's root schema: the categories it takes. */
+  rootSchema: unknown;
 }
 
 function useFormState(ctx: ElementFormStateCtx): SystemFormState {
@@ -494,9 +499,12 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
 
   const applySystemSubcategoryChange = useCallback(
     (value: string) => {
+      // A zone takes the Calculated method: the only one HEM:EPC accepts at present.
+      const name = selection?.id ? ctx.getElementById(selection.id)?.name : undefined;
+      const extraJson = value === ZONE_UNCONDITIONED ? { [ZONE_UNCONDITIONED]: { [name || 'Unconditioned zone']: { method: 'Calculated' } } } : undefined;
       setSystemSubcategory(value);
       setSystemPreset('');
-      setSystemExtraJson(null);
+      setSystemExtraJson(extraJson ?? null);
       if (
         selection?.id
         && !selection.isPlaceholder
@@ -505,12 +513,12 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
         ctx.updateElement(selection.id, {
           subcategory: value || undefined,
           system_preset: undefined,
-          extra_json: undefined,
+          extra_json: extraJson,
         } as Partial<Element>);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see commitSystemSelectionUpdate's dep-array comment above.
-    [selection, ctx.updateElement],
+    [selection, ctx.updateElement, ctx.getElementById],
   );
 
   const handleSystemSubcategoryChange = useCallback(
@@ -857,6 +865,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     handleSystemTypeChange,
     systemPlantCount: plantCount,
     systemCategoryOptions,
+    rootSchema: ctx.schemaPort.availability === 'available' ? ctx.schemaPort.getRootSchema(targetSchemaMode(ctx.schemaPort)) : undefined,
   };
 }
 
@@ -930,6 +939,39 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
     } = state;
     const { elementType, renderFieldLabel, elementsById, productCatalogue, hemDatabaseProducts, systemHasProductSlot, renderSpaceHeatSystemEmitterManager, selectedElement } = ctx;
     const sizing = <HeatingSizingBlock element={selectedElement} elements={Object.values(elementsById)} />;
+    const zoneRow = systemSubcategory === ZONE_UNCONDITIONED;
+    const categoryOptions = [...systemCategoryOptions,
+      ...(takesUnconditionedZones(state.rootSchema, ctx.existingBuilding) || zoneRow
+        ? [{ value: ZONE_UNCONDITIONED, label: SYSTEM_SUBCATEGORY_LABELS[ZONE_UNCONDITIONED] }] : [])];
+    const categoryField = (
+      <>
+        {renderFieldLabel('Category:', elementType)}
+        <div className="element-input">
+          <StandardDropdown
+            value={systemSubcategory}
+            onChange={handleSystemSubcategoryChange}
+            options={categoryOptions}
+            variant="ghost"
+            size="md"
+          />
+        </div>
+      </>
+    );
+    // An unconditioned zone has no product, preset or source: its method, envelope and coefficients.
+    if (zoneRow && selectedSystemElementFull) {
+      return (
+        <>
+          {categoryField}
+          <UnconditionedZoneFields
+            row={selectedSystemElementFull}
+            commit={(extraJson) => {
+              state.setSystemExtraJson(extraJson);
+              ctx.updateElement(selectedSystemElementFull.id, { extra_json: extraJson } as Partial<Element>);
+            }}
+          />
+        </>
+      );
+    }
 
     // Products take no sample preset, so the type is chosen here.
     const showType = !!(hemDatabaseProducts && systemPlantCount <= 1 && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
@@ -975,16 +1017,7 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
           </>
         ) : !productCatalogue || systemUiMode === 'presets' ? (
           <>
-            {renderFieldLabel('Category:', elementType)}
-            <div className="element-input">
-              <StandardDropdown
-                value={systemSubcategory}
-                onChange={handleSystemSubcategoryChange}
-                options={systemCategoryOptions}
-                variant="ghost"
-                size="md"
-              />
-            </div>
+            {categoryField}
             {showType ? (
           <>
             <div className="element-label">Type</div>

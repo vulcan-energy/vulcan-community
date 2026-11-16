@@ -140,6 +140,7 @@ import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/m
 import { getHemieBundle, hemieBundleHostProblem } from '../../lib/hemieBundles';
 import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../../lib/hemieFabric';
 import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
+import { adjacentUnconditionedZone, takesUnconditionedZones, unconditionedZoneIssues, unconditionedZoneNames, ZONE_UNCONDITIONED } from '../../lib/unconditionedZones';
 
 // ---------------- Module-level pure helpers ----------------
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
@@ -262,22 +263,10 @@ function formatNumberForIssue(value: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2);
 }
 
-const WINDOW_OPENING_FIELD_ISSUES: Record<WindowOpeningField, string> = {
-  free_area_height: 'Free Area Height should not be 0',
-  mid_height: 'Mid Height should not be 0',
-  max_window_open_area: 'Open area should not be 0',
-};
-
-const WINDOW_OPENING_FIELD_REQUIRED: Record<WindowOpeningField, string> = {
-  free_area_height: 'Free Area Height is required',
-  mid_height: 'Mid Height is required',
-  max_window_open_area: 'Open area is required',
-};
-
 /** A zero and a blank field need different wording. */
 const windowOpeningFieldIssue = (el: BuildingElementTransparent, field: WindowOpeningField): ValidationIssue =>
   geoIssue(
-    typeof el[field] === 'number' ? WINDOW_OPENING_FIELD_ISSUES[field] : WINDOW_OPENING_FIELD_REQUIRED[field],
+    `${resolveFieldLabelContent(field)} ${typeof el[field] === 'number' ? 'should not be 0' : 'is required'}`,
     field,
   );
 
@@ -310,14 +299,14 @@ function physicalOpeningLimitIssues(
     const name = (field: string, single: string) => several ? `Part ${index + 1} ${field}` : single;
     if (row.free_area_height !== undefined && strictlyAbove(row.free_area_height, height)) {
       issues.push(geoIssue(
-        `${name('free height', 'Free Area Height')} (${formatNumberForIssue(row.free_area_height)} m) is greater than the window height (${formatNumberForIssue(height)} m).`,
+        `${name('free height', resolveFieldLabelContent('free_area_height'))} (${formatNumberForIssue(row.free_area_height)} m) is greater than the window height (${formatNumberForIssue(height)} m).`,
         several ? 'window_part_list' : 'free_area_height',
       ));
     }
     const mid = row.mid_height;
     if (mid !== undefined && (strictlyAbove(baseHeight, mid) || strictlyAbove(mid, head))) {
       issues.push(geoIssue(
-        `${name('mid height', 'Mid Height')} (${formatNumberForIssue(mid)} m) is outside the window (${formatNumberForIssue(baseHeight)} m to ${formatNumberForIssue(head)} m above ground).`,
+        `${name('mid height', resolveFieldLabelContent('mid_height'))} (${formatNumberForIssue(mid)} m) is outside the window (${formatNumberForIssue(baseHeight)} m to ${formatNumberForIssue(head)} m above ground).`,
         several ? 'window_part_list' : 'mid_height',
       ));
     }
@@ -337,7 +326,7 @@ function validateWindowOpenings(
   const openings = classifyWindowOpenings(el as unknown as WindowOpeningSource);
   if (physical !== true) {
     const issues: ValidationIssue[] = [];
-    for (const field of Object.keys(WINDOW_OPENING_FIELD_ISSUES) as WindowOpeningField[]) {
+    for (const field of ['free_area_height', 'mid_height', 'max_window_open_area'] as const) {
       if (!isPositiveFiniteNumber(el[field])) issues.push(windowOpeningFieldIssue(el, field));
     }
     if (openings.kind === 'rows' && openings.source === 'parts' && physical === false) {
@@ -1266,6 +1255,10 @@ const CONVERTER_BUILT_FIELDS: Readonly<Record<string, readonly string[]>> = {
 const converterBuilds = (type: string, field: string): boolean =>
   field === 'is_adjacent_space_within_dwelling' || !!CONVERTER_BUILT_FIELDS[type]?.includes(field);
 
+/** The target's root schema, or none when the host gives no schema. */
+const rootSchemaFor = (context: ValidationContext): unknown =>
+  context.schemaPort.availability === 'available' ? context.schemaPort.getRootSchema(targetSchemaMode(context.schemaPort)) : undefined;
+
 /** An existing-building model: the EPC conversion reads categories and defaults where a new build reads drawn detail. */
 const isExistingBuildingContext = (context: ValidationContext): boolean =>
   (context.complianceSettings as { IsExistingBuilding?: boolean } | undefined)?.IsExistingBuilding === true;
@@ -1643,7 +1636,7 @@ export const validateElementCore = (
         issues.push(geo('Perimeter cannot be 0', 'perimeter'));
       }
       if (!groundElement.floor_type) {
-        issues.push(geo('Floor Type is required', 'floor_type'));
+        issues.push(geo(`${resolveFieldLabelContent('floor_type')} is required`, 'floor_type'));
       }
       if (!groundElement.isPlaceholder) {
         const layers = elementAssemblyLayers(groundElement);
@@ -1728,7 +1721,14 @@ export const validateElementCore = (
         }
       }
 
-      if (element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && !element.isPlaceholder
+      const namedZone = element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' ? adjacentUnconditionedZone(element) : undefined;
+      if (namedZone !== undefined && !element.isPlaceholder) {
+        if (!takesUnconditionedZones(rootSchemaFor(context), isExistingBuildingContext(context))) {
+          issues.push(schema('This model cannot have unconditioned zones. Choose Resistance and enter the unheated space\'s resistance.', ZONE_UNCONDITIONED));
+        } else if (elementsById && !unconditionedZoneNames(Object.values(elementsById)).includes(namedZone)) {
+          issues.push(schema(`Next to unconditioned zone '${namedZone}', which the model does not have. Choose a zone or add one.`, ZONE_UNCONDITIONED));
+        }
+      } else if (element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && !element.isPlaceholder
         && !leftToTarget(element.type, 'thermal_resistance_unconditioned_space')) {
         const unheated = element as BuildingElementAdjacentUnconditionedSpace_Simple;
         const ru = unheated.extra_json?.thermal_resistance_unconditioned_space;
@@ -2328,7 +2328,7 @@ export const validateElementCore = (
         issues.push(geo('Orientation must be between 0 and 360 degrees', 'orientation360'));
       }
       if (onSiteElement.base_height === undefined || onSiteElement.base_height <= 0 || onSiteElement.base_height > 500) {
-        issues.push(geo('Base Height must be between 0.01 and 500 m', 'base_height'));
+        issues.push(geo(`${resolveFieldLabelContent('base_height')} must be between 0.01 and 500 m`, 'base_height'));
       }
       if (!onSiteElement.width || onSiteElement.width <= 0 || onSiteElement.width > 100) {
         issues.push(geo('Width must be between 0 and 100 m', 'width'));
@@ -2439,9 +2439,19 @@ export const validateElementCore = (
         'SpaceCoolSystem',
         'SpaceHeatSystem',
         'WWHRS',
+        ZONE_UNCONDITIONED,
       ];
       if (!sysElement.subcategory || !validSubcategories.includes(sysElement.subcategory)) {
         issues.push(geo('System target root must be a supported FHS family', 'subcategory'));
+      }
+      if (sysElement.subcategory === ZONE_UNCONDITIONED && !sysElement.isPlaceholder) {
+        const root = rootSchemaFor(context);
+        const problems = takesUnconditionedZones(root, isExistingBuildingContext(context))
+          ? Object.values(readRecord(readRecord(sysElement.extra_json)[ZONE_UNCONDITIONED])).flatMap((zone) => unconditionedZoneIssues(zone, root))
+          : ['This model cannot have unconditioned zones. Delete this row.'];
+        // One issue: issues are kept one per field.
+        if (problems.length) issues.push(schema(problems.join(' '), 'extra_json'));
+        break;
       }
       const preset = sysElement.system_preset;
       const hasPresetName = typeof preset === 'string' && preset.trim() !== '';

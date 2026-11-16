@@ -160,6 +160,7 @@
 // consumer — see types.ts), parentElement/setParentElement, pitch/setPitch,
 // orientation360/setOrientation360, applyOrientationToGeometry.
 
+import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { calculateDerivedWindowMidHeight } from '../../lib/zoneDerivation';
@@ -998,7 +999,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             />
           )}
         </div>
-        {renderFieldLabel('Base Height (m):', elementType, 'base_height')}
+        {renderFieldLabel(`${resolveFieldLabelContent('base_height')} (m):`, elementType, 'base_height')}
         <div className="element-input" ref={registerBaseFieldRef('base_height')}>
           <StandardInput
             {...decimalInputProps(state.baseHeightInput)}

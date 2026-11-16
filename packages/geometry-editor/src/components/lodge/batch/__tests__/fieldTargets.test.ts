@@ -30,21 +30,21 @@ describe('FIELD_TARGETS', () => {
     }
   });
 
-  it('uses raw-field-faithful display labels for FHS fabric and window targets', () => {
-    expect(getFieldTargetById('u_value_opaque')?.label).toBe('U Value');
-    expect(getFieldTargetById('u_value_window')?.label).toBe('U Value');
-    expect(getFieldTargetById('g_value')?.label).toBe('G Value');
-    expect(getFieldTargetById('frame_area_fraction')?.label).toBe('Frame Area Fraction');
-    expect(getFieldTargetById('free_area_height')?.label).toBe('Free Area Height');
+  it('labels FHS fabric and window targets as the element editor does', () => {
+    expect(getFieldTargetById('u_value_opaque')?.label).toBe('U-Value');
+    expect(getFieldTargetById('u_value_window')?.label).toBe('U-Value');
+    expect(getFieldTargetById('g_value')?.label).toBe('G-Value');
+    expect(getFieldTargetById('frame_area_fraction')?.label).toBe('Frame area fraction');
+    expect(getFieldTargetById('free_area_height')?.label).toBe('Free area height');
     expect(getFieldTargetById('max_window_open_area')?.label).toBe('Open area');
     expect(getFieldTargetById('security_risk')?.label).toBeUndefined();
     expect(getFieldTargetById('window_security_risk')?.label).toBe('Security risk');
-    expect(getFieldTargetById('areal_heat_capacity_opaque')?.label).toBe('Areal Heat Capacity');
-    expect(getFieldTargetById('mass_distribution_class_opaque')?.label).toBe('Mass Distribution Class');
-    expect(getFieldTargetById('mass_distribution_class_ground')?.label).toBe('Mass Distribution Class');
-    expect(getFieldTargetById('u_value_party_wall')?.label).toBe('U Value');
-    expect(getFieldTargetById('mass_distribution_party_wall')?.label).toBe('Mass Distribution Class');
-    expect(getFieldTargetById('mass_distribution_class_adjacent_unconditioned')?.label).toBe('Mass Distribution Class');
+    expect(getFieldTargetById('areal_heat_capacity_opaque')?.label).toBe('Heat capacity per area');
+    expect(getFieldTargetById('mass_distribution_class_opaque')?.label).toBe('Mass distribution');
+    expect(getFieldTargetById('mass_distribution_class_ground')?.label).toBe('Mass distribution');
+    expect(getFieldTargetById('u_value_party_wall')?.label).toBe('U-Value');
+    expect(getFieldTargetById('mass_distribution_party_wall')?.label).toBe('Mass distribution');
+    expect(getFieldTargetById('mass_distribution_class_adjacent_unconditioned')?.label).toBe('Mass distribution');
   });
 
   it('contains the original 5 fabric targets', () => {

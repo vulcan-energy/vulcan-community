@@ -149,7 +149,7 @@ describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
     const window = transparentWindow([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }]);
     const { store } = mount([window]);
     const before = json(store, window.id);
-    const field = input('Base Height (m)');
+    const field = input('Base height (m)');
     for (const value of ['-1', '501']) {
       fireEvent.change(field, { target: { value } });
       expect(json(store, window.id)).toBe(before);
@@ -801,10 +801,10 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(screen.getByText('Assembly')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Loading assemblies…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
-    expect(input('U Value')).not.toBeDisabled();
-    expect(input('U Value')).toHaveValue('');
-    expect(input('Thermal Resistance Construction')).not.toBeDisabled();
-    expect(input('Thermal Resistance Construction')).toHaveValue('');
+    expect(input('U-Value')).not.toBeDisabled();
+    expect(input('U-Value')).toHaveValue('');
+    expect(input('Construction thermal resistance')).not.toBeDisabled();
+    expect(input('Construction thermal resistance')).toHaveValue('');
     expect(screen.getByRole('combobox', { name: 'Mass distribution' }))
       .not.toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Heat capacity per area' }))

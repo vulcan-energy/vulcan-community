@@ -180,6 +180,26 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: '°C',
   },
+  // Unconditioned zone (HEM:EPC): plain labels for the ISO 52016-1 coefficients.
+  'coeff_ventilation_unconditioned_zone': {
+    label: 'Ventilation coefficient',
+    description: 'How much the zone’s air leakage adds to its heat loss to outside (c_ztu,ve; 0 = none). Blank: HEM uses 0.5 (BS EN ISO 52016-1 Table B.5).',
+    type: 'number',
+  },
+  'coeff_temp_limit_unconditioned_zone': {
+    label: 'Temperature limit coefficient',
+    description: 'Caps the zone temperature between the dwelling and outdoor air temperatures (c_ztu,h,max). 1 caps it at the warmer of the two; above 1 lets a sunspace get warmer. Blank: 1.',
+    type: 'number',
+  },
+  'factor_adjustment_unconditioned_zone': {
+    label: 'Adjustment factor',
+    type: 'number',
+  },
+  'heat_transfer_coeff_unconditioned_zone_total': {
+    label: 'Total heat transfer coefficient',
+    type: 'number',
+    units: 'W/K',
+  },
   // Wet distribution flow rates are litres per minute: HEM divides design, minimum and maximum flow by 60 (emitters).
   'design_flow_rate': {
     label: 'Design flow rate',
@@ -952,6 +972,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'cm²',
   },
   'orientation360': {
+    label: 'Orientation',
     description: 'Orientation angle of the inclined surface, expressed as the geographical azimuth angle of the horizontal projection of the inclined surface normal (unit: degrees, range: 0-360, where 0°=North, 90°=East, 180°=South, 270°=West).',
     type: 'number',
     units: 'degrees',
@@ -2131,8 +2152,45 @@ function applyLabelSpellings(label: string): string {
   return LABEL_HYPHENATIONS.get(spelled.toLowerCase()) ?? spelled;
 }
 
-/** Step 0 of the override ladder: an explicit `label` on this key's own entry. */
+/**
+ * Labels for fabric fields whose key or title reads badly start-cased, in the sentence case
+ * of the curated `label`s, so every row of a wall, window or floor reads alike. Kept apart
+ * from TOOLTIP_OVERRIDES so a label never changes which entry supplies a description.
+ */
+const FIELD_LABELS: Readonly<Record<string, string>> = {
+  base_height: 'Base height',
+  total_area: 'Total area',
+  frame_area_fraction: 'Frame area fraction',
+  free_area_height: 'Free area height',
+  mid_height: 'Mid height',
+  max_window_open_area: 'Open area',
+  security_risk: 'Security risk',
+  is_external_door: 'External door',
+  Control_WindowOpenable: 'Window opening control',
+  is_unheated_pitched_roof: 'Unheated pitched roof',
+  thermal_resistance_unconditioned_space: 'Unheated space thermal resistance',
+  party_wall_cavity_type: 'Party wall cavity type',
+  party_wall_lining_type: 'Party wall lining type',
+  thermal_resistance_cavity: 'Cavity thermal resistance',
+  floor_type: 'Floor type',
+  thermal_resistance_floor_construction: 'Floor construction thermal resistance',
+  psi_wall_floor_junc: 'Wall-floor junction psi',
+  thickness_walls: 'Wall thickness',
+  edge_insulation: 'Edge insulation',
+  height_upper_surface: 'Upper surface height',
+  shield_fact_location: 'Wind shielding',
+  area_per_perimeter_vent: 'Vent area per perimeter',
+  thermal_resist_insul: 'Void base insulation thermal resistance',
+  thermal_transm_walls: 'Wall thermal transmittance',
+  depth_basement_floor: 'Basement floor depth',
+  thermal_resist_walls_base: 'Basement wall thermal resistance',
+  height_basement_walls: 'Basement wall height above ground',
+  thermal_transm_envi_base: 'Floor above basement thermal transmittance',
+};
+
+/** Step 0 of the override ladder: an explicit `label` for this key. */
 function labelOverrideFor(propertyKey: string): string | undefined {
+  if (FIELD_LABELS[propertyKey]) return FIELD_LABELS[propertyKey];
   const info = TOOLTIP_OVERRIDES[propertyKey] ?? TOOLTIP_OVERRIDES[`*:${propertyKey}`];
   const label = info?.label?.trim();
   return label && label.length > 0 ? label : undefined;

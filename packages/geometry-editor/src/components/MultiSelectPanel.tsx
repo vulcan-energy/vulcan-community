@@ -3,6 +3,7 @@
 
 import { isInternalFloorElement } from '../lib/zoneDerivation';
 import { readProfiledLineFace } from '../lib/profileLineFace';
+import { resolveFieldLabelContent } from '../lib/schemaDescriptionOverrides';
 import { forbiddenFieldKeys, newlyForbiddenFieldKeys } from '../lib/systemSchemaFlatten';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, Pencil, X as XIcon, type IconNode } from 'lucide';
@@ -2958,7 +2959,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         {selectionKinds.has('BuildingElementOpaque') && (
           <div className="multi-select-field-group">
             {renderSelectRow(
-              'External Door',
+              resolveFieldLabelContent('is_external_door'),
               opaqueExternalDoorSummary,
               activeOpaqueSurfaceIds.length > 0,
               BOOLEAN_SELECT_OPTIONS,
@@ -3043,7 +3044,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         {selectionKinds.has('BuildingElementPartyWall') && (
           <div className="multi-select-field-group">
             {renderSelectRow(
-              'Party Wall Cavity Type',
+              resolveFieldLabelContent('party_wall_cavity_type'),
               partyWallCavityTypeSummary,
               wallDimensionIds.length > 0 && partyWallCavityFields.options.length > 0,
               partyWallCavityFields.options,
@@ -3075,7 +3076,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             )}
             {partyWallCavityFields.supportsResistance && renderExtraJsonNumberRow(
               'partyWallCavityResistance',
-              'Cavity Resistance (m²K/W)',
+              `${resolveFieldLabelContent('thermal_resistance_cavity')} (m²K/W)`,
               partyWallCavityResistanceSummary,
               wallDimensionIds.length > 0,
               'e.g. 0.18',
@@ -3102,7 +3103,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           )}
           {renderNumberRow(
             'wallBaseHeight',
-            'Base Height (m)',
+            `${resolveFieldLabelContent('base_height')} (m)`,
             wallBaseHeightSummary,
             wallDimensionIds.length > 0,
             'e.g. 0 — bottom edge above ground',
@@ -3152,7 +3153,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderNumberRow(
           'winBaseHeight',
-          'Base Height (m)',
+          `${resolveFieldLabelContent('base_height')} (m)`,
           windowBaseHeightSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.90 — sill above ground',
@@ -3177,7 +3178,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderNumberRow(
           'freeAreaHeight',
-          'Free Area Height (m)',
+          `${resolveFieldLabelContent('free_area_height')} (m)`,
           freeAreaHeightSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.40',
@@ -3188,7 +3189,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderNumberRow(
           'midHeight',
-          'Mid Height (m)',
+          `${resolveFieldLabelContent('mid_height')} (m)`,
           midHeightSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 1.20',
@@ -3199,7 +3200,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         )}
         {renderNumberRow(
           'maxOpenArea',
-          'Open area (m²)',
+          `${resolveFieldLabelContent('max_window_open_area')} (m²)`,
           maxOpenAreaSummary,
           activeWindowSurfaceIds.length > 0,
           'e.g. 0.50',
@@ -3391,7 +3392,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         {selectionKinds.has('BuildingElementGround') && (
           <div className="multi-select-field-group">
             {renderSelectRow(
-              'Floor Type',
+              resolveFieldLabelContent('floor_type'),
               groundFloorTypeSummary,
               true,
               FLOOR_TYPE_OPTIONS,
@@ -3407,7 +3408,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             {allActiveGroundsAreBasement && (
               renderNumberRow(
                 'depthBasementFloor',
-                'Basement Floor Depth (m)',
+                `${resolveFieldLabelContent('depth_basement_floor')} (m)`,
                 groundDepthBasementSummary,
                 true,
                 'e.g. 2.50',
@@ -3418,7 +3419,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             )}
             {renderNumberRow(
               'thicknessWalls',
-              'Wall Thickness (m)',
+              `${resolveFieldLabelContent('thickness_walls')} (m)`,
               groundThicknessWallsSummary,
               true,
               'e.g. 0.30',
@@ -3819,7 +3820,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               constructionFieldScopeKey,
               constructionTargetIds,
               'u',
-              'U Value',
+              resolveFieldLabelContent('u_value'),
               constructionUValueSummary,
               'Set U',
               (_el, value) => ({ u_value: value }),
@@ -3829,7 +3830,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               constructionFieldScopeKey,
               constructionTargetIds,
               'r',
-              'Thermal Resistance Construction',
+              resolveFieldLabelContent('thermal_resistance_construction'),
               constructionResistanceSummary,
               'Set R',
               (el, value) => ({
