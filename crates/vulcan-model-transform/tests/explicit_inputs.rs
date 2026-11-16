@@ -239,7 +239,9 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
 }
 
 #[test]
-fn window_heights_use_the_template_base_height_when_the_metadata_row_is_absent() {
+/// The editor measures a file that states no base from 0, so a non-zero template base refuses the
+/// file; a stated base measures the window heights.
+fn window_heights_need_a_stated_base_when_the_template_sets_one() {
     let window = "
 Window Elements
 Name,Zone,Type,area,pitch,width,height,orientation360,base_height,frame_area_fraction,free_area_height,mid_height,max_window_open_area
@@ -264,27 +266,37 @@ Window,Living,BuildingElementTransparent,1.61,90,1.24,1.3,180,1,0.25,0.95,1.65,0
                 wrapper_version: Some("1.0.0a8".into()),
             },
         })
-        .unwrap()
-        .model
     };
     let row = convert(
         "Ventilation_ventilation_zone_base_height,1.0",
-        r#"{"Zone":{},"InfiltrationVentilation":{"ventilation_zone_base_height":0.0}}"#,
-    );
-    let template = convert(
-        "",
         r#"{"Zone":{},"InfiltrationVentilation":{"ventilation_zone_base_height":1.0}}"#,
-    );
-    for path in [
-        "/InfiltrationVentilation/ventilation_zone_base_height",
-        "/Zone/Living/BuildingElement/Window/window_part_list",
-    ] {
-        assert_eq!(row.pointer(path), template.pointer(path), "{path}");
-    }
+    )
+    .unwrap()
+    .model;
     assert_eq!(
-        template.pointer("/Zone/Living/BuildingElement/Window/window_part_list/0/mid_height"),
+        row.pointer("/InfiltrationVentilation/ventilation_zone_base_height"),
+        Some(&serde_json::json!(1.0))
+    );
+    assert_eq!(
+        row.pointer("/Zone/Living/BuildingElement/Window/window_part_list/0/mid_height"),
         Some(&serde_json::json!(0.65))
     );
+    match convert(
+        "",
+        r#"{"Zone":{},"InfiltrationVentilation":{"ventilation_zone_base_height":1.0}}"#,
+    ) {
+        Err(vulcan_model_transform::TransformError::Build(error)) => {
+            assert_eq!(error.code, "E034");
+            assert!(
+                error
+                    .message
+                    .contains("states no ventilation zone base height"),
+                "{}",
+                error.message
+            );
+        }
+        other => panic!("a file that states no base must not take the template's: {other:?}"),
+    }
 
     // A Systems InfiltrationVentilation row overrides the template; Metadata rows override both,
     // and window heights are measured from the base the model carries.

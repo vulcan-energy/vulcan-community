@@ -652,6 +652,17 @@ const ABSENT_ROW_DEFAULTS: Readonly<Record<string, boolean>> = {
   PartO_active_cooling_required: false,
 };
 
+/**
+ * The defaults template's ventilation zone base when `key` is that row and the base is not 0. The
+ * editor measures a file that states no base from 0, so such a base would move its heights: the
+ * user must state the base (the converter refuses the file, E034).
+ */
+function nonZeroTemplateBase(defaults: unknown, key: string): number | undefined {
+  if (key !== 'Ventilation_ventilation_zone_base_height') return undefined;
+  const base = templateMetadataValue(defaults, key);
+  return typeof base === 'number' && base !== 0 ? base : undefined;
+}
+
 /** The value the converter uses when the file has no such row: the defaults template's, else ABSENT_ROW_DEFAULTS. */
 function templateMetadataValue(defaults: unknown, key: string): unknown {
   return valueAt(defaults, metadataSchemaPath(key)) ?? ABSENT_ROW_DEFAULTS[key];
@@ -695,6 +706,9 @@ export function absentMetadataRowFill(
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
       || required.has(key) || desnzDefault.has(key) || cleared.has(metadataSettingKey(key)) || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
+    // The editor measures a file that states no base from 0: a non-zero template base is not filled,
+    // and unsetMetadataInputIssues asks for the base (see nonZeroTemplateBase).
+    if (nonZeroTemplateBase(defaults, key) !== undefined) continue;
     // A target that lacks the field, or does not take the value (HEM:EPC has no `house` build type), gets no fill.
     if (template === undefined || !targetFieldAccepts(targetRoot, metadataSchemaPath(key), template)) continue;
     patch[metadataSettingKey(key)] = template;
@@ -817,7 +831,9 @@ export function unsetMetadataInputIssues(
         && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'
         && (blank.has(key) || (defaults !== undefined
           && (templateMetadataValue(defaults, key) !== undefined || schemaRequiresMetadataValue(targetRoot, key))))))
-    ? [unread[key]
+    ? [nonZeroTemplateBase(defaults, key) !== undefined
+      ? `Global Settings: The defaults set the ventilation zone base height to ${nonZeroTemplateBase(defaults, key)} m, but this file states none. Enter the base height in Global Settings.`
+      : unread[key]
       ? `Global Settings: ${METADATA_INPUT_LABELS[key]} is '${unread[key]}', which the target does not accept. Enter it in Global Settings.${hint(key)}`
       : `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]
     : []))];

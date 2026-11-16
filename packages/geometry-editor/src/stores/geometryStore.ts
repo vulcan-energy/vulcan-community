@@ -79,7 +79,7 @@ import {
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
-import { CURRENT_VULCAN_CSV_VERSION, hydrateForDefaultsFilledVentilationBase } from '../geometry/io/parseCsvToGeometry';
+import { CURRENT_VULCAN_CSV_VERSION } from '../geometry/io/parseCsvToGeometry';
 import { validateSpaceLabels } from '../geometry/validation/validateSpaceLabels';
 import { selectPartFData } from '../geometry/validation/partF';
 import {
@@ -3029,14 +3029,8 @@ const withPrecomputedDefaultsLookup = (
           metadataFillRoot(schemaPort),
         )
         : { patch: {} };
-      // Defaults that complete a load (loadAwaitsDefaults): a base they fill is the file's.
-      const hydrated = fill && defaultsJson && state.loadAwaitsDefaults
-        ? hydrateForDefaultsFilledVentilationBase(
-          (update as Partial<GeometryState>).elementsById ?? state.elementsById, state.sourceCsvVersion, fill.patch)
-        : undefined;
       return {
         ...update,
-        ...(hydrated ? { elementsById: hydrated } : {}),
         defaultsLookup: createDefaultsLookup(defaultsJson),
         ...(fill && Object.keys(fill.patch).length ? { complianceSettings: { ...complianceSettings, ...fill.patch } } : {}),
         // A load that ended before these defaults arrived lists the rows they fill.

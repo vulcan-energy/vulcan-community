@@ -7583,18 +7583,39 @@ impl JSONBuilder {
     /// Merges the fragment of each `is_infiltration_ventilation_row`.
     /// The ventilation zone base height `build_json` will merge: the defaults, then Systems rows,
     /// then Metadata rows. The Ventilation Systems section does not set it.
+    ///
+    /// The editor measures a file that states no base (no Metadata row or Systems row sets it) from
+    /// 0, so a non-zero defaults base would move its heights: that file is an error.
     fn merged_ventilation_zone_base_height(
         &self,
         csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<f64, BuildError> {
-        let mut probe = serde_json::json!({
-            "InfiltrationVentilation": self.defaults.get("InfiltrationVentilation").cloned()
-        });
+        let mut infiltration = self.defaults.get("InfiltrationVentilation").cloned();
+        let defaults_base = infiltration
+            .as_mut()
+            .and_then(Value::as_object_mut)
+            .and_then(|fields| fields.remove("ventilation_zone_base_height"));
+        let mut probe = serde_json::json!({ "InfiltrationVentilation": infiltration });
         Self::merge_systems_infiltration_ventilation_rows(&mut probe, csv_data)?;
         // The full merge reports a bad Metadata cell; the probe must not report it a second time.
         let reported = self.non_fatal_errors.borrow().len();
         self.merge_ventilation_env_from_metadata(&mut probe, csv_data)?;
         self.non_fatal_errors.borrow_mut().truncate(reported);
+        if probe
+            .pointer("/InfiltrationVentilation/ventilation_zone_base_height")
+            .is_none_or(Value::is_null)
+        {
+            let defaults_base = defaults_base
+                .as_ref()
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            if defaults_base != 0.0 {
+                return Err(BuildError::new(
+                    "E034",
+                    &format!("This file states no ventilation zone base height, but the defaults set it to {defaults_base} m. Give Ventilation_ventilation_zone_base_height in the Metadata section (Global Settings in the editor)."),
+                ));
+            }
+        }
         Ok(ventilation_zone_base_height(&probe))
     }
 
@@ -13718,10 +13739,10 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
         }
     }
 
-    /// A defaults template base measures a file that lacks the Metadata row and a Systems row; the
-    /// editor's save writes that base as the Metadata row, which measures the same heights.
+    /// The editor measures a file that states no base from 0, so a non-zero defaults template base
+    /// would move its heights: the file must state the base. Stated, it measures the heights.
     #[test]
-    fn a_defaults_template_base_measures_a_file_that_states_none() {
+    fn a_non_zero_defaults_base_needs_the_file_to_state_one() {
         for metadata_row in ["", "Ventilation_ventilation_zone_base_height,2.8\n"] {
             let csv = format!(
                 "Metadata\nGlobalOrientationOffset,0\nVulcanCsvVersion,4\n{metadata_row}\n{}vent_1,Vents,,,,,,,1.5,30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,3.6,1.4,{{}}\n",
@@ -13740,6 +13761,21 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
                 JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
             builder.defaults["InfiltrationVentilation"]["ventilation_zone_base_height"] =
                 serde_json::json!(2.8);
+            if metadata_row.is_empty() {
+                let error = builder
+                    .build_json(&data)
+                    .expect_err("a file that states no base must not take the defaults' 2.8 m");
+                assert_eq!(error.code, "E034");
+                assert!(
+                    error
+                        .message
+                        .contains("states no ventilation zone base height")
+                        && error.message.contains("2.8 m"),
+                    "{}",
+                    error.message
+                );
+                continue;
+            }
             let result = builder.build_json(&data).expect("CSV should merge");
             let inf = &result["InfiltrationVentilation"];
             assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(2.8));

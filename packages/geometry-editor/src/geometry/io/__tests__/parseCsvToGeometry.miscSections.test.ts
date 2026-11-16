@@ -317,28 +317,40 @@ Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""
     expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
   });
 
-  // The converter measures a file that lacks the row from the defaults template's base, and the
-  // defaults fill writes that row: the heights take it, whether the defaults are at hand at the load
-  // or arrive after it.
-  it.each(['before', 'after'])('measures a file that lacks the row from a defaults template base read %s the load', (when) => {
-    const template = { InfiltrationVentilation: { ventilation_zone_base_height: 2.8 } };
-    const open = (csv: string) => {
+  // The converter measures a file that states no base from the defaults template's base, but the
+  // editor measures it from 0: a non-zero template base blocks until the user enters the base.
+  it.each(['before', 'after'])('asks for the base of a file that states none where the defaults set one, read %s the load', (when) => {
+    const askBase = 'The defaults set the ventilation zone base height to 2.8 m, but this file states none. Enter the base height in Global Settings.';
+    const open = (csv: string, base: number) => {
       const store = createGeometryStore({ defaultDefaultsPath: null });
+      const template = { InfiltrationVentilation: { ventilation_zone_base_height: base } };
       if (when === 'before') store.setState({ defaultsJson: template, defaultsLoading: false } as never);
       store.getState().loadFromCSV(csv, when === 'before' ? { keepUnchangedDefaults: true } : undefined);
       if (when === 'after') store.setState({ defaultsJson: template, defaultsLoading: false } as never);
       const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
       return { store, vent: byName('Trickle').mid_height_air_flow_path, window: byName('Window 1').mid_height };
     };
-    const opened = open(baseSourceCsv(''));
-    expect(opened).toMatchObject({ vent: 4.3, window: 4.2 });
+    const issues = (store: ReturnType<typeof createGeometryStore>) => store.getState().collectAllGeometryWarnings().criticalIssues;
+
+    const opened = open(baseSourceCsv(''), 2.8);
+    expect(opened).toMatchObject({ vent: 1.5, window: 1.4 });
+    expect(issues(opened.store)).toContainEqual(expect.stringContaining(askBase));
+    expect(opened.store.getState().generateCSV()).not.toContain('Ventilation_ventilation_zone_base_height');
+
+    opened.store.getState().setComplianceSettings({ Ventilation_ventilation_zone_base_height: 2.8 } as never);
+    expect(issues(opened.store).some((issue) => issue.includes('ventilation zone base height'))).toBe(false);
     const csv = opened.store.getState().generateCSV();
     expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.8,');
-    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
-    expect(csv).toContain(',1.4,0.4,');
-    const reopened = open(csv);
-    expect(reopened).toMatchObject({ vent: 4.3, window: 4.2 });
+    // The drawing stays where it was: the file now measures it from 2.8 m.
+    expect(csv).toContain('Trickle,Vents,,,,,,-1.3,');
+    const reopened = open(csv, 2.8);
+    expect(reopened).toMatchObject({ vent: 1.5, window: 1.4 });
     expect(reopened.store.getState().generateCSV()).toBe(csv);
+
+    // A template base of 0 is the editor's: no issue, and the defaults fill writes it.
+    const zero = open(baseSourceCsv(''), 0);
+    expect(issues(zero.store).some((issue) => issue.includes('ventilation zone base height'))).toBe(false);
+    expect(zero.store.getState().generateCSV()).toContain('Ventilation_ventilation_zone_base_height,0,');
   });
 
   it('writes the derived base of a model the editor built and adds it back on reload', () => {
