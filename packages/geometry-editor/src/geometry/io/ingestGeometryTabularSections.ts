@@ -814,10 +814,8 @@ export function ingestGeometryTabularSections(
             newElements.push(ductworkElement);
           } else if (elementType === 'MechanicalVentilationTerminal') {
             const terminalCoords = parseOptionalCoordsColumn(V(d, 'coords'));
+            // Without a height cell the terminal's point z is its height; the CSV writer reads it there.
             const csvMidHeight = num(d, 'mid_height_air_flow_path');
-            const coordMidHeight = Number.isFinite(terminalCoords[0]?.z)
-              ? roundToTwoDecimals(terminalCoords[0].z)
-              : undefined;
             const terminalElement: MechanicalVentilationTerminal = {
               id: generateId(),
               name,
@@ -825,7 +823,7 @@ export function ingestGeometryTabularSections(
               terminal_type: parseRequiredEnumColumn(V(d, 'terminal_type'), ['intake', 'exhaust']),
               parent_element: V(d, 'parent_element') || null,
               host_element: V(d, 'host_element') || null,
-              mid_height_air_flow_path: csvMidHeight ?? coordMidHeight,
+              mid_height_air_flow_path: csvMidHeight,
               orientation360: num(d, 'orientation360'),
               pitch: num(d, 'pitch'),
               coordinates: terminalCoords,

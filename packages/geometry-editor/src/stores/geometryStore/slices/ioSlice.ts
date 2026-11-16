@@ -19,7 +19,7 @@ import {
 import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from '../../../lib/windowOpenings';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
-import { resolveEffectiveVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
+import { resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight, ventilationZoneBaseDrawingZ } from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import {
   CURRENT_VULCAN_CSV_VERSION,
@@ -74,6 +74,7 @@ import {
 } from '../../../lib/pvHostDerivation';
 import {
   getAreaBasedElementExportGeometry,
+  exposedOpaqueCsvBaseHeight,
   getElementGrossArea,
   getOpaqueElementExportGeometry,
 } from '../../../lib/elementArea';
@@ -487,14 +488,16 @@ const formatElementFirstCoordForCsv = (element: { coordinates?: Array<{ x: numbe
   return formatCoords([coords[0]]);
 };
 
+/** A terminal's mid-height less `heightOffset` (the ventilation zone base from CSV version 4). */
 const mechanicalVentilationTerminalMidHeightForCsv = (
   element: ElementByType<'MechanicalVentilationTerminal'>,
+  heightOffset: number,
 ): number | '' => {
   if (typeof element.mid_height_air_flow_path === 'number' && Number.isFinite(element.mid_height_air_flow_path)) {
-    return element.mid_height_air_flow_path;
+    return roundFloatNoise(element.mid_height_air_flow_path - heightOffset);
   }
   const z = element.coordinates?.[0]?.z;
-  return typeof z === 'number' && Number.isFinite(z) ? roundToTwoDecimals(z) : '';
+  return typeof z === 'number' && Number.isFinite(z) ? roundToTwoDecimals(z - heightOffset) : '';
 };
 
 const formatViewerBaseHeightForCsv = (element: { _base_height?: unknown; base_height?: unknown }): string => {
@@ -935,7 +938,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const rawState = get();
     const migrationIssues = csvMigrationIssues(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
     const upgrading = rawState.csvUpgradeRequested && rawState.sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION;
-    if ((upgrading || rawState.sourceCsvVersion >= CURRENT_VULCAN_CSV_VERSION) && !exportOptions?.allowUnresolvedMigration) {
+    if ((upgrading || rawState.sourceCsvVersion >= 3) && !exportOptions?.allowUnresolvedMigration) {
       assertCsvMigrationResolved(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
     }
     // Draft snapshots keep the original format; a resolved Save finalizes
@@ -1109,6 +1112,20 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Every compliance row is written with its value (see metadataRowValues). A row the file had
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
+    // Heights below are measured from this base (windows from version 2, at its drawing height), the one the converter
+    // uses and a reload adds back: the Metadata row, a Systems row, 0 where the file lacks the row
+    // or has it blank, or the derived base, which the Metadata row then carries.
+    const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
+      zones: state.zones,
+      elementsById: state.elementsById,
+      elementIds: state.elementIds,
+      spaceLabelsById: state.spaceLabelsById,
+      spaceLabelIds: state.spaceLabelIds,
+      complianceSettings: compliance,
+      floors: state.floors,
+    });
+    // Where that base is in the drawing, which every drawn height is written less.
+    const zoneBaseDrawingZ = ventilationZoneBaseDrawingZ(exportElements, effectiveVentBaseHeight);
     const unreadRows = compliance.unreadMetadataRows ?? {};
     for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), targetRules(options.schemaPort, state.complianceSettings).storeyBuildTypes)) {
       const cell = value ?? unreadRows[key];
@@ -1123,14 +1140,6 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     if (!options.schemaPort.targetSchemaMode && csvModelProfile(state.targetBundleId, compliance.complianceValidationCell) === 'core') {
       lines.push('ComplianceValidationEnabled,FALSE,,,,,,,,,,,,,');
     }
-    const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
-      zones: state.zones,
-      elementsById: state.elementsById,
-      spaceLabelsById: state.spaceLabelsById,
-      spaceLabelIds: state.spaceLabelIds,
-      complianceSettings: compliance,
-      floors: state.floors,
-    });
 
     lines.push(',,,,,,,,,,,,');
 
@@ -1244,13 +1253,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatPositiveFiniteNumberForCsv(exportedGeometry.width)),
             escapeCSV(formatPositiveFiniteNumberForCsv(exportedGeometry.height)),
             escapeCSV(roundOrientation360ForCsv(element.orientation360)),
-            escapeCSV(formatOptionalFiniteNumberForCsv(
-              exportedGeometry.height > 0 ||
-              exportedGeometry.width > 0 ||
-              (typeof element.base_height === 'number' && Number.isFinite(element.base_height))
-                ? exportedGeometry.baseHeight
-                : undefined
-            )),
+            // The value the ventilation zone base frame reads (ventilationZoneBaseFrame).
+            escapeCSV(formatOptionalFiniteNumberForCsv(exposedOpaqueCsvBaseHeight(element))),
             element.is_unheated_pitched_roof === undefined ? '' : element.is_unheated_pitched_roof ? 'TRUE' : 'FALSE',
             element.is_external_door ? 'TRUE' : 'FALSE',
             escapeCSV(element.parent_element || ''),
@@ -1311,7 +1315,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // Follow-up: the in-session path uses DERIVED_VALUE_EPSILON = 0.005 in
           // transparentOpeningDerivedFields.ts, while this export check uses
           // slopedDimensionDiffers' 0.01 default for the same auto-vs-manual decision.
-          const windowHeightOffset = exportVersion >= 2 ? effectiveVentBaseHeight : 0;
+          const windowHeightOffset = exportVersion >= 2 ? zoneBaseDrawingZ : 0;
           // A blank mid_height stays blank: the converter then takes the window's air-flow height
           // from its extra_json or the defaults, not from the opening's centre.
           const exportedMidHeight = typeof element.mid_height !== 'number' || !Number.isFinite(element.mid_height)
@@ -1336,7 +1340,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatOptionalFiniteNumberForCsv(element.max_window_open_area)),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(
-              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, effectiveVentBaseHeight),
+              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, zoneBaseDrawingZ),
             ) : '')
           ];
           lines.push(ensureColumnCount(windowRow, windowColumnCount, windowHeader, element.nonNumericCells));
@@ -1538,6 +1542,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const ventilationHeader = [...EXPECTED_SECTION_HEADERS['Ventilation Systems']];
       const ventilationColumnCount = ventilationHeader.length;
 
+      // HEM measures vent and terminal mid-heights from the ventilation zone base (CSV version 4).
+      const ventHeightOffset = exportVersion >= 4 ? zoneBaseDrawingZ : 0;
       lines.push('Ventilation Systems,,,,,,,,,,,,,,');
       lines.push(ensureColumnCount(ventilationHeader, ventilationColumnCount));
       ventilationElements.forEach(element => {
@@ -1558,9 +1564,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.parent_element || ''),
           escapeCSV(element.type === 'MechanicalVentilationTerminal' ? element.host_element || '' : ''),
           escapeCSV(element.type === 'MechanicalVentilationTerminal'
-            ? mechanicalVentilationTerminalMidHeightForCsv(element)
+            ? mechanicalVentilationTerminalMidHeightForCsv(element, ventHeightOffset)
             : element.type === 'Vents'
-              ? element.mid_height_air_flow_path
+              ? (typeof element.mid_height_air_flow_path === 'number'
+                ? roundFloatNoise(element.mid_height_air_flow_path - ventHeightOffset)
+                : element.mid_height_air_flow_path)
               : mechanicalVentilationFlatPosition.mid_height_air_flow_path ?? ''),
           escapeCSV(element.type === 'Vents' ? element.area_cm2 : ''),
           escapeCSV(element.type === 'Vents' || element.type === 'MechanicalVentilationTerminal'
@@ -2089,7 +2097,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         importedSettings.storey_of_dwelling = undefined;
         importedSettings.storeys_in_building = undefined;
       }
-      if (importedSettings.Ventilation_ventilation_zone_base_height !== undefined) {
+      // A Metadata base over a Systems row stays, matching or not: cleared, the Systems row would set it.
+      if (importedSettings.Ventilation_ventilation_zone_base_height !== undefined
+          && systemsRowVentilationBaseHeight(newElements) === undefined) {
         const effectiveVentForBase = importedSettings.AirPermeability_ventilation_zone_height
           ?? (derivedVent > 0 ? derivedVent : undefined);
         const derivedVentBase = calculateSuggestedVentilationBaseHeight(newElements, undefined, {

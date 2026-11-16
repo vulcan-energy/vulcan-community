@@ -113,6 +113,7 @@ import {
   resolveEffectiveVentilationZoneBaseHeight,
   type GlobalSettingsShape,
 } from '../../lib/globalSettingsValidation';
+import { ventilationZoneBaseFrame, type VentilationZoneBaseFrame } from '../../lib/effectiveDwellingDetails';
 import { canMechanicalVentilationInheritHostPlacement } from '../../lib/mechanicalVentilationBranches';
 import {
   readAuthoredUnheatedPitchedRoofCeilingElevationM,
@@ -484,6 +485,11 @@ export interface ValidationContext {
   modelValidityChecks?: boolean;
   /** Global inputs used to resolve the same ventilation-zone base height written on save. */
   complianceSettings?: GlobalSettingsShape;
+  /**
+   * Load order of `elementsById`: the save and the converter take the last Systems row's base in
+   * this order. Without it the base reads `elementsById` order.
+   */
+  elementIds?: readonly string[];
   numberOfBedrooms?: number;
   calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
   /** Context Shading names the target's conversion does not use (wholly in stated quadrants). */
@@ -1263,16 +1269,29 @@ const rootSchemaFor = (context: ValidationContext): unknown =>
 const isExistingBuildingContext = (context: ValidationContext): boolean =>
   (context.complianceSettings as { IsExistingBuilding?: boolean } | undefined)?.IsExistingBuilding === true;
 
-const ventilationBaseHeights = new WeakMap<Element[], WeakMap<object, WeakMap<object, number | undefined>>>();
+const ventilationBaseFrames = new WeakMap<Element[], WeakMap<object, WeakMap<object, VentilationZoneBaseFrame | undefined>>>();
 const NO_FLOORS = {};
-/** {@link resolveEffectiveVentilationZoneBaseHeight}, a model-wide value, once per (elements, floors, settings) for every window. */
-function ventilationZoneBaseHeightFor(elements: Element[], floors: Floor[] | undefined, complianceSettings: GlobalSettingsShape): number | undefined {
-  let byFloors = ventilationBaseHeights.get(elements);
-  if (!byFloors) ventilationBaseHeights.set(elements, (byFloors = new WeakMap()));
+const elementsInLoadOrders = new WeakMap<Record<string, Element>, WeakMap<readonly string[], Element[]>>();
+/** `elementsById` in `elementIds` order, the same array for the same inputs. */
+function elementsInLoadOrder(elementsById: Record<string, Element>, elementIds: readonly string[]): Element[] {
+  let byIds = elementsInLoadOrders.get(elementsById);
+  if (!byIds) elementsInLoadOrders.set(elementsById, (byIds = new WeakMap()));
+  let ordered = byIds.get(elementIds);
+  if (!ordered) byIds.set(elementIds, (ordered = elementIds.flatMap((id) => elementsById[id] ?? [])));
+  return ordered;
+}
+/**
+ * Where {@link resolveEffectiveVentilationZoneBaseHeight} sits in the drawing ({@link ventilationZoneBaseFrame}), a
+ * model-wide value, once per (elements, floors, settings) for every element; undefined when the base is unsettled.
+ */
+function ventilationZoneBaseFrameFor(elements: Element[], floors: Floor[] | undefined, complianceSettings: GlobalSettingsShape): VentilationZoneBaseFrame | undefined {
+  let byFloors = ventilationBaseFrames.get(elements);
+  if (!byFloors) ventilationBaseFrames.set(elements, (byFloors = new WeakMap()));
   let bySettings = byFloors.get(floors ?? NO_FLOORS);
   if (!bySettings) byFloors.set(floors ?? NO_FLOORS, (bySettings = new WeakMap()));
   if (!bySettings.has(complianceSettings)) {
-    bySettings.set(complianceSettings, resolveEffectiveVentilationZoneBaseHeight({ elements, floors, complianceSettings }));
+    const base = resolveEffectiveVentilationZoneBaseHeight({ elements, floors, complianceSettings });
+    bySettings.set(complianceSettings, base === undefined ? undefined : ventilationZoneBaseFrame(elements, base));
   }
   return bySettings.get(complianceSettings);
 }
@@ -1378,6 +1397,7 @@ export const validateElementCore = (
 
   // Shared across a validation pass, so derivations keyed on them (roof cut-outs) run once.
   const allElements = elementsById ? elementsOf(elementsById) : [];
+  const elementsForBase = elementsById && context.elementIds ? elementsInLoadOrder(elementsById, context.elementIds) : allElements;
   const effectiveFloors = (): Floor[] => (floors ? effectiveFloorsOf(floors, allElements) : []);
   const floorStackWarnings = context.floorStackWarningElementIds
     ?? (floors ? getFloorStackWarningElementIds(allElements, floors) : new Set<string>());
@@ -1465,6 +1485,9 @@ export const validateElementCore = (
     case 'BuildingElementOpaque': {
       const el = element as BuildingElementOpaque;
       const shape = getElementShape(el);
+      // The converter blocks a drawing that does not place the ventilation zone base (E069).
+      const frame = context.complianceSettings && ventilationZoneBaseFrameFor(elementsForBase, floors, context.complianceSettings);
+      if (frame?.problem && frame.problemElementIds?.includes(el.id)) issues.push(geo(frame.problem, 'base_height'));
 
       if (shape === 'sloped-polygon' && el.coordinates && el.coordinates.length >= 3) {
         const derivedDimensions = deriveSlopedElementDimensions(el, context.globalOrientationOffset);
@@ -1582,13 +1605,13 @@ export const validateElementCore = (
         () => getAreaBasedElementExportGeometry(el, context.globalOrientationOffset),
       ));
       if (complianceValidationEnabled && context.complianceSettings) {
-        const ventilationZoneBaseHeight = ventilationZoneBaseHeightFor(allElements, floors, context.complianceSettings);
+        const ventilationZoneBaseHeight = ventilationZoneBaseFrameFor(elementsForBase, floors, context.complianceSettings)?.drawingZ;
         if (ventilationZoneBaseHeight !== undefined) {
           const windowBaseHeight = getAreaBasedElementExportGeometry(el, context.globalOrientationOffset).baseHeight;
           if (windowBaseHeight < ventilationZoneBaseHeight) {
             issues.push(
               fhs(
-                `Window base height (${formatNumberForIssue(windowBaseHeight)} m) is below the ventilation zone base height (${formatNumberForIssue(ventilationZoneBaseHeight)} m).`,
+                `Window base height (${formatNumberForIssue(windowBaseHeight)} m) is below the ventilation zone base, drawn at ${formatNumberForIssue(ventilationZoneBaseHeight)} m.`,
                 'base_height',
               ),
             );
@@ -2006,8 +2029,14 @@ export const validateElementCore = (
             'mid_height_air_flow_path',
           ));
         }
-      } else if (position.mid_height_air_flow_path < 1 || position.mid_height_air_flow_path > 60) {
-        issues.push(geo('mid_height_air_flow_path must be between 1 and 60 m', 'mid_height_air_flow_path'));
+      } else {
+        // HEM measures the height from the ventilation zone base, as the CSV writes it; a base the
+        // dwelling details cannot settle is not checked, as for windows.
+        const base = context.complianceSettings && ventilationZoneBaseFrameFor(elementsForBase, floors, context.complianceSettings)?.drawingZ;
+        const height = base === undefined ? undefined : position.mid_height_air_flow_path - base;
+        if (height !== undefined && (height < 1 || height > 60)) {
+          issues.push(geo('Terminal height must be 1 to 60 m above the ventilation zone base', 'mid_height_air_flow_path'));
+        }
       }
 
       if (elementsById && parent?.type === 'MechanicalVentilation' && (parent as MechanicalVentilation).vent_type === 'MVHR' && isMvhrTerminalRole(terminalElement.terminal_type)) {
@@ -3161,11 +3190,13 @@ export const collectGeometryValidation = (
     ? getFloorStackWarningElementIds(elements, options.floors)
     : new Set<string>();
 
+  const elementIds = elements.map((element) => element.id);
   elements.forEach((element) => {
     if (element.isPlaceholder) return;
     const validation = validateElementCore(element, {
       schemaPort: options.schemaPort,
       elementsById,
+      elementIds,
       zones,
       floors: options.floors,
       globalOrientationOffset: options.globalOrientationOffset,

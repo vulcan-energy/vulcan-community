@@ -347,6 +347,12 @@ export const getAreaBasedElementExportGeometry = (
   };
 };
 
+/** The base_height an Exposed Elements row writes for an opaque element; undefined for a blank cell. */
+export function exposedOpaqueCsvBaseHeight(element: BuildingElementOpaque): number | undefined {
+  const geometry = getAreaBasedElementExportGeometry(element);
+  return geometry.height > 0 || geometry.width > 0 || isFiniteNumber(element.base_height) ? geometry.baseHeight : undefined;
+}
+
 export const getOpaqueElementExportGeometry = (
   element: BuildingElementOpaque,
   globalOrientationOffset?: number,

@@ -13,6 +13,7 @@ import {
 import { deriveFloorsFromElements } from './floorDerivation';
 import { elementBaseElevationMForTb, slabElevationMForFloorZ } from './geometry3dMapper';
 import { fhsStoreyToCanvasFloor } from './storeySemantics';
+import { ventilationZoneBaseDrawingZ } from './effectiveDwellingDetails';
 import { isWalkableFloorHorizontalPolygon, withEffectiveStoreyHeights } from './zoneDerivation';
 
 export const DEVELOPMENT_CONTEXT_SHADING_META_KEY = 'development_context_shading';
@@ -306,8 +307,10 @@ export function resolveDevelopmentModelVerticalContext(args: {
   ];
   const knownHeightM = heightCandidates.find((height): height is number => height !== undefined);
   const metadataBase = metadataBaseHeightM(args.complianceSettings, floors, knownHeightM);
-  const usesElementBase = localBaseM > SAME_FLOOR_TOLERANCE_M;
-  const baseM = usesElementBase ? localBaseM : metadataBase.baseM;
+  // The ground where the ventilation zone base frame (the converter's rule) puts it.
+  const groundZ = ventilationZoneBaseDrawingZ(args.elements, metadataBase.baseM) - metadataBase.baseM;
+  const usesElementBase = groundZ === 0 && localBaseM > SAME_FLOOR_TOLERANCE_M;
+  const baseM = localBaseM - groundZ;
   const heightM = knownHeightM ?? 0;
 
   return {

@@ -106,15 +106,15 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     store.getState().resolveCsvUValueInterpretation([party.id], 'whole_wall');
     expect(store.getState().generateCSV({ allowUnresolvedMigration: true })).toContain('VulcanCsvVersion,1');
     const upgraded = store.getState().generateCSV();
-    expect(upgraded).toContain('VulcanCsvVersion,3');
+    expect(upgraded).toContain('VulcanCsvVersion,4');
     const upgradedWindow = parseCsvToGeometry(upgraded).elements.find(element => element.type === 'BuildingElementTransparent')!;
     expect(upgradedWindow.mid_height).toBe(3.8);
     expect(upgradedWindow.extra_json?.window_part_list).toEqual([{ mid_height_air_flow_path: 3.8 }]);
   });
 
   it('rejects unsupported future Vulcan CSV versions instead of guessing', () => {
-    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 1.4, 1.4)))
-      .toThrow('Unsupported VulcanCsvVersion: 4');
+    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,5,,,,,,,,,,,,,', 1.4, 1.4)))
+      .toThrow('Unsupported VulcanCsvVersion: 5');
   });
 
   it.each(['', '2.5', 'not-a-version'])(
@@ -125,7 +125,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     },
   );
 
-  it('exports HEM-relative window and window-part mid-heights as idempotent version-3 CSV', () => {
+  it('exports HEM-relative window and window-part mid-heights as idempotent current-version CSV', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const zone = { id: 'zone-1', name: 'Living', type: 'Zone' } as Zone;
     const window = {
@@ -152,7 +152,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     });
 
     const csv = store.getState().generateCSV();
-    expect(csv).toContain('VulcanCsvVersion,3');
+    expect(csv).toContain('VulcanCsvVersion,4');
     expect(csv).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
 
     const parsed = parseCsvToGeometry(csv);
@@ -165,7 +165,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     const reloaded = createGeometryStore({ defaultDefaultsPath: null });
     reloaded.getState().loadFromCSV(csv);
     const savedAgain = reloaded.getState().generateCSV();
-    expect(savedAgain).toContain('VulcanCsvVersion,3');
+    expect(savedAgain).toContain('VulcanCsvVersion,4');
     expect(savedAgain).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
   });
 
@@ -190,6 +190,233 @@ Window 1,Basement,BuildingElementTransparent,1.2,90,1,1.2,0,-0.8,,0.1,0.4,0.9,0.
     expect((window?.extra_json as any).window_part_list).toEqual([
       { mid_height_air_flow_path: -0.1, note: 'preserve' },
     ]);
+  });
+
+  // HEM measures vents and MVHR terminals from the ventilation zone base, as it does windows.
+  const ventCsv = (version: string, base: number, vent: number, terminal: string, terminalZ: number) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+${version}
+Ventilation_ventilation_zone_base_height,${base},,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Ventilation Systems,,,,,,,,,,,,,
+Name,Type,length,duct_type,terminal_type,parent_element,host_element,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,coords,extra_json
+MVHR 1,MechanicalVentilation,,,,,,,,,,MVHR,,"{}"
+Trickle,Vents,,,,,,${vent},30,90,90,,"4.000,5.000,1.000","{}"
+Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,${terminal},,315,90,,"1.000,0.000,${terminalZ}","{}"
+`.trim();
+  const ventHeights = (csv: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(csv);
+    const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
+    return { store, vent: byName('Trickle').mid_height_air_flow_path, terminal: byName('Intake').mid_height_air_flow_path };
+  };
+
+  it.each([
+    [2.8, 1.5, 1.8, 4.3, 4.6],
+    [-2.5, 1.5, 1.8, -1, -0.7],
+  ])('round-trips version-4 vent and terminal heights over base %s', (base, ventCell, terminalCell, vent, terminal) => {
+    const loaded = ventHeights(ventCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', base, ventCell, String(terminalCell), terminal));
+    expect(loaded).toMatchObject({ vent, terminal });
+    const csv = loaded.store.getState().generateCSV();
+    expect(csv).toContain('VulcanCsvVersion,4');
+    expect(csv).toContain(`Trickle,Vents,,,,,,${ventCell},`);
+    expect(csv).toContain(`Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,${terminalCell},`);
+    const reloaded = ventHeights(csv);
+    expect(reloaded).toMatchObject({ vent, terminal });
+    expect(reloaded.store.getState().generateCSV()).toBe(csv);
+  });
+
+  it('writes a terminal with no height column from its point, less the base', () => {
+    const loaded = ventHeights(ventCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 2.8, 1.5, '', 4.6));
+    expect(loaded.store.getState().generateCSV()).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,1.8,');
+  });
+
+  it('keeps version-3 ground-relative vent and terminal heights until the file is upgraded', () => {
+    const loaded = ventHeights(ventCsv('VulcanCsvVersion,3,,,,,,,,,,,,,', 2.8, 4.3, '4.6', 4.6));
+    expect(loaded).toMatchObject({ vent: 4.3, terminal: 4.6 });
+    const ordinarySave = loaded.store.getState().generateCSV();
+    expect(ordinarySave).toContain('VulcanCsvVersion,3');
+    expect(ordinarySave).toContain('Trickle,Vents,,,,,,4.3,');
+    loaded.store.getState().requestCsvUpgrade();
+    const upgraded = loaded.store.getState().generateCSV();
+    expect(upgraded).toContain('VulcanCsvVersion,4');
+    expect(upgraded).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(upgraded).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,1.8,');
+    expect(ventHeights(upgraded)).toMatchObject({ vent: 4.3, terminal: 4.6 });
+  });
+
+  // The file states the base the export subtracted, where the converter reads it, so a reload adds
+  // back the same base: a Systems row's, or the editor's derived base written as a Metadata row.
+  const baseSourceCsv = (metadataRows: string, systemsBase?: number) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+VulcanCsvVersion,4,,,,,,,,,,,,,
+${metadataRows}
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,0,3.2,,0.1,0.4,1.4,0.4,"0.000,0.000,1.000|1.000,0.000,1.000","{}"
+
+Ventilation Systems,,,,,,,,,,,,,
+Name,Type,length,duct_type,terminal_type,parent_element,host_element,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,coords,extra_json
+Trickle,Vents,,,,,,1.5,30,90,90,,"4.000,5.000,1.000","{}"
+${systemsBase === undefined ? '' : `
+Systems,,,,,,,
+Name,Zone,Type,subcategory,system_preset,base_height,coords,extra_json
+Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""ventilation_zone_base_height"":${systemsBase}}}"`}
+`.trim();
+  const openBaseSource = (csv: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(csv);
+    const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
+    return { store, vent: byName('Trickle').mid_height_air_flow_path, window: byName('Window 1').mid_height };
+  };
+
+  const flatRows = [
+    'General_build_type,flat,,,,,,,,,,,,,',
+    'General_storeys_in_dwelling,1,,,,,,,,,,,,,',
+    'General_storey_of_dwelling,2,,,,,,,,,,,,,',
+    'AirPermeability_ventilation_zone_height,2.4,,,,,,,,,,,,,',
+  ].join('\n');
+
+  // A dwelling drawn from its own floor (lowest wall at 0) with its base 9 m up, such as a flat
+  // drawn on the drawing's ground floor: the drawing measures from the base, so the drawn heights
+  // are HEM's. Drawn at 9 m the drawing is in ground coordinates and the same cells come out.
+  it.each([
+    ['VulcanCsvVersion,4,,,,,,,,,,,,,', 0, 1.6],
+    ['VulcanCsvVersion,3,,,,,,,,,,,,,', 0, 1.6],
+    ['VulcanCsvVersion,4,,,,,,,,,,,,,', 9, 1.6],
+    ['VulcanCsvVersion,3,,,,,,,,,,,,,', 9, 10.6],
+  ])('measures heights from a base of 9 m: %s, walls drawn at %s m', (version, drawnAt, ventCell) => {
+    const withWall = (csv: string) => csv.replace('\nVentilation Systems', `
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+South Wall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,${drawnAt},FALSE,FALSE,,"0,0,0|4,0,0","{}"
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,180,${drawnAt + 0.9},South Wall,0.1,0.4,1.5,0.4,"1,0,0|2,0,0","{}"
+
+Ventilation Systems`);
+    const loaded = ventHeights(withWall(ventCsv(version, 9, ventCell, version.includes(',4') ? '2.4' : String(drawnAt + 2.4), drawnAt + 2.4)));
+    expect(loaded).toMatchObject({ vent: drawnAt + 1.6, terminal: drawnAt + 2.4 });
+    const window = Object.values(loaded.store.getState().elementsById).find((e) => e.name === 'Window 1') as any;
+    expect(window.mid_height).toBe(drawnAt + 1.5);
+    loaded.store.getState().requestCsvUpgrade();
+    const saved = loaded.store.getState().generateCSV();
+    expect(saved).toContain('VulcanCsvVersion,4');
+    expect(saved).toContain('Trickle,Vents,,,,,,1.6,');
+    expect(saved).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,2.4,');
+    expect(saved).toMatch(/Window 1,Living,BuildingElementTransparent,[^\n]*,1\.5,0\.4,/);
+    expect(ventHeights(saved)).toMatchObject({ vent: drawnAt + 1.6, terminal: drawnAt + 2.4 });
+  });
+
+  it('never moves heights over a base within 0.25 m of 0, wherever the walls are drawn', () => {
+    const csv = ventCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 0, 1.6, '2.4', 2.4).replace('\nVentilation Systems', `
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+South Wall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,0.2,FALSE,FALSE,,"0,0,0|4,0,0","{}"
+
+Ventilation Systems`);
+    const loaded = ventHeights(csv);
+    expect(loaded).toMatchObject({ vent: 1.6, terminal: 2.4 });
+    const saved = loaded.store.getState().generateCSV();
+    expect(saved).toContain('Trickle,Vents,,,,,,1.6,');
+    expect(saved).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,2.4,');
+  });
+
+  it('adds back a Systems row base and leaves that row to state it', () => {
+    const opened = openBaseSource(baseSourceCsv('', 2.8));
+    expect(opened).toMatchObject({ vent: 4.3, window: 4.2 });
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).not.toContain('Ventilation_ventilation_zone_base_height');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
+  });
+
+  // A file that lacks the base row, or has it blank, states no base: the converter measures from 0
+  // (no defaults template sets it), and on HEM:EPC an existing building takes HEMIE's estimate and a
+  // new-build upper flat must state it. The save keeps the row as the file had it.
+  it.each([
+    ['an FHS file', flatRows, undefined],
+    ['an existing-building EPC file', `${flatRows}\nIsExistingBuilding,TRUE,,,,,,,,,,,,,`, undefined],
+    ['a new-build EPC file', `${flatRows}\nIsExistingBuilding,FALSE,,,,,,,,,,,,,`, undefined],
+    ['a file with the row blank', `${flatRows}\nVentilation_ventilation_zone_base_height,,,,,,,,,,,,,,`, 'Ventilation_ventilation_zone_base_height,,'],
+  ])('measures %s that states no base from 0 and saves the row as it was', (_, rows, baseRow) => {
+    const opened = openBaseSource(baseSourceCsv(rows));
+    expect(opened).toMatchObject({ vent: 1.5, window: 1.4 });
+    const csv = opened.store.getState().generateCSV();
+    if (baseRow) expect(csv).toContain(baseRow);
+    else expect(csv).not.toContain('Ventilation_ventilation_zone_base_height');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
+  });
+
+  // The converter measures a file that states no base from the defaults template's base, but the
+  // editor measures it from 0: a non-zero template base blocks until the user enters the base.
+  it.each(['before', 'after'])('asks for the base of a file that states none where the defaults set one, read %s the load', (when) => {
+    const askBase = 'The defaults set the ventilation zone base height to 2.8 m, but this file states none. Enter the base height in Global Settings.';
+    const open = (csv: string, base: number) => {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      const template = { InfiltrationVentilation: { ventilation_zone_base_height: base } };
+      if (when === 'before') store.setState({ defaultsJson: template, defaultsLoading: false } as never);
+      store.getState().loadFromCSV(csv, when === 'before' ? { keepUnchangedDefaults: true } : undefined);
+      if (when === 'after') store.setState({ defaultsJson: template, defaultsLoading: false } as never);
+      const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
+      return { store, vent: byName('Trickle').mid_height_air_flow_path, window: byName('Window 1').mid_height };
+    };
+    const issues = (store: ReturnType<typeof createGeometryStore>) => store.getState().collectAllGeometryWarnings().criticalIssues;
+
+    const opened = open(baseSourceCsv(''), 2.8);
+    expect(opened).toMatchObject({ vent: 1.5, window: 1.4 });
+    expect(issues(opened.store)).toContainEqual(expect.stringContaining(askBase));
+    expect(opened.store.getState().generateCSV()).not.toContain('Ventilation_ventilation_zone_base_height');
+
+    opened.store.getState().setComplianceSettings({ Ventilation_ventilation_zone_base_height: 2.8 } as never);
+    expect(issues(opened.store).some((issue) => issue.includes('ventilation zone base height'))).toBe(false);
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.8,');
+    // The drawing stays where it was: the file now measures it from 2.8 m.
+    expect(csv).toContain('Trickle,Vents,,,,,,-1.3,');
+    const reopened = open(csv, 2.8);
+    expect(reopened).toMatchObject({ vent: 1.5, window: 1.4 });
+    expect(reopened.store.getState().generateCSV()).toBe(csv);
+
+    // A template base of 0 is the editor's: no issue, and the defaults fill writes it.
+    const zero = open(baseSourceCsv(''), 0);
+    expect(issues(zero.store).some((issue) => issue.includes('ventilation zone base height'))).toBe(false);
+    expect(zero.store.getState().generateCSV()).toContain('Ventilation_ventilation_zone_base_height,0,');
+  });
+
+  it('writes the derived base of a model the editor built and adds it back on reload', () => {
+    const opened = openBaseSource(baseSourceCsv(flatRows));
+    opened.store.setState({ complianceSettings: { ...opened.store.getState().complianceSettings, absentMetadataRows: undefined } });
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.4,');
+    const reopened = openBaseSource(csv);
+    expect(reopened.store.getState().generateCSV()).toBe(csv);
+    expect(reopened).toMatchObject({ vent: opened.vent, window: opened.window });
+  });
+
+  it('keeps a Metadata base the file had over a Systems row, even where it matches the geometry', () => {
+    const opened = openBaseSource(baseSourceCsv(`${flatRows}\nVentilation_ventilation_zone_base_height,2.4,,,,,,,,,,,,,`, 2.8));
+    expect(opened).toMatchObject({ vent: 3.9, window: 3.8 });
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.4,');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
   });
 
   it('parses the canonical property postcode metadata row', () => {

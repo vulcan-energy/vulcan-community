@@ -79,6 +79,7 @@ import {
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
+import { CURRENT_VULCAN_CSV_VERSION } from '../geometry/io/parseCsvToGeometry';
 import { validateSpaceLabels } from '../geometry/validation/validateSpaceLabels';
 import { selectPartFData } from '../geometry/validation/partF';
 import {
@@ -2847,7 +2848,7 @@ const createElementValidation = (schemaPort: GeometrySchemaPort) => {
     const eb = elementsById ?? state.elementsById;
     const defaultsLookup = state.defaultsLookup;
     const key = [
-      eb, state.zones, state.floors, state.globalOrientationOffset, state.complianceSettings,
+      eb, state.elementIds, state.zones, state.floors, state.globalOrientationOffset, state.complianceSettings,
       state.sourceCsvVersion, state.csvUpgradeRequested, state.calculateContextShadingDistance,
       state.targetValidation, state.defaultsLoading, defaultsLookup, state.defaultsJson,
       state.junctionPsiDefaultsPath, state.junctionPsiDefaultsMap, state.spaceLabelsById,
@@ -2863,6 +2864,7 @@ const createElementValidation = (schemaPort: GeometrySchemaPort) => {
         sourceCsvVersion: state.sourceCsvVersion,
         csvUpgradeRequested: state.csvUpgradeRequested,
         elementsById: eb,
+        elementIds: state.elementIds,
         zones: state.zones,
         floors: state.floors,
         globalOrientationOffset: state.globalOrientationOffset,
@@ -3078,7 +3080,7 @@ const createGeometryState = (
     // so a late read cannot refill the map.
     stateBeforeReset.setJunctionPsiDefaultsPath(undefined);
     set((state) => ({
-      sourceCsvVersion: 3,
+      sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION,
       sourceProvenanceMarkersVersion: undefined,
       provenance: {},
       csvUpgradeRequested: false,
@@ -7781,6 +7783,7 @@ const createGeometryState = (
       sourceCsvVersion: state.sourceCsvVersion,
       csvUpgradeRequested: state.csvUpgradeRequested,
       elementsById: state.elementsById,
+      elementIds: state.elementIds,
       zones: state.zones,
       floors: state.floors,
       globalOrientationOffset: state.globalOrientationOffset,
@@ -7845,7 +7848,8 @@ const createGeometryState = (
     allWarnings.push(...collectDuplicateElementNameWarnings(Object.values(state.elementsById), state.zones));
     allWarnings.push(
       ...collectGlobalSettingsWarnings({
-        elements: Object.values(state.elementsById),
+        // Load order: the warning names the Systems row base the save and the converter take.
+        elements: state.elementIds.flatMap((id) => state.elementsById[id] ?? []),
         floors: state.floors,
         zones: state.zones,
         complianceValidationEnabled,

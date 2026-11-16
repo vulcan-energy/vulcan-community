@@ -956,8 +956,13 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: 'm',
   },
+  'Vents:mid_height_air_flow_path': {
+    description: 'Mid-height of the vent air flow path above ground (unit: m), as for the window it sits in. Vulcan gives HEM this height less the ventilation zone base height; HEM takes 1-60 m. Used in natural ventilation calculations to determine airflow through vents based on pressure differences (BS EN 16798-7).',
+    type: 'number',
+    units: 'm',
+  },
   'MechanicalVentilationTerminal:mid_height_air_flow_path': {
-    description: 'Mid-height of the MVHR terminal air flow path, derived from the terminal point’s 3D z height.',
+    description: 'Mid-height of the MVHR terminal air flow path above ground: the terminal point’s 3D z height (unit: m). Vulcan gives HEM this height less the ventilation zone base height; HEM takes 1-60 m.',
     type: 'number',
     units: 'm',
   },

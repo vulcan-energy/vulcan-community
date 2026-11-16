@@ -1321,7 +1321,7 @@ pub(crate) fn extract_metadata_field(
 
 const VULCAN_CSV_VERSION: &str = "VulcanCsvVersion";
 const LEGACY_VULCAN_CSV_VERSION: u64 = 1;
-const CURRENT_VULCAN_CSV_VERSION: u64 = 3;
+const CURRENT_VULCAN_CSV_VERSION: u64 = 4;
 
 fn metadata_field_value(
     csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
@@ -1342,6 +1342,80 @@ fn ventilation_zone_base_height(model: &Value) -> f64 {
         .pointer("/InfiltrationVentilation/ventilation_zone_base_height")
         .and_then(Value::as_f64)
         .unwrap_or(0.0)
+}
+
+/// Within this a drawn height is "at" 0 or at the base (the editor's DRAWN_AT_ZERO_TOLERANCE_M).
+const DRAWN_AT_ZERO_TOLERANCE_M: f64 = 0.25;
+
+/// Where the ventilation zone base sits in the drawing. HEM measures window, vent and MechVent
+/// mid-heights from the ventilation zone and the base and a building element's or PV array's
+/// base_height from ground (`ventilation.rs`, `building_element.rs`), so a drawn height z is
+/// `z - drawing_z` above the base and `z - drawing_z + base` above ground.
+///
+/// The dwelling's level is its lowest Exposed Elements BuildingElementOpaque base_height (blank as
+/// 0). With a base within 0.25 m of 0, or no wall, the drawing is in ground coordinates
+/// (`drawing_z` = base). Otherwise a level within 0.25 m of 0 (and not of the base) is a dwelling
+/// drawn from its own floor, the base (`drawing_z` = level); a level within 0.25 m of the base
+/// (and not of 0) is in ground coordinates. A level near both, or near neither, cannot be placed:
+/// E069. The editor resolves it the same way (`ventilationZoneBaseFrame`).
+fn ventilation_zone_base_drawing_z(
+    csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+    ventilation_base_height: f64,
+) -> Result<f64, BuildError> {
+    // A wall without a base height is drawn at 0 (the editor's getAreaBasedBaseHeight); a cell
+    // that does not parse is left for the merge to report.
+    let walls: Vec<(&str, f64)> = csv_data
+        .get("Exposed Elements")
+        .into_iter()
+        .flatten()
+        .filter(|row| row.get("Type").and_then(Value::as_str) == Some("BuildingElementOpaque"))
+        .filter_map(|row| {
+            let base = parse_csv_number_cell(row.get("base_height"), "base_height").ok()?;
+            let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+            Some((name, base.unwrap_or(0.0)))
+        })
+        .collect();
+    let Some(level) = walls.iter().map(|(_, z)| *z).reduce(f64::min) else {
+        return Ok(ventilation_base_height);
+    };
+    if ventilation_base_height.abs() <= DRAWN_AT_ZERO_TOLERANCE_M {
+        return Ok(ventilation_base_height);
+    }
+    let at_zero = level.abs() <= DRAWN_AT_ZERO_TOLERANCE_M;
+    let at_base = (level - ventilation_base_height).abs() <= DRAWN_AT_ZERO_TOLERANCE_M;
+    match (at_zero, at_base) {
+        (true, false) => Ok(level),
+        (false, true) => Ok(ventilation_base_height),
+        (both, _) => {
+            let names: Vec<&str> = walls
+                .iter()
+                .filter(|(_, z)| (z - level).abs() <= DRAWN_AT_ZERO_TOLERANCE_M)
+                .map(|(name, _)| *name)
+                .collect();
+            let names = names.join(", ");
+            let level = (level * 100.0).round() / 100.0;
+            let message = if both {
+                format!("The lowest walls ({names}) are drawn at {level} m, near both 0 and the ventilation zone base height ({ventilation_base_height} m), so heights cannot be measured. Draw the dwelling at 0 or at its base height.")
+            } else {
+                format!("The lowest walls ({names}) are drawn at {level} m, but the ventilation zone base height is {ventilation_base_height} m. Draw the dwelling at 0 or at its base height.")
+            };
+            Err(BuildError::new("E069", &message))
+        }
+    }
+}
+
+/// A base_height the row draws, moved by `shift` to HEM's height above ground.
+fn shift_drawn_base_height(element: &mut Value, row: &BTreeMap<String, Value>, shift: f64) {
+    if !matches!(
+        parse_csv_number_cell(row.get("base_height"), "base_height"),
+        Ok(Some(_))
+    ) {
+        return;
+    }
+    if let Some(drawn) = element.get("base_height").and_then(Value::as_f64) {
+        let ground = ((drawn + shift) * 1e6).round() / 1e6;
+        element["base_height"] = serde_json::json!(ground);
+    }
 }
 
 fn window_mid_height_to_hem_reference(
@@ -1382,9 +1456,9 @@ fn vulcan_csv_version(
 
 fn migrate_v1_window_mid_height_reference(
     csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
-    ventilation_base_height: f64,
+    zone_base_z: f64,
 ) -> Result<(), BuildError> {
-    if ventilation_base_height.abs() <= f64::EPSILON {
+    if zone_base_z.abs() <= f64::EPSILON {
         return Ok(());
     }
 
@@ -1393,7 +1467,7 @@ fn migrate_v1_window_mid_height_reference(
             if let Some(mid_height) = window.get("mid_height").and_then(Value::as_f64) {
                 window.insert(
                     "mid_height".to_string(),
-                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height)?,
+                    window_mid_height_to_hem_reference(mid_height, zone_base_z)?,
                 );
             }
             let Some(part_list) = window
@@ -1416,10 +1490,62 @@ fn migrate_v1_window_mid_height_reference(
                 };
                 part_object.insert(
                     "mid_height_air_flow_path".to_string(),
-                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height)?,
+                    window_mid_height_to_hem_reference(mid_height, zone_base_z)?,
                 );
             }
         }
+    }
+    Ok(())
+}
+
+/// Ventilation Systems heights as HEM reads them: from the ventilation zone base. Before version 4
+/// a Vents row's `mid_height_air_flow_path` and a terminal's height column were drawing
+/// heights, so they move down by the base's drawing height (`ventilation_zone_base_drawing_z`) once. Whatever no record says came
+/// from typing a zone-relative value, so every such value is taken as the drawing height the
+/// editor placed. A terminal without a height column takes its point's z, which is a drawing
+/// coordinate in every version.
+fn vent_heights_to_hem_reference(
+    csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+    version: u64,
+    zone_base_z: f64,
+) -> Result<(), BuildError> {
+    if zone_base_z.abs() <= f64::EPSILON {
+        return Ok(());
+    }
+    for row in csv_data
+        .get_mut("Ventilation Systems")
+        .into_iter()
+        .flatten()
+    {
+        let row_type = row.get("Type").and_then(Value::as_str);
+        if !matches!(row_type, Some("Vents" | "MechanicalVentilationTerminal")) {
+            continue;
+        }
+        // A cell that does not parse stays as it is, for the merge to report.
+        let Ok(column) = parse_csv_number_cell(
+            row.get("mid_height_air_flow_path"),
+            "mid_height_air_flow_path",
+        ) else {
+            continue;
+        };
+        let drawing_height = match column {
+            Some(height) if version < 4 => height,
+            Some(_) => continue,
+            None if row_type == Some("MechanicalVentilationTerminal") => {
+                match parse_coords_points(row.get("coords"), "coords")
+                    .ok()
+                    .and_then(|points| points.first().copied())
+                {
+                    Some(point) => point.z,
+                    None => continue,
+                }
+            }
+            None => continue,
+        };
+        row.insert(
+            "mid_height_air_flow_path".to_string(),
+            window_mid_height_to_hem_reference(drawing_height, zone_base_z)?,
+        );
     }
     Ok(())
 }
@@ -1428,12 +1554,13 @@ fn migrate_v1_window_mid_height_reference(
 /// schema merge. Add future migrations here in ascending version order.
 fn migrate_vulcan_csv_to_current(
     csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
-    ventilation_base_height: f64,
+    zone_base_z: f64,
 ) -> Result<(), BuildError> {
     let version = vulcan_csv_version(csv_data)?;
     if version < 2 {
-        migrate_v1_window_mid_height_reference(csv_data, ventilation_base_height)?;
+        migrate_v1_window_mid_height_reference(csv_data, zone_base_z)?;
     }
+    vent_heights_to_hem_reference(csv_data, version, zone_base_z)?;
     {
         for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
             if row.get("Type").and_then(Value::as_str) != Some("BuildingElementPartyWall") {
@@ -2073,17 +2200,26 @@ impl JSONBuilder {
         // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
         let mut sanitized_csv_data = sanitize_csv_extra_json(csv_data);
         let mut result = self.defaults.clone();
-        // Window heights are measured from the ventilation zone base the final model carries, so
-        // every InfiltrationVentilation input merges first, in precedence order: the sections,
+        // Window, vent and terminal heights are measured from the ventilation zone base the final
+        // model carries, so the rows convert before any of them merges.
+        let ventilation_base_height =
+            self.merged_ventilation_zone_base_height(&sanitized_csv_data)?;
+        let zone_base_z =
+            ventilation_zone_base_drawing_z(&sanitized_csv_data, ventilation_base_height)?;
+        migrate_vulcan_csv_to_current(&mut sanitized_csv_data, zone_base_z)?;
+        // Every InfiltrationVentilation input merges first, in precedence order: the sections,
         // then Systems rows, then Metadata rows. Nothing later writes these fields.
         self.merge_ventilation_systems(&mut result, &sanitized_csv_data)?;
         self.merge_combustion_appliances(&mut result, &sanitized_csv_data)?;
         Self::merge_systems_infiltration_ventilation_rows(&mut result, &sanitized_csv_data)?;
         self.merge_ventilation_env_from_metadata(&mut result, &sanitized_csv_data)?;
-        migrate_vulcan_csv_to_current(
-            &mut sanitized_csv_data,
-            ventilation_zone_base_height(&result),
-        )?;
+        let merged_base_height = ventilation_zone_base_height(&result);
+        if merged_base_height != ventilation_base_height {
+            return Err(BuildError::new(
+                "E034",
+                &format!("Heights were measured from a ventilation zone base of {ventilation_base_height} m, but the merged model's is {merged_base_height} m."),
+            ));
+        }
         let csv_data = &sanitized_csv_data;
 
         let existing_building =
@@ -2673,7 +2809,10 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
-        let ventilation_base_height = ventilation_zone_base_height(result);
+        let base = ventilation_zone_base_height(result);
+        let ventilation_base_height = ventilation_zone_base_drawing_z(csv_data, base)?;
+        // A drawn base height goes to HEM above ground (see ventilation_zone_base_drawing_z).
+        let ground_shift = base - ventilation_base_height;
         let building_element_sections = [
             "Exposed Elements",
             "Window Elements",
@@ -3297,6 +3436,10 @@ impl JSONBuilder {
                                 message: w.message,
                             }
                         }));
+
+                    if ground_shift != 0.0 {
+                        shift_drawn_base_height(&mut element_obj, element_row, ground_shift);
+                    }
 
                     // Add to zone's BuildingElement section
                     let zone = result["Zone"][zone_name].as_object_mut().unwrap();
@@ -5951,6 +6094,9 @@ impl JSONBuilder {
                 // No PV systems in CSV - cleanup will remove empty section
                 return Ok(());
             }
+            // A drawn base height goes to HEM above ground (see ventilation_zone_base_drawing_z).
+            let base = ventilation_zone_base_height(result);
+            let ground_shift = base - ventilation_zone_base_drawing_z(csv_data, base)?;
             let result_obj = result
                 .as_object_mut()
                 .ok_or_else(|| BuildError::new("E029", "Result JSON is not an object"))?;
@@ -6020,6 +6166,11 @@ impl JSONBuilder {
                 let pv_path = crate::json_pointer(&["OnSiteGeneration", element_name]);
                 for key in ["peak_power", "base_height", "width", "height"] {
                     if let Some(num) = self.csv_number_non_fatal(row.get(key), key, &pv_path) {
+                        let num = if key == "base_height" && ground_shift != 0.0 {
+                            ((num + ground_shift) * 1e6).round() / 1e6
+                        } else {
+                            num
+                        };
                         pv_system.insert(
                             key.to_string(),
                             Value::Number(
@@ -7521,6 +7672,44 @@ impl JSONBuilder {
     }
 
     /// Merges the fragment of each `is_infiltration_ventilation_row`.
+    /// The ventilation zone base height `build_json` will merge: the defaults, then Systems rows,
+    /// then Metadata rows. The Ventilation Systems section does not set it.
+    ///
+    /// The editor measures a file that states no base (no Metadata row or Systems row sets it) from
+    /// 0, so a non-zero defaults base would move its heights: that file is an error.
+    fn merged_ventilation_zone_base_height(
+        &self,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+    ) -> Result<f64, BuildError> {
+        let mut infiltration = self.defaults.get("InfiltrationVentilation").cloned();
+        let defaults_base = infiltration
+            .as_mut()
+            .and_then(Value::as_object_mut)
+            .and_then(|fields| fields.remove("ventilation_zone_base_height"));
+        let mut probe = serde_json::json!({ "InfiltrationVentilation": infiltration });
+        Self::merge_systems_infiltration_ventilation_rows(&mut probe, csv_data)?;
+        // The full merge reports a bad Metadata cell; the probe must not report it a second time.
+        let reported = self.non_fatal_errors.borrow().len();
+        self.merge_ventilation_env_from_metadata(&mut probe, csv_data)?;
+        self.non_fatal_errors.borrow_mut().truncate(reported);
+        if probe
+            .pointer("/InfiltrationVentilation/ventilation_zone_base_height")
+            .is_none_or(Value::is_null)
+        {
+            let defaults_base = defaults_base
+                .as_ref()
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            if defaults_base != 0.0 {
+                return Err(BuildError::new(
+                    "E034",
+                    &format!("This file states no ventilation zone base height, but the defaults set it to {defaults_base} m. Give Ventilation_ventilation_zone_base_height in the Metadata section (Global Settings in the editor)."),
+                ));
+            }
+        }
+        Ok(ventilation_zone_base_height(&probe))
+    }
+
     fn merge_systems_infiltration_ventilation_rows(
         result: &mut Value,
         csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
@@ -10618,7 +10807,7 @@ window 0,Living,BuildingElementTransparent,1.2,90,1,1.2,90,3.2,{stored_mid_heigh
     fn vulcan_csv_version_rejects_unsupported_future_versions() {
         let csv = r#"Metadata
 GlobalOrientationOffset,0
-VulcanCsvVersion,4
+VulcanCsvVersion,5
 
 Zone
 Name,Type,volume,floor_area
@@ -10632,7 +10821,7 @@ Living,Zone,100,50
         let error = builder
             .build_json(&data)
             .expect_err("future CSV version must fail");
-        assert!(error.message.contains("Unsupported VulcanCsvVersion: 4"));
+        assert!(error.message.contains("Unsupported VulcanCsvVersion: 5"));
     }
 
     #[test]
@@ -13540,6 +13729,319 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
 "#,
             rows.join("\n")
         )
+    }
+
+    /// HEM measures a vent's and an MVHR terminal's mid-height from the ventilation zone base
+    /// (ventilation.rs adds the base back). CSV version 4 stores them that way; earlier versions
+    /// stored drawing heights, which migrate once. Terminal coords are always drawing coordinates;
+    /// the wall drawn at the base puts the drawing in ground coordinates.
+    #[test]
+    fn vent_and_terminal_heights_are_measured_from_the_ventilation_zone_base() {
+        // (version row, base, vent column, intake column, exhaust point z, expected HEM heights)
+        for (version_row, base, vent, intake, exhaust_z) in [
+            ("VulcanCsvVersion,4", 2.8, 1.7, 1.9, 4.6),
+            ("VulcanCsvVersion,3", 2.8, 4.5, 4.7, 4.6),
+            ("", 2.8, 4.5, 4.7, 4.6),
+            ("VulcanCsvVersion,3", -2.5, -1.0, -0.6, -0.7),
+            ("VulcanCsvVersion,4", -2.5, 1.5, 1.9, -0.7),
+        ] {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVentilation_ventilation_zone_base_height,{base}\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n",
+                mvhr_terminal_csv(true)
+                    .replace("180,0,FALSE,FALSE", &format!("180,{base},FALSE,FALSE"))
+                    .replace(
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                        &format!("intake,mvhr_1,wall_1,{intake},,,,,\"0,0,{intake}\""),
+                    )
+                    .replace(
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                        &format!("exhaust,mvhr_1,wall_1,,,,,,\"1,0,{exhaust_z}\""),
+                    )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            let expected_vent = if base > 0.0 { 1.7 } else { 1.5 };
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(expected_vent),
+                "{version_row:?} base {base}"
+            );
+            let mv = &inf["MechanicalVentilation"]["mvhr_1"];
+            assert_eq!(
+                mv["position_intake"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.9),
+                "{version_row:?} base {base}"
+            );
+            assert_eq!(
+                mv["position_exhaust"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.8),
+                "{version_row:?} base {base}"
+            );
+        }
+    }
+
+    /// A dwelling drawn from its own floor (lowest wall at zero) with its base above ground, such
+    /// as an upper-storey flat drawn on the drawing's ground floor: the drawing measures from the
+    /// base, so every drawn height is already HEM's height above it. A dwelling drawn at its base
+    /// is in ground coordinates and the same heights come out.
+    #[test]
+    fn a_dwelling_drawn_at_zero_measures_drawn_heights_from_its_base() {
+        for (version_row, wall_base, drawn) in [
+            ("VulcanCsvVersion,4", 0.0, 0.0),
+            ("VulcanCsvVersion,3", 0.0, 0.0),
+            ("VulcanCsvVersion,4", 9.0, 9.0),
+            ("VulcanCsvVersion,3", 9.0, 9.0),
+        ] {
+            let terminal_z = drawn + 2.4;
+            let vent = if version_row.ends_with('3') {
+                drawn + 1.6
+            } else {
+                1.6
+            };
+            let sill = drawn + 0.9;
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVentilation_ventilation_zone_base_height,9\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,{sill},1.5,{{}}\n",
+                mvhr_terminal_csv(true)
+                    .replace("180,0,FALSE,FALSE", &format!("180,{wall_base},FALSE,FALSE"))
+                    .replace(
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                        &format!("intake,mvhr_1,wall_1,,,,,,\"0,0,{terminal_z}\""),
+                    )
+                    .replace(
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                        &format!("exhaust,mvhr_1,wall_1,,,,,,\"1,0,{terminal_z}\""),
+                    )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(9.0));
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.6),
+                "{version_row} wall at {wall_base}"
+            );
+            let mv = &inf["MechanicalVentilation"]["mvhr_1"];
+            for position in ["position_intake", "position_exhaust"] {
+                assert_eq!(
+                    mv[position]["mid_height_air_flow_path"].as_f64(),
+                    Some(2.4),
+                    "{version_row} wall at {wall_base} {position}"
+                );
+            }
+            let elements = &result["Zone"]["Default Zone"]["BuildingElement"];
+            assert_eq!(
+                elements["window 0"]["mid_height"].as_f64(),
+                Some(1.5),
+                "{version_row} wall at {wall_base}"
+            );
+            // HEM's base_height is above ground (building_element.rs): the sill is 0.9 m above
+            // the 9 m base, the wall stands on it.
+            assert_eq!(elements["window 0"]["base_height"].as_f64(), Some(9.9));
+            assert_eq!(elements["wall_1"]["base_height"].as_f64(), Some(9.0));
+        }
+    }
+
+    /// The csv for the frame tests: a wall drawn at `wall_base`, a vent before version 4 at 1.6 m,
+    /// a terminal point at 2.4 m and a window with its sill at 1.1 m, over `base`.
+    fn frame_csv(base: f64, wall_base: f64) -> String {
+        format!(
+            "Metadata\nGlobalOrientationOffset,0\nVentilation_ventilation_zone_base_height,{base}\nVulcanCsvVersion,3\n\n{}vent_1,Vents,,,,,,,1.6,30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,1.1,1.7,{{}}\n",
+            mvhr_terminal_csv(true)
+                .replace("180,0,FALSE,FALSE", &format!("180,{wall_base},FALSE,FALSE"))
+                .replace(
+                    "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                    "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.4\"",
+                )
+        )
+    }
+
+    /// A base within 0.25 m of 0 puts the drawing in ground coordinates whatever the walls'
+    /// level: heights are as before the drawing frame existed.
+    #[test]
+    fn a_base_near_zero_never_moves_drawn_heights() {
+        let data = CSVParser::new()
+            .parse_csv(&frame_csv(0.0, 0.2))
+            .expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let result = builder.build_json(&data).expect("CSV should merge");
+        let inf = &result["InfiltrationVentilation"];
+        assert_eq!(
+            inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+            Some(1.6)
+        );
+        assert_eq!(
+            inf["MechanicalVentilation"]["mvhr_1"]["position_exhaust"]["mid_height_air_flow_path"]
+                .as_f64(),
+            Some(2.4)
+        );
+        let elements = &result["Zone"]["Default Zone"]["BuildingElement"];
+        assert_eq!(elements["window 0"]["base_height"].as_f64(), Some(1.1));
+        assert_eq!(elements["wall_1"]["base_height"].as_f64(), Some(0.2));
+    }
+
+    /// A dwelling drawn at zero on a 9 m base: building elements and PV go to HEM above ground.
+    #[test]
+    fn drawn_base_heights_go_to_hem_above_ground() {
+        let csv = format!(
+            "{}\nOn-Site Generation\nName,Type,generation_type,pitch,orientation360,base_height,peak_power,coords,extra_json\nPV 1,OnSiteGeneration,PhotovoltaicSystem,30,180,5,2.5,\"0,0,0|1,0,0|1,1,0|0,1,0\",\"{{\"\"ventilation_strategy\"\":\"\"moderately_ventilated\"\",\"\"EnergySupply\"\":\"\"mains elec\"\",\"\"shading\"\":[],\"\"inverter_peak_power_dc\"\":2,\"\"inverter_peak_power_ac\"\":1.4,\"\"inverter_is_inside\"\":false,\"\"inverter_type\"\":\"\"optimised_inverter\"\"}}\"\n",
+            frame_csv(9.0, 0.0)
+        );
+        let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let result = builder.build_json(&data).expect("CSV should merge");
+        let elements = &result["Zone"]["Default Zone"]["BuildingElement"];
+        assert_eq!(elements["window 0"]["base_height"].as_f64(), Some(10.1));
+        assert_eq!(elements["wall_1"]["base_height"].as_f64(), Some(9.0));
+        assert_eq!(
+            result["OnSiteGeneration"]["PV 1"]["base_height"].as_f64(),
+            Some(14.0)
+        );
+    }
+
+    /// Walls near both 0 and the base, or near neither, do not say where the base is drawn.
+    #[test]
+    fn walls_that_place_the_base_nowhere_or_twice_are_e069() {
+        for (base, wall_base, says) in [
+            (
+                0.4,
+                0.2,
+                "near both 0 and the ventilation zone base height (0.4 m)",
+            ),
+            (
+                9.0,
+                3.0,
+                "drawn at 3 m, but the ventilation zone base height is 9 m",
+            ),
+        ] {
+            let data = CSVParser::new()
+                .parse_csv(&frame_csv(base, wall_base))
+                .expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let error = builder
+                .build_json(&data)
+                .expect_err("the base cannot be placed");
+            assert_eq!(error.code, "E069");
+            assert!(
+                error.message.contains("(wall_1)")
+                    && error.message.contains(says)
+                    && error
+                        .message
+                        .ends_with("Draw the dwelling at 0 or at its base height."),
+                "{}",
+                error.message
+            );
+        }
+    }
+
+    /// A Systems InfiltrationVentilation row that sets the base, with no Metadata row: windows,
+    /// vents and terminals are measured from that base.
+    #[test]
+    fn a_systems_row_base_measures_windows_vents_and_terminals() {
+        for (version_row, vent, window) in [
+            ("VulcanCsvVersion,4", 1.5, 1.4),
+            ("VulcanCsvVersion,3", 4.3, 1.4),
+            ("", 4.3, 4.2),
+        ] {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,3.6,{window},{{}}\n\nSystems\nName,Zone,Type,subcategory,extra_json\nVentilation,,System,InfiltrationVentilation,\"{{\"\"InfiltrationVentilation\"\":{{\"\"ventilation_zone_base_height\"\":2.8}}}}\"\n",
+                mvhr_terminal_csv(true).replace("180,0,FALSE,FALSE", "180,2.8,FALSE,FALSE").replace(
+                    "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                    "intake,mvhr_1,wall_1,,,,,,\"0,0,4.7\"",
+                ).replace(
+                    "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                    "exhaust,mvhr_1,wall_1,,,,,,\"1,0,4.6\"",
+                )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(2.8));
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.5),
+                "{version_row:?}"
+            );
+            let mv = &inf["MechanicalVentilation"]["mvhr_1"];
+            assert_eq!(
+                mv["position_intake"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.9)
+            );
+            assert_eq!(
+                mv["position_exhaust"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.8)
+            );
+            assert_eq!(
+                result["Zone"]["Default Zone"]["BuildingElement"]["window 0"]["mid_height"]
+                    .as_f64(),
+                Some(1.4),
+                "{version_row:?}"
+            );
+        }
+    }
+
+    /// The editor measures a file that states no base from 0, so a non-zero defaults template base
+    /// would move its heights: the file must state the base. Stated, it measures the heights.
+    #[test]
+    fn a_non_zero_defaults_base_needs_the_file_to_state_one() {
+        for metadata_row in ["", "Ventilation_ventilation_zone_base_height,2.8\n"] {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVulcanCsvVersion,4\n{metadata_row}\n{}vent_1,Vents,,,,,,,1.5,30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,3.6,1.4,{{}}\n",
+                mvhr_terminal_csv(true)
+                    .replace(
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,4.7\"",
+                    )
+                    .replace(
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,4.6\"",
+                    )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            builder.defaults["InfiltrationVentilation"]["ventilation_zone_base_height"] =
+                serde_json::json!(2.8);
+            if metadata_row.is_empty() {
+                let error = builder
+                    .build_json(&data)
+                    .expect_err("a file that states no base must not take the defaults' 2.8 m");
+                assert_eq!(error.code, "E034");
+                assert!(
+                    error
+                        .message
+                        .contains("states no ventilation zone base height")
+                        && error.message.contains("2.8 m"),
+                    "{}",
+                    error.message
+                );
+                continue;
+            }
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(2.8));
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.5),
+                "{metadata_row:?}"
+            );
+            assert_eq!(
+                result["Zone"]["Default Zone"]["BuildingElement"]["window 0"]["mid_height"]
+                    .as_f64(),
+                Some(1.4),
+                "{metadata_row:?}"
+            );
+        }
     }
 
     /// Native hash maps take a new seed for each map, so a repeat build in one process sees the

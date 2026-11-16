@@ -210,7 +210,7 @@ describe('FHS window base-height validation', () => {
       source: 'fhs',
       fieldKey: 'base_height',
       message: expect.stringContaining(
-        'Window base height (0.50 m) is below the ventilation zone base height (1 m).',
+        'Window base height (0.50 m) is below the ventilation zone base, drawn at 1 m.',
       ),
     }));
   });
@@ -226,7 +226,7 @@ describe('FHS window base-height validation', () => {
     });
 
     expect(
-      result.issues.some((issue) => issue.message.includes('ventilation zone base height')),
+      result.issues.some((issue) => issue.message.includes('below the ventilation zone base')),
     ).toBe(false);
   });
 
@@ -246,7 +246,7 @@ describe('FHS window base-height validation', () => {
     expect(result.issues).toContainEqual(expect.objectContaining({
       source: 'fhs',
       message: expect.stringContaining(
-        'Window base height (2.30 m) is below the ventilation zone base height (2.40 m).',
+        'Window base height (2.30 m) is below the ventilation zone base, drawn at 2.40 m.',
       ),
     }));
   });
@@ -264,8 +264,81 @@ describe('FHS window base-height validation', () => {
     });
 
     expect(
-      result.issues.some((issue) => issue.message.includes('ventilation zone base height')),
+      result.issues.some((issue) => issue.message.includes('below the ventilation zone base')),
     ).toBe(false);
+  });
+});
+
+// The checks measure from the base the file converts with (see resolveEffectiveVentilationBaseHeight):
+// a Systems row's, or 0 where a loaded file lacks the Metadata row or has it blank.
+describe('ventilation zone base the checks measure from', () => {
+  const BASE_ROW = 'Ventilation_ventilation_zone_base_height';
+  // Derives a 2.4 m base with `floors`.
+  const upperFlat = { build_type: 'flat', storeys_in_dwelling: 1, storey_of_dwelling: 2 };
+  const systemsRow = {
+    id: 'sys', name: 'Ventilation', type: 'System', subcategory: 'InfiltrationVentilation',
+    extra_json: { InfiltrationVentilation: { ventilation_zone_base_height: 2.8 } }, coordinates: [], isPlaceholder: false,
+  } as unknown as Element;
+  const terminalAt = (z: number) => ({ ...hostedTerminal('Wall A'), coordinates: [{ x: 1, y: 0, z }] }) as Element;
+  const mvhrParts = [mvhrUnit(), terminalHost('wall-a', 'Wall A', 'zone-1')];
+  // The host wall drawn at the base puts the drawing in ground coordinates.
+  const mvhrPartsDrawnAt = (base: number) => [mvhrUnit(), { ...terminalHost('wall-a', 'Wall A', 'zone-1'), base_height: base } as Element];
+  const baseIssue = (element: Element, others: Element[], settings: object) => validateElementCore(element, {
+    ...baseContext(element),
+    elementsById: Object.fromEntries([element, ...others].map((e) => [e.id, e])),
+    floors,
+    complianceSettings: settings,
+  }).issues.find((issue) => issue.message.includes('ventilation zone base'))?.message;
+  const noBase = [{ absentMetadataRows: [BASE_ROW] }, { unreadMetadataRows: { [BASE_ROW]: '' } }];
+
+  it('checks a window and a terminal against a Systems row base', () => {
+    expect(baseIssue(window(2.6), [systemsRow], upperFlat)).toContain('drawn at 2.80 m');
+    expect(baseIssue(terminalAt(3.5), [...mvhrPartsDrawnAt(2.8), systemsRow], upperFlat)).toContain('1 to 60 m above');
+  });
+
+  it('names the lowest walls when they place the base nowhere, as the converter (E069) does', () => {
+    const host = { ...terminalHost('wall-a', 'Wall A', 'zone-1'), base_height: 3, width: 4, height: 2.8 } as Element;
+    const result = validateElementCore(host, {
+      ...baseContext(host), elementsById: { [host.id]: host }, floors,
+      complianceSettings: { Ventilation_ventilation_zone_base_height: 9 },
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({ fieldKey: 'base_height',
+      message: 'Wall A (BuildingElementOpaque): The lowest walls (Wall A) are drawn at 3 m, but the ventilation zone base height is 9 m. Draw the dwelling at 0 or at its base height.' }));
+  });
+
+  it('measures from the floor of a dwelling drawn at zero, which is the base', () => {
+    expect(baseIssue(terminalAt(0.5), [...mvhrParts, systemsRow], upperFlat)).toContain('1 to 60 m above');
+    expect(baseIssue(terminalAt(2), [...mvhrParts, systemsRow], upperFlat)).toBeUndefined();
+    expect(baseIssue(window(0.9), [...mvhrParts, systemsRow], upperFlat)).toBeUndefined();
+  });
+
+  it.each(noBase)('checks a window and a terminal against 0 where the file states no base (%o)', (fileRow) => {
+    expect(baseIssue(window(2.3), [], { ...upperFlat, ...fileRow })).toBeUndefined();
+    expect(baseIssue(terminalAt(2), mvhrParts, { ...upperFlat, ...fileRow })).toBeUndefined();
+  });
+
+  it('skips the terminal check when the base cannot be settled, as the window check does', () => {
+    expect(baseIssue(terminalAt(0.5), mvhrParts, {})).toBeUndefined();
+    expect(baseIssue(window(0), [], {})).toBeUndefined();
+  });
+
+  it('takes the last Systems row base in load order (elementIds), as the save and converter do', () => {
+    const systemsAt = (id: string, base: number) => ({
+      ...systemsRow, id, name: `Ventilation ${id}`,
+      extra_json: { InfiltrationVentilation: { ventilation_zone_base_height: base } },
+    }) as unknown as Element;
+    const element = window(3);
+    // An all-digit id enumerates first in Object.values, ahead of load order.
+    const elementsById = { [element.id]: element, a: systemsAt('a', 2.8), 7: systemsAt('7', 3.1) };
+    const issue = validateElementCore(element, {
+      ...baseContext(element), elementsById, elementIds: [element.id, 'a', '7'], floors, complianceSettings: upperFlat,
+    }).issues.find((i) => i.message.includes('ventilation zone base'))?.message;
+    expect(issue).toContain('drawn at 3.10 m');
+  });
+
+  it('checks against the derived base otherwise', () => {
+    expect(baseIssue(window(2.3), [], upperFlat)).toContain('drawn at 2.40 m');
+    expect(baseIssue(terminalAt(2), mvhrPartsDrawnAt(2.4), upperFlat)).toContain('1 to 60 m above');
   });
 });
 
