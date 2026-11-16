@@ -2043,6 +2043,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       takesResistance,
       resistanceShown,
       setResistanceChosen,
+      currentData,
       onChange,
     ],
   );
