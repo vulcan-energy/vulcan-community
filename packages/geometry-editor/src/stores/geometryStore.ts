@@ -79,6 +79,7 @@ import {
 } from '../geometry/validation/validateElement';
 import { findLinearThermalBridgeIssues } from '../geometry/thermalBridge/findLinearThermalBridgeIssues';
 import { validateZone as validateZoneCore } from '../geometry/validation/validateZone';
+import { CURRENT_VULCAN_CSV_VERSION } from '../geometry/io/parseCsvToGeometry';
 import { validateSpaceLabels } from '../geometry/validation/validateSpaceLabels';
 import { selectPartFData } from '../geometry/validation/partF';
 import {
@@ -3078,7 +3079,7 @@ const createGeometryState = (
     // so a late read cannot refill the map.
     stateBeforeReset.setJunctionPsiDefaultsPath(undefined);
     set((state) => ({
-      sourceCsvVersion: 3,
+      sourceCsvVersion: CURRENT_VULCAN_CSV_VERSION,
       sourceProvenanceMarkersVersion: undefined,
       provenance: {},
       csvUpgradeRequested: false,

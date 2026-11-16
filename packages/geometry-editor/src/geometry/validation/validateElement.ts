@@ -2006,8 +2006,13 @@ export const validateElementCore = (
             'mid_height_air_flow_path',
           ));
         }
-      } else if (position.mid_height_air_flow_path < 1 || position.mid_height_air_flow_path > 60) {
-        issues.push(geo('mid_height_air_flow_path must be between 1 and 60 m', 'mid_height_air_flow_path'));
+      } else {
+        // HEM measures the height from the ventilation zone base, as the CSV writes it.
+        const base = (context.complianceSettings && ventilationZoneBaseHeightFor(allElements, floors, context.complianceSettings)) ?? 0;
+        const height = position.mid_height_air_flow_path - base;
+        if (height < 1 || height > 60) {
+          issues.push(geo('Terminal height must be 1 to 60 m above the ventilation zone base', 'mid_height_air_flow_path'));
+        }
       }
 
       if (elementsById && parent?.type === 'MechanicalVentilation' && (parent as MechanicalVentilation).vent_type === 'MVHR' && isMvhrTerminalRole(terminalElement.terminal_type)) {

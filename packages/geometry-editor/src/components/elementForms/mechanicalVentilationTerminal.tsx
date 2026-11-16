@@ -71,6 +71,7 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { isExistingBuilding } from '../../lib/windowOpenings';
+import { resolveEffectiveVentilationBaseHeight } from '../../lib/effectiveDwellingDetails';
 import { getParentByName } from '../../lib/parentOrientation';
 import { defaultMvhrTerminalZ, deriveMechanicalVentilationTerminalPosition, isMvhrTerminalHost } from '../../lib/mvhrDuctwork';
 import { MVHR_TERMINAL_ROLES } from '../../lib/mvhrRoles';
@@ -117,6 +118,8 @@ export interface MechanicalVentilationTerminalFormState {
   findEligibleHost: (hostName: string) => Element | undefined;
   /** An existing building places each vent in its host element, at a stated position in it. */
   existingBuilding: boolean;
+  /** The ventilation zone base the exported terminal height is measured from. */
+  ventilationZoneBaseHeightM: number;
   /** A new terminal's height on the selected storey (its base + the default terminal height). */
   defaultTerminalZ: number;
 }
@@ -125,6 +128,16 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
   const [terminalType, setTerminalType] = useState<'' | 'intake' | 'exhaust'>('');
   const [hostElement, setHostElement] = useState<string>('');
   const existingBuilding = useGeometryStore(isExistingBuilding);
+  const ventilationZoneBaseHeightM = useGeometryStore((state) =>
+    resolveEffectiveVentilationBaseHeight({
+      zones: state.zones,
+      elementsById: state.elementsById,
+      spaceLabelsById: state.spaceLabelsById,
+      spaceLabelIds: state.spaceLabelIds,
+      complianceSettings: state.complianceSettings,
+      floors: state.floors,
+    }),
+  );
 
   const isExistingElementSelection = (): boolean =>
     !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
@@ -181,6 +194,7 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
     hostElement,
     setHostElement,
     existingBuilding,
+    ventilationZoneBaseHeightM,
     commitMvhrTerminalMidHeightAirFlowPath,
     mvhrTerminalMidHeightAirFlowPathInput,
     commitMvhrTerminalManualPositionField,
@@ -265,6 +279,7 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
       hostElement,
       setHostElement,
       existingBuilding,
+      ventilationZoneBaseHeightM,
       mvhrTerminalMidHeightAirFlowPathInput,
       mvhrTerminalOrientationInput,
       mvhrTerminalPitchInput,
@@ -449,7 +464,7 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
         </div>
         {derivedPosition ? (
           <div className="element-editor-note">
-            Export position: mid_height_air_flow_path {formatConditionalDecimals(derivedPosition.mid_height_air_flow_path)} m,
+            Export position: mid_height_air_flow_path {formatConditionalDecimals(roundToTwoDecimals(derivedPosition.mid_height_air_flow_path - ventilationZoneBaseHeightM))} m above the ventilation zone base,
             orientation {Math.round(derivedPosition.orientation360)}°, pitch {Math.round(derivedPosition.pitch)}°.
           </div>
         ) : mountedHost ? (

@@ -62,7 +62,7 @@ import { parseFabricPreset } from '../../lib/fabricPreset';
 
 export const VULCAN_CSV_VERSION_METADATA_KEY = 'VulcanCsvVersion';
 export const LEGACY_VULCAN_CSV_VERSION = 1;
-export const CURRENT_VULCAN_CSV_VERSION = 3;
+export const CURRENT_VULCAN_CSV_VERSION = 4;
 
 type WindowPart = { mid_height_air_flow_path?: unknown } & Record<string, unknown>;
 
@@ -115,7 +115,10 @@ export function convertGroundRelativeWindowExtraJsonForCsv(
   };
 }
 
-/** Hydrate version-2 HEM-relative CSV values into Vulcan's ground-relative editor coordinates. */
+/**
+ * Hydrate HEM-relative CSV values into Vulcan's ground-relative editor coordinates: window
+ * mid-heights from version 2, vent and MVHR terminal mid-heights from version 4.
+ */
 function migrateVulcanCsvElementsForEditor(
   elements: Element[],
   csvVersion: number,
@@ -129,6 +132,12 @@ function migrateVulcanCsvElementsForEditor(
   }
 
   return elements.map((element) => {
+    if (element.type === 'Vents' || element.type === 'MechanicalVentilationTerminal') {
+      const midpoint = element.mid_height_air_flow_path;
+      return csvVersion >= 4 && typeof midpoint === 'number' && Number.isFinite(midpoint)
+        ? { ...element, mid_height_air_flow_path: roundFloatNoise(midpoint + ventilationZoneBaseHeight) }
+        : element;
+    }
     if (element.type !== 'BuildingElementTransparent') return element;
     if (csvVersion === LEGACY_VULCAN_CSV_VERSION) {
       // v1 columns and legacy parts are already ground-relative; the builder reads new-style parts as zone-relative.

@@ -487,14 +487,16 @@ const formatElementFirstCoordForCsv = (element: { coordinates?: Array<{ x: numbe
   return formatCoords([coords[0]]);
 };
 
+/** A terminal's mid-height less `heightOffset` (the ventilation zone base from CSV version 4). */
 const mechanicalVentilationTerminalMidHeightForCsv = (
   element: ElementByType<'MechanicalVentilationTerminal'>,
+  heightOffset: number,
 ): number | '' => {
   if (typeof element.mid_height_air_flow_path === 'number' && Number.isFinite(element.mid_height_air_flow_path)) {
-    return element.mid_height_air_flow_path;
+    return roundFloatNoise(element.mid_height_air_flow_path - heightOffset);
   }
   const z = element.coordinates?.[0]?.z;
-  return typeof z === 'number' && Number.isFinite(z) ? roundToTwoDecimals(z) : '';
+  return typeof z === 'number' && Number.isFinite(z) ? roundToTwoDecimals(z - heightOffset) : '';
 };
 
 const formatViewerBaseHeightForCsv = (element: { _base_height?: unknown; base_height?: unknown }): string => {
@@ -935,7 +937,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const rawState = get();
     const migrationIssues = csvMigrationIssues(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
     const upgrading = rawState.csvUpgradeRequested && rawState.sourceCsvVersion < CURRENT_VULCAN_CSV_VERSION;
-    if ((upgrading || rawState.sourceCsvVersion >= CURRENT_VULCAN_CSV_VERSION) && !exportOptions?.allowUnresolvedMigration) {
+    if ((upgrading || rawState.sourceCsvVersion >= 3) && !exportOptions?.allowUnresolvedMigration) {
       assertCsvMigrationResolved(Object.values(rawState.elementsById), rawState.sourceCsvVersion);
     }
     // Draft snapshots keep the original format; a resolved Save finalizes
@@ -1538,6 +1540,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const ventilationHeader = [...EXPECTED_SECTION_HEADERS['Ventilation Systems']];
       const ventilationColumnCount = ventilationHeader.length;
 
+      // HEM measures vent and terminal mid-heights from the ventilation zone base (CSV version 4).
+      const ventHeightOffset = exportVersion >= 4 ? effectiveVentBaseHeight : 0;
       lines.push('Ventilation Systems,,,,,,,,,,,,,,');
       lines.push(ensureColumnCount(ventilationHeader, ventilationColumnCount));
       ventilationElements.forEach(element => {
@@ -1558,9 +1562,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(element.parent_element || ''),
           escapeCSV(element.type === 'MechanicalVentilationTerminal' ? element.host_element || '' : ''),
           escapeCSV(element.type === 'MechanicalVentilationTerminal'
-            ? mechanicalVentilationTerminalMidHeightForCsv(element)
+            ? mechanicalVentilationTerminalMidHeightForCsv(element, ventHeightOffset)
             : element.type === 'Vents'
-              ? element.mid_height_air_flow_path
+              ? (typeof element.mid_height_air_flow_path === 'number'
+                ? roundFloatNoise(element.mid_height_air_flow_path - ventHeightOffset)
+                : element.mid_height_air_flow_path)
               : mechanicalVentilationFlatPosition.mid_height_air_flow_path ?? ''),
           escapeCSV(element.type === 'Vents' ? element.area_cm2 : ''),
           escapeCSV(element.type === 'Vents' || element.type === 'MechanicalVentilationTerminal'

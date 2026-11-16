@@ -119,7 +119,7 @@ describe('floor mutation invariants', () => {
     const { store } = seedWindow(false, false);
     const legacyCsv = store.getState()
       .generateCSV()
-      .replace('VulcanCsvVersion,3', 'VulcanCsvVersion,2\nProvenanceMarkers,2')
+      .replace('VulcanCsvVersion,4', 'VulcanCsvVersion,2\nProvenanceMarkers,2')
       .replace(',""_window_security_risk_user_override"":true', '');
     expect(legacyCsv).not.toContain('_window_security_risk_user_override');
 

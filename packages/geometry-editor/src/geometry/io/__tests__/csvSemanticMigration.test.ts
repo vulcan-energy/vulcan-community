@@ -43,7 +43,7 @@ TargetBundleId,${rustA7}`])(
       store.getState().requestCsvUpgrade();
       expect(store.getState().getCsvMigrationIssues()).toEqual([]);
       const saved = store.getState().generateCSV();
-      expect(saved).toContain('VulcanCsvVersion,3');
+      expect(saved).toContain('VulcanCsvVersion,4');
       const reopened = createGeometryStore({ defaultDefaultsPath: null });
       reopened.getState().loadFromCSV(saved);
       expect(reopened.getState().getCsvMigrationIssues()).toEqual([]);
@@ -161,7 +161,7 @@ TargetBundleId,${rustA7}`, { u_value: .25, u_value_interpretation: meaning, u_va
     store.getState().resolveCsvUValueInterpretation(['q'], 'half_construction');
     store.getState().setTargetBundleId('test:immutable-pin');
     const csv = store.getState().generateCSV();
-    expect(csv).toContain('VulcanCsvVersion,3');
+    expect(csv).toContain('VulcanCsvVersion,4');
     const reopened = createGeometryStore();
     reopened.getState().loadFromCSV(csv);
     expect(reopened.getState().getCsvMigrationIssues()).toEqual([]);
@@ -197,7 +197,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,,"{""u_value"":0.25}"
     expect(state.generateCSV()).toContain('VulcanCsvVersion,1');
     state.requestCsvUpgrade();
     const upgraded = store.getState().generateCSV();
-    expect(upgraded).toContain('VulcanCsvVersion,3');
+    expect(upgraded).toContain('VulcanCsvVersion,4');
     expect(upgraded).not.toContain('ProvenanceMarkers,');
     const reopened = createGeometryStore({ defaultDefaultsPath: null });
     reopened.getState().loadFromCSV(upgraded);
@@ -244,7 +244,7 @@ Window,Living,BuildingElementTransparent,2,90,1,2,0,1,,0.25,1,2,0.6,,"{""securit
   });
 
   it('does not use an old provenance row to accept an unknown CSV format', () => {
-    expect(() => parseCsvToGeometry('Metadata\nVulcanCsvVersion,4\nProvenanceMarkers,3\n')).toThrow('Unsupported VulcanCsvVersion: 4');
+    expect(() => parseCsvToGeometry('Metadata\nVulcanCsvVersion,5\nProvenanceMarkers,3\n')).toThrow('Unsupported VulcanCsvVersion: 5');
   });
 
   it.each([

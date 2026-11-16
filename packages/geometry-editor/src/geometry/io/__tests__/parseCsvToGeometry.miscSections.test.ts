@@ -106,15 +106,15 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     store.getState().resolveCsvUValueInterpretation([party.id], 'whole_wall');
     expect(store.getState().generateCSV({ allowUnresolvedMigration: true })).toContain('VulcanCsvVersion,1');
     const upgraded = store.getState().generateCSV();
-    expect(upgraded).toContain('VulcanCsvVersion,3');
+    expect(upgraded).toContain('VulcanCsvVersion,4');
     const upgradedWindow = parseCsvToGeometry(upgraded).elements.find(element => element.type === 'BuildingElementTransparent')!;
     expect(upgradedWindow.mid_height).toBe(3.8);
     expect(upgradedWindow.extra_json?.window_part_list).toEqual([{ mid_height_air_flow_path: 3.8 }]);
   });
 
   it('rejects unsupported future Vulcan CSV versions instead of guessing', () => {
-    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 1.4, 1.4)))
-      .toThrow('Unsupported VulcanCsvVersion: 4');
+    expect(() => parseCsvToGeometry(windowCsv('VulcanCsvVersion,5,,,,,,,,,,,,,', 1.4, 1.4)))
+      .toThrow('Unsupported VulcanCsvVersion: 5');
   });
 
   it.each(['', '2.5', 'not-a-version'])(
@@ -125,7 +125,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     },
   );
 
-  it('exports HEM-relative window and window-part mid-heights as idempotent version-3 CSV', () => {
+  it('exports HEM-relative window and window-part mid-heights as idempotent current-version CSV', () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const zone = { id: 'zone-1', name: 'Living', type: 'Zone' } as Zone;
     const window = {
@@ -152,7 +152,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     });
 
     const csv = store.getState().generateCSV();
-    expect(csv).toContain('VulcanCsvVersion,3');
+    expect(csv).toContain('VulcanCsvVersion,4');
     expect(csv).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
 
     const parsed = parseCsvToGeometry(csv);
@@ -165,7 +165,7 @@ Party,Living,BuildingElementPartyWall,6,90,2,3,,"{""u_value"":0.25}"
     const reloaded = createGeometryStore({ defaultDefaultsPath: null });
     reloaded.getState().loadFromCSV(csv);
     const savedAgain = reloaded.getState().generateCSV();
-    expect(savedAgain).toContain('VulcanCsvVersion,3');
+    expect(savedAgain).toContain('VulcanCsvVersion,4');
     expect(savedAgain).toContain('"{""window_part_list"":[{""mid_height_air_flow_path"":1.4}]}"');
   });
 
@@ -190,6 +190,64 @@ Window 1,Basement,BuildingElementTransparent,1.2,90,1,1.2,0,-0.8,,0.1,0.4,0.9,0.
     expect((window?.extra_json as any).window_part_list).toEqual([
       { mid_height_air_flow_path: -0.1, note: 'preserve' },
     ]);
+  });
+
+  // HEM measures vents and MVHR terminals from the ventilation zone base, as it does windows.
+  const ventCsv = (version: string, base: number, vent: number, terminal: string, terminalZ: number) => `
+Metadata,,,,,,,,,,,,,
+GlobalOrientationOffset,0,,,,,,,,,,,,,
+${version}
+Ventilation_ventilation_zone_base_height,${base},,,,,,,,,,,,,
+
+Zone,,,,,,,,,,,,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Ventilation Systems,,,,,,,,,,,,,
+Name,Type,length,duct_type,terminal_type,parent_element,host_element,mid_height_air_flow_path,area_cm2,orientation360,pitch,vent_type,coords,extra_json
+MVHR 1,MechanicalVentilation,,,,,,,,,,MVHR,,"{}"
+Trickle,Vents,,,,,,${vent},30,90,90,,"4.000,5.000,1.000","{}"
+Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,${terminal},,315,90,,"1.000,0.000,${terminalZ}","{}"
+`.trim();
+  const ventHeights = (csv: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().loadFromCSV(csv);
+    const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
+    return { store, vent: byName('Trickle').mid_height_air_flow_path, terminal: byName('Intake').mid_height_air_flow_path };
+  };
+
+  it.each([
+    [2.8, 1.5, 1.8, 4.3, 4.6],
+    [-2.5, 1.5, 1.8, -1, -0.7],
+  ])('round-trips version-4 vent and terminal heights over base %s', (base, ventCell, terminalCell, vent, terminal) => {
+    const loaded = ventHeights(ventCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', base, ventCell, String(terminalCell), terminal));
+    expect(loaded).toMatchObject({ vent, terminal });
+    const csv = loaded.store.getState().generateCSV();
+    expect(csv).toContain('VulcanCsvVersion,4');
+    expect(csv).toContain(`Trickle,Vents,,,,,,${ventCell},`);
+    expect(csv).toContain(`Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,${terminalCell},`);
+    const reloaded = ventHeights(csv);
+    expect(reloaded).toMatchObject({ vent, terminal });
+    expect(reloaded.store.getState().generateCSV()).toBe(csv);
+  });
+
+  it('writes a terminal with no height column from its point, less the base', () => {
+    const loaded = ventHeights(ventCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 2.8, 1.5, '', 4.6));
+    expect(loaded.store.getState().generateCSV()).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,1.8,');
+  });
+
+  it('keeps version-3 ground-relative vent and terminal heights until the file is upgraded', () => {
+    const loaded = ventHeights(ventCsv('VulcanCsvVersion,3,,,,,,,,,,,,,', 2.8, 4.3, '4.6', 4.6));
+    expect(loaded).toMatchObject({ vent: 4.3, terminal: 4.6 });
+    const ordinarySave = loaded.store.getState().generateCSV();
+    expect(ordinarySave).toContain('VulcanCsvVersion,3');
+    expect(ordinarySave).toContain('Trickle,Vents,,,,,,4.3,');
+    loaded.store.getState().requestCsvUpgrade();
+    const upgraded = loaded.store.getState().generateCSV();
+    expect(upgraded).toContain('VulcanCsvVersion,4');
+    expect(upgraded).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(upgraded).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,1.8,');
+    expect(ventHeights(upgraded)).toMatchObject({ vent: 4.3, terminal: 4.6 });
   });
 
   it('parses the canonical property postcode metadata row', () => {
