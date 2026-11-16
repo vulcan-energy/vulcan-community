@@ -840,7 +840,22 @@ impl Ctx<'_> {
                 c.remove(*field);
             }
         }
-        for key in element_override_keys(construction_type) {
+        // A construction detail its type does not take would be dropped silently: name the element.
+        let taken = element_override_keys(construction_type);
+        for e in elements {
+            for key in ["insulation_location", "insulation_thickness"]
+                .iter()
+                .chain(&ROOF_DETAILS)
+                .chain(&LOFT_DETAILS)
+                .chain(&HEATED_ROOF_DETAILS)
+                .chain(&FLOOR_DETAILS)
+            {
+                if e.get(key).is_some() && !taken.contains(key) {
+                    self.errors.push(error("CONSTRUCTION", e.path(), format!("'{}' states {key}, which the existing-building EPC does not take for a {}. Remove it.", e.name, construction_type.replace('_', " "))));
+                }
+            }
+        }
+        for key in taken {
             if let Some(value) = self.agreed(elements, key) {
                 c.insert(key.into(), value.clone());
             }
@@ -4754,6 +4769,20 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 && e.message.starts_with(
                     "The external wall fabric default states only part of the outside surface: give its surface material too"
                 )),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn a_detail_the_construction_type_does_not_take_names_the_element() {
+        let roof = gable_roof()
+            .into_iter()
+            .map(|r| format!("{r}\"{{\"\"thatched\"\":true,\"\"joist_depth\"\":100}}\""))
+            .collect();
+        let (_, errors, _) = run(&house(roof));
+        assert!(
+            errors.iter().any(|e| e.path.ends_with("/Roof S")
+                && e.message.contains("states joist_depth, which the existing-building EPC does not take for a thatched roof")),
             "{errors:#?}"
         );
     }
