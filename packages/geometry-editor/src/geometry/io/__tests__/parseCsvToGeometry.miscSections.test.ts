@@ -288,6 +288,38 @@ Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""
     'AirPermeability_ventilation_zone_height,2.4,,,,,,,,,,,,,',
   ].join('\n');
 
+  // A dwelling drawn from its own floor (lowest wall at 0) with its base 9 m up, such as a flat
+  // drawn on the drawing's ground floor: the drawing measures from the base, so the drawn heights
+  // are HEM's. Drawn at 9 m the drawing is in ground coordinates and the same cells come out.
+  it.each([
+    ['VulcanCsvVersion,4,,,,,,,,,,,,,', 0, 1.6],
+    ['VulcanCsvVersion,3,,,,,,,,,,,,,', 0, 1.6],
+    ['VulcanCsvVersion,4,,,,,,,,,,,,,', 9, 1.6],
+    ['VulcanCsvVersion,3,,,,,,,,,,,,,', 9, 10.6],
+  ])('measures heights from a base of 9 m: %s, walls drawn at %s m', (version, drawnAt, ventCell) => {
+    const withWall = (csv: string) => csv.replace('\nVentilation Systems', `
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+South Wall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,${drawnAt},FALSE,FALSE,,"0,0,0|4,0,0","{}"
+
+Window Elements,,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Window 1,Living,BuildingElementTransparent,1.2,90,1,1.2,180,${drawnAt + 0.9},South Wall,0.1,0.4,1.5,0.4,"1,0,0|2,0,0","{}"
+
+Ventilation Systems`);
+    const loaded = ventHeights(withWall(ventCsv(version, 9, ventCell, version.includes(',4') ? '2.4' : String(drawnAt + 2.4), drawnAt + 2.4)));
+    expect(loaded).toMatchObject({ vent: drawnAt + 1.6, terminal: drawnAt + 2.4 });
+    const window = Object.values(loaded.store.getState().elementsById).find((e) => e.name === 'Window 1') as any;
+    expect(window.mid_height).toBe(drawnAt + 1.5);
+    loaded.store.getState().requestCsvUpgrade();
+    const saved = loaded.store.getState().generateCSV();
+    expect(saved).toContain('VulcanCsvVersion,4');
+    expect(saved).toContain('Trickle,Vents,,,,,,1.6,');
+    expect(saved).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,2.4,');
+    expect(saved).toMatch(/Window 1,Living,BuildingElementTransparent,[^\n]*,1\.5,0\.4,/);
+    expect(ventHeights(saved)).toMatchObject({ vent: drawnAt + 1.6, terminal: drawnAt + 2.4 });
+  });
+
   it('adds back a Systems row base and leaves that row to state it', () => {
     const opened = openBaseSource(baseSourceCsv('', 2.8));
     expect(opened).toMatchObject({ vent: 4.3, window: 4.2 });

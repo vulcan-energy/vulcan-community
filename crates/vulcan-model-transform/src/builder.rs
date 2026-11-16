@@ -1344,6 +1344,41 @@ fn ventilation_zone_base_height(model: &Value) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Within this of 0 a drawn floor is "drawn at zero" (the editor's SAME_FLOOR_TOLERANCE_M).
+const DRAWN_AT_ZERO_TOLERANCE_M: f64 = 0.25;
+
+/// Where the ventilation zone base sits in the drawing: the height every drawn height (window
+/// sill and head, terminal point, vent or window height before its CSV version measured from the
+/// base) is less to give HEM's height above the base (HEM `ventilation.rs`: a Window, Vent or
+/// MechVent mid-height is "relative to ventilation zone", the base "relative to ground").
+/// A dwelling whose lowest wall is drawn at zero is drawn from its own floor, which is the base
+/// (the overheating frame `dwellingGroundZ` puts ground `base` below it); a dwelling drawn
+/// elsewhere, or with no wall, is in ground coordinates, so the base is `ventilation_base_height`
+/// above drawing zero. The editor resolves it
+/// the same way (`ventilationZoneBaseDrawingZ`).
+fn ventilation_zone_base_drawing_z(
+    csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+    ventilation_base_height: f64,
+) -> f64 {
+    let lowest_wall = csv_data
+        .get("Exposed Elements")
+        .into_iter()
+        .flatten()
+        .filter(|row| row.get("Type").and_then(Value::as_str) == Some("BuildingElementOpaque"))
+        // A wall without a base height is drawn at 0 (the editor's getAreaBasedBaseHeight); a cell
+        // that does not parse is left for the merge to report.
+        .filter_map(|row| {
+            parse_csv_number_cell(row.get("base_height"), "base_height")
+                .ok()
+                .map(|cell| cell.unwrap_or(0.0))
+        })
+        .reduce(f64::min);
+    match lowest_wall {
+        Some(floor) if floor.abs() <= DRAWN_AT_ZERO_TOLERANCE_M => floor,
+        _ => ventilation_base_height,
+    }
+}
+
 fn window_mid_height_to_hem_reference(
     value: f64,
     ventilation_base_height: f64,
@@ -1382,9 +1417,9 @@ fn vulcan_csv_version(
 
 fn migrate_v1_window_mid_height_reference(
     csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
-    ventilation_base_height: f64,
+    zone_base_z: f64,
 ) -> Result<(), BuildError> {
-    if ventilation_base_height.abs() <= f64::EPSILON {
+    if zone_base_z.abs() <= f64::EPSILON {
         return Ok(());
     }
 
@@ -1393,7 +1428,7 @@ fn migrate_v1_window_mid_height_reference(
             if let Some(mid_height) = window.get("mid_height").and_then(Value::as_f64) {
                 window.insert(
                     "mid_height".to_string(),
-                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height)?,
+                    window_mid_height_to_hem_reference(mid_height, zone_base_z)?,
                 );
             }
             let Some(part_list) = window
@@ -1416,7 +1451,7 @@ fn migrate_v1_window_mid_height_reference(
                 };
                 part_object.insert(
                     "mid_height_air_flow_path".to_string(),
-                    window_mid_height_to_hem_reference(mid_height, ventilation_base_height)?,
+                    window_mid_height_to_hem_reference(mid_height, zone_base_z)?,
                 );
             }
         }
@@ -1426,16 +1461,16 @@ fn migrate_v1_window_mid_height_reference(
 
 /// Ventilation Systems heights as HEM reads them: from the ventilation zone base. Before version 4
 /// a Vents row's `mid_height_air_flow_path` and a terminal's height column were drawing
-/// (ground-relative) heights, so they move down by the base once. Whatever no record says came
+/// heights, so they move down by the base's drawing height (`ventilation_zone_base_drawing_z`) once. Whatever no record says came
 /// from typing a zone-relative value, so every such value is taken as the drawing height the
 /// editor placed. A terminal without a height column takes its point's z, which is a drawing
 /// coordinate in every version.
 fn vent_heights_to_hem_reference(
     csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     version: u64,
-    ventilation_base_height: f64,
+    zone_base_z: f64,
 ) -> Result<(), BuildError> {
-    if ventilation_base_height.abs() <= f64::EPSILON {
+    if zone_base_z.abs() <= f64::EPSILON {
         return Ok(());
     }
     for row in csv_data
@@ -1470,7 +1505,7 @@ fn vent_heights_to_hem_reference(
         };
         row.insert(
             "mid_height_air_flow_path".to_string(),
-            window_mid_height_to_hem_reference(drawing_height, ventilation_base_height)?,
+            window_mid_height_to_hem_reference(drawing_height, zone_base_z)?,
         );
     }
     Ok(())
@@ -1480,13 +1515,13 @@ fn vent_heights_to_hem_reference(
 /// schema merge. Add future migrations here in ascending version order.
 fn migrate_vulcan_csv_to_current(
     csv_data: &mut BTreeMap<String, Vec<BTreeMap<String, Value>>>,
-    ventilation_base_height: f64,
+    zone_base_z: f64,
 ) -> Result<(), BuildError> {
     let version = vulcan_csv_version(csv_data)?;
     if version < 2 {
-        migrate_v1_window_mid_height_reference(csv_data, ventilation_base_height)?;
+        migrate_v1_window_mid_height_reference(csv_data, zone_base_z)?;
     }
-    vent_heights_to_hem_reference(csv_data, version, ventilation_base_height)?;
+    vent_heights_to_hem_reference(csv_data, version, zone_base_z)?;
     {
         for row in csv_data.get("Non-Exposed Elements").into_iter().flatten() {
             if row.get("Type").and_then(Value::as_str) != Some("BuildingElementPartyWall") {
@@ -2130,7 +2165,9 @@ impl JSONBuilder {
         // model carries, so the rows convert before any of them merges.
         let ventilation_base_height =
             self.merged_ventilation_zone_base_height(&sanitized_csv_data)?;
-        migrate_vulcan_csv_to_current(&mut sanitized_csv_data, ventilation_base_height)?;
+        let zone_base_z =
+            ventilation_zone_base_drawing_z(&sanitized_csv_data, ventilation_base_height);
+        migrate_vulcan_csv_to_current(&mut sanitized_csv_data, zone_base_z)?;
         // Every InfiltrationVentilation input merges first, in precedence order: the sections,
         // then Systems rows, then Metadata rows. Nothing later writes these fields.
         self.merge_ventilation_systems(&mut result, &sanitized_csv_data)?;
@@ -2733,7 +2770,8 @@ impl JSONBuilder {
         result: &mut Value,
         csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     ) -> Result<(), BuildError> {
-        let ventilation_base_height = ventilation_zone_base_height(result);
+        let ventilation_base_height =
+            ventilation_zone_base_drawing_z(csv_data, ventilation_zone_base_height(result));
         let building_element_sections = [
             "Exposed Elements",
             "Window Elements",
@@ -13642,8 +13680,8 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
 
     /// HEM measures a vent's and an MVHR terminal's mid-height from the ventilation zone base
     /// (ventilation.rs adds the base back). CSV version 4 stores them that way; earlier versions
-    /// stored drawing (ground-relative) heights, which migrate once. Terminal coords are always
-    /// drawing coordinates.
+    /// stored drawing heights, which migrate once. Terminal coords are always drawing coordinates;
+    /// the wall drawn at the base puts the drawing in ground coordinates.
     #[test]
     fn vent_and_terminal_heights_are_measured_from_the_ventilation_zone_base() {
         // (version row, base, vent column, intake column, exhaust point z, expected HEM heights)
@@ -13657,6 +13695,7 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
             let csv = format!(
                 "Metadata\nGlobalOrientationOffset,0\nVentilation_ventilation_zone_base_height,{base}\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n",
                 mvhr_terminal_csv(true)
+                    .replace("180,0,FALSE,FALSE", &format!("180,{base},FALSE,FALSE"))
                     .replace(
                         "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
                         &format!("intake,mvhr_1,wall_1,{intake},,,,,\"0,0,{intake}\""),
@@ -13691,6 +13730,66 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
         }
     }
 
+    /// A dwelling drawn from its own floor (lowest wall at zero) with its base above ground, such
+    /// as an upper-storey flat drawn on the drawing's ground floor: the drawing measures from the
+    /// base, so every drawn height is already HEM's height above it. A dwelling drawn at its base
+    /// is in ground coordinates and the same heights come out.
+    #[test]
+    fn a_dwelling_drawn_at_zero_measures_drawn_heights_from_its_base() {
+        for (version_row, wall_base, drawn) in [
+            ("VulcanCsvVersion,4", 0.0, 0.0),
+            ("VulcanCsvVersion,3", 0.0, 0.0),
+            ("VulcanCsvVersion,4", 9.0, 9.0),
+            ("VulcanCsvVersion,3", 9.0, 9.0),
+        ] {
+            let terminal_z = drawn + 2.4;
+            let vent = if version_row.ends_with('3') {
+                drawn + 1.6
+            } else {
+                1.6
+            };
+            let sill = drawn + 0.9;
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVentilation_ventilation_zone_base_height,9\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,{sill},1.5,{{}}\n",
+                mvhr_terminal_csv(true)
+                    .replace("180,0,FALSE,FALSE", &format!("180,{wall_base},FALSE,FALSE"))
+                    .replace(
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                        &format!("intake,mvhr_1,wall_1,,,,,,\"0,0,{terminal_z}\""),
+                    )
+                    .replace(
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                        &format!("exhaust,mvhr_1,wall_1,,,,,,\"1,0,{terminal_z}\""),
+                    )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(9.0));
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.6),
+                "{version_row} wall at {wall_base}"
+            );
+            let mv = &inf["MechanicalVentilation"]["mvhr_1"];
+            for position in ["position_intake", "position_exhaust"] {
+                assert_eq!(
+                    mv[position]["mid_height_air_flow_path"].as_f64(),
+                    Some(2.4),
+                    "{version_row} wall at {wall_base} {position}"
+                );
+            }
+            assert_eq!(
+                result["Zone"]["Default Zone"]["BuildingElement"]["window 0"]["mid_height"]
+                    .as_f64(),
+                Some(1.5),
+                "{version_row} wall at {wall_base}"
+            );
+        }
+    }
+
     /// A Systems InfiltrationVentilation row that sets the base, with no Metadata row: windows,
     /// vents and terminals are measured from that base.
     #[test]
@@ -13702,7 +13801,7 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
         ] {
             let csv = format!(
                 "Metadata\nGlobalOrientationOffset,0\n{version_row}\n\n{}vent_1,Vents,,,,,,,{vent},30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,3.6,{window},{{}}\n\nSystems\nName,Zone,Type,subcategory,extra_json\nVentilation,,System,InfiltrationVentilation,\"{{\"\"InfiltrationVentilation\"\":{{\"\"ventilation_zone_base_height\"\":2.8}}}}\"\n",
-                mvhr_terminal_csv(true).replace(
+                mvhr_terminal_csv(true).replace("180,0,FALSE,FALSE", "180,2.8,FALSE,FALSE").replace(
                     "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
                     "intake,mvhr_1,wall_1,,,,,,\"0,0,4.7\"",
                 ).replace(

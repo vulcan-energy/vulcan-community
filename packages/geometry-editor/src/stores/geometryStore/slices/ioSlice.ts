@@ -19,7 +19,7 @@ import {
 import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from '../../../lib/windowOpenings';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
-import { resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight } from '../../../lib/effectiveDwellingDetails';
+import { resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight, ventilationZoneBaseDrawingZ } from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
 import {
   CURRENT_VULCAN_CSV_VERSION,
@@ -1111,7 +1111,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Every compliance row is written with its value (see metadataRowValues). A row the file had
     // blank or unreadable is written as it was, which the converter blocks; leaving it out would let
     // the converter take the defaults template's value instead.
-    // Heights below are written less this base (windows from version 2), the one the converter
+    // Heights below are measured from this base (windows from version 2, at its drawing height), the one the converter
     // uses and a reload adds back: the Metadata row, a Systems row, 0 where the file lacks the row
     // or has it blank, or the derived base, which the Metadata row then carries.
     const effectiveVentBaseHeight = resolveEffectiveVentilationBaseHeight({
@@ -1123,6 +1123,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       complianceSettings: compliance,
       floors: state.floors,
     });
+    // Where that base is in the drawing, which every drawn height is written less.
+    const zoneBaseDrawingZ = ventilationZoneBaseDrawingZ(exportElements, effectiveVentBaseHeight);
     const unreadRows = compliance.unreadMetadataRows ?? {};
     for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), targetRules(options.schemaPort, state.complianceSettings).storeyBuildTypes)) {
       const cell = value ?? unreadRows[key];
@@ -1317,7 +1319,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           // Follow-up: the in-session path uses DERIVED_VALUE_EPSILON = 0.005 in
           // transparentOpeningDerivedFields.ts, while this export check uses
           // slopedDimensionDiffers' 0.01 default for the same auto-vs-manual decision.
-          const windowHeightOffset = exportVersion >= 2 ? effectiveVentBaseHeight : 0;
+          const windowHeightOffset = exportVersion >= 2 ? zoneBaseDrawingZ : 0;
           // A blank mid_height stays blank: the converter then takes the window's air-flow height
           // from its extra_json or the defaults, not from the opening's centre.
           const exportedMidHeight = typeof element.mid_height !== 'number' || !Number.isFinite(element.mid_height)
@@ -1342,7 +1344,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatOptionalFiniteNumberForCsv(element.max_window_open_area)),
             formatElementCoordsForCsv(element),
             escapeCSVJson(element.extra_json ? JSON.stringify(
-              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, effectiveVentBaseHeight),
+              convertGroundRelativeWindowExtraJsonForCsv(element.extra_json, windowHeightOffset, zoneBaseDrawingZ),
             ) : '')
           ];
           lines.push(ensureColumnCount(windowRow, windowColumnCount, windowHeader, element.nonNumericCells));
@@ -1545,7 +1547,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       const ventilationColumnCount = ventilationHeader.length;
 
       // HEM measures vent and terminal mid-heights from the ventilation zone base (CSV version 4).
-      const ventHeightOffset = exportVersion >= 4 ? effectiveVentBaseHeight : 0;
+      const ventHeightOffset = exportVersion >= 4 ? zoneBaseDrawingZ : 0;
       lines.push('Ventilation Systems,,,,,,,,,,,,,,');
       lines.push(ensureColumnCount(ventilationHeader, ventilationColumnCount));
       ventilationElements.forEach(element => {

@@ -113,6 +113,7 @@ import {
   resolveEffectiveVentilationZoneBaseHeight,
   type GlobalSettingsShape,
 } from '../../lib/globalSettingsValidation';
+import { ventilationZoneBaseDrawingZ } from '../../lib/effectiveDwellingDetails';
 import { canMechanicalVentilationInheritHostPlacement } from '../../lib/mechanicalVentilationBranches';
 import {
   readAuthoredUnheatedPitchedRoofCeilingElevationM,
@@ -1279,14 +1280,18 @@ function elementsInLoadOrder(elementsById: Record<string, Element>, elementIds: 
   if (!ordered) byIds.set(elementIds, (ordered = elementIds.flatMap((id) => elementsById[id] ?? [])));
   return ordered;
 }
-/** {@link resolveEffectiveVentilationZoneBaseHeight}, a model-wide value, once per (elements, floors, settings) for every window. */
+/**
+ * {@link resolveEffectiveVentilationZoneBaseHeight} at its height in the drawing
+ * ({@link ventilationZoneBaseDrawingZ}), a model-wide value, once per (elements, floors, settings) for every window.
+ */
 function ventilationZoneBaseHeightFor(elements: Element[], floors: Floor[] | undefined, complianceSettings: GlobalSettingsShape): number | undefined {
   let byFloors = ventilationBaseHeights.get(elements);
   if (!byFloors) ventilationBaseHeights.set(elements, (byFloors = new WeakMap()));
   let bySettings = byFloors.get(floors ?? NO_FLOORS);
   if (!bySettings) byFloors.set(floors ?? NO_FLOORS, (bySettings = new WeakMap()));
   if (!bySettings.has(complianceSettings)) {
-    bySettings.set(complianceSettings, resolveEffectiveVentilationZoneBaseHeight({ elements, floors, complianceSettings }));
+    const base = resolveEffectiveVentilationZoneBaseHeight({ elements, floors, complianceSettings });
+    bySettings.set(complianceSettings, base === undefined ? undefined : ventilationZoneBaseDrawingZ(elements, base));
   }
   return bySettings.get(complianceSettings);
 }
@@ -1603,7 +1608,7 @@ export const validateElementCore = (
           if (windowBaseHeight < ventilationZoneBaseHeight) {
             issues.push(
               fhs(
-                `Window base height (${formatNumberForIssue(windowBaseHeight)} m) is below the ventilation zone base height (${formatNumberForIssue(ventilationZoneBaseHeight)} m).`,
+                `Window base height (${formatNumberForIssue(windowBaseHeight)} m) is below the ventilation zone base, drawn at ${formatNumberForIssue(ventilationZoneBaseHeight)} m.`,
                 'base_height',
               ),
             );

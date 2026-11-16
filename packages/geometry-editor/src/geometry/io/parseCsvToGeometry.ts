@@ -53,7 +53,7 @@ import {
 } from './csvSectionRows';
 import { ingestGeometryTabularSections, NUMBER_CELL } from './ingestGeometryTabularSections';
 import { normalizeCsvConstructionProvenance } from './csvSemanticMigration';
-import { systemsRowVentilationBaseHeight } from '../../lib/effectiveDwellingDetails';
+import { systemsRowVentilationBaseHeight, ventilationZoneBaseDrawingZ } from '../../lib/effectiveDwellingDetails';
 import { parseProvenanceMetadataValue, PROVENANCE_METADATA_KEY, type ProvenanceSource } from '../../lib/provenance';
 import { normalizeThermalBridgeSourceLinks } from '../thermalBridge/normalizeThermalBridgeSourceLinks';
 import { shiftPhysicalPartHeight } from '../../lib/windowOpenings';
@@ -117,8 +117,9 @@ export function convertGroundRelativeWindowExtraJsonForCsv(
 }
 
 /**
- * Hydrate HEM-relative CSV values into Vulcan's ground-relative editor coordinates: window
- * mid-heights from version 2, vent and MVHR terminal mid-heights from version 4.
+ * Hydrate HEM-relative CSV values into Vulcan's drawing coordinates: window mid-heights from
+ * version 2, vent and MVHR terminal mid-heights from version 4. `ventilationZoneBaseHeight` is the
+ * base's height in the drawing (ventilationZoneBaseDrawingZ).
  */
 function migrateVulcanCsvElementsForEditor(
   elements: Element[],
@@ -860,11 +861,15 @@ export const parseCsvToGeometry = (
       ground.total_area = automaticTotal;
     }
   }
-  // The base the file states, where the converter reads it: the Metadata row, else a Systems row.
+  // The base the file states, where the converter reads it (the Metadata row, else a Systems row),
+  // at its height in the drawing.
   const referenceNormalizedElements = migrateVulcanCsvElementsForEditor(
     newElements,
     csvVersion,
-    complianceSettings.Ventilation_ventilation_zone_base_height ?? systemsRowVentilationBaseHeight(newElements) ?? 0,
+    ventilationZoneBaseDrawingZ(
+      newElements,
+      complianceSettings.Ventilation_ventilation_zone_base_height ?? systemsRowVentilationBaseHeight(newElements) ?? 0,
+    ),
   );
   const normalizedElements = normalizeThermalBridgeSourceLinks(referenceNormalizedElements, globalOffset);
 

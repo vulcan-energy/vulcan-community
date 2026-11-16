@@ -40,7 +40,7 @@ import {
 } from './WindowDetailControls';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
 import { getDefaultValue, resolveFieldSource, type FabricPresetSource, type FieldSourceInfo } from '../lib/fieldDefault';
-import { resolveEffectiveVentilationBaseHeight } from '../lib/effectiveDwellingDetails';
+import { resolveVentilationZoneBaseDrawingZ } from '../lib/effectiveDwellingDetails';
 
 type SuspendedThermalTransmWallSource = {
   elementId: string;
@@ -997,7 +997,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
   const getElementById = useGeometryStore((state) => state.getElementById);
   const updateElement = useGeometryStore((state) => state.updateElement);
   const ventilationZoneBaseHeightM = useGeometryStore((state) =>
-    resolveEffectiveVentilationBaseHeight({
+    resolveVentilationZoneBaseDrawingZ({
       zones: state.zones,
       elementsById: state.elementsById,
       elementIds: state.elementIds,

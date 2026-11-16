@@ -71,7 +71,7 @@ import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { isExistingBuilding } from '../../lib/windowOpenings';
-import { resolveEffectiveVentilationBaseHeight } from '../../lib/effectiveDwellingDetails';
+import { resolveVentilationZoneBaseDrawingZ } from '../../lib/effectiveDwellingDetails';
 import { getParentByName } from '../../lib/parentOrientation';
 import { defaultMvhrTerminalZ, deriveMechanicalVentilationTerminalPosition, isMvhrTerminalHost } from '../../lib/mvhrDuctwork';
 import { MVHR_TERMINAL_ROLES } from '../../lib/mvhrRoles';
@@ -129,7 +129,7 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
   const [hostElement, setHostElement] = useState<string>('');
   const existingBuilding = useGeometryStore(isExistingBuilding);
   const ventilationZoneBaseHeightM = useGeometryStore((state) =>
-    resolveEffectiveVentilationBaseHeight({
+    resolveVentilationZoneBaseDrawingZ({
       zones: state.zones,
       elementsById: state.elementsById,
       elementIds: state.elementIds,

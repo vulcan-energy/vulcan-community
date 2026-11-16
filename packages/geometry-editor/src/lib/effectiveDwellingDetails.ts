@@ -116,6 +116,36 @@ export function resolveEffectiveVentilationBaseHeight(
   return derivedVentilationBaseHeight(inputs);
 }
 
+/** Within this of 0 a dwelling's lowest wall is drawn at zero (as SAME_FLOOR_TOLERANCE_M). */
+const DRAWN_AT_ZERO_TOLERANCE_M = 0.25;
+
+/**
+ * Where the ventilation zone base sits in the drawing: the height a drawn height (window, vent,
+ * terminal) is less to give HEM's height above the base. HEM (ventilation.rs) measures window,
+ * vent and terminal mid-heights from the ventilation zone and the base from ground. A dwelling
+ * whose lowest wall is drawn at zero is drawn from its own floor, the base (overheating's
+ * dwellingGroundZ puts ground `base` below it); one drawn elsewhere, or with no wall, is in ground
+ * coordinates, so the base is `base` above drawing zero. The converter resolves it the same way
+ * from the CSV (ventilation_zone_base_drawing_z), which writes each wall's base height (blank as 0).
+ */
+export function ventilationZoneBaseDrawingZ(elements: Iterable<Element>, base: number): number {
+  let lowestWall: number | undefined;
+  for (const element of elements) {
+    if (element.type !== 'BuildingElementOpaque') continue;
+    const z = typeof element.base_height === 'number' && Number.isFinite(element.base_height) ? element.base_height : 0;
+    lowestWall = lowestWall === undefined ? z : Math.min(lowestWall, z);
+  }
+  return lowestWall !== undefined && Math.abs(lowestWall) <= DRAWN_AT_ZERO_TOLERANCE_M ? lowestWall : base;
+}
+
+/** {@link resolveEffectiveVentilationBaseHeight} at its height in the drawing ({@link ventilationZoneBaseDrawingZ}). */
+export function resolveVentilationZoneBaseDrawingZ(inputs: EffectiveVentilationBaseHeightInputs): number {
+  return ventilationZoneBaseDrawingZ(
+    inputs.elementIds.flatMap((id) => inputs.elementsById[id] ?? []),
+    resolveEffectiveVentilationBaseHeight(inputs),
+  );
+}
+
 /** The ventilation-zone base height the geometry and dwelling details give. */
 export function derivedVentilationBaseHeight(
   inputs: Omit<EffectiveVentilationBaseHeightInputs, 'elementIds'>,
