@@ -2306,11 +2306,13 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         Value::Object(std::mem::take(&mut ctx.constructions.by_name)),
     );
 
-    let double_glazed = geometry["constructions"]
-        .as_object()
-        .into_iter()
-        .flatten()
-        .any(|(_, c)| c["construction_type"] == "window" && c["glazing_type"] == "double");
+    let mut windows = Vec::new();
+    placed_windows(&geometry["building_parts"], &mut windows);
+    let double_glazed = windows.iter().any(|w| {
+        w["construction"]
+            .as_str()
+            .is_some_and(|key| geometry["constructions"][key]["glazing_type"] == "double")
+    });
     let ventilation = infiltration(
         ctx,
         full_ventilation,
@@ -3451,6 +3453,22 @@ fn wind_sheltering_level(ventilation: &Value) -> Option<&'static str> {
     }
 }
 
+/// The windows HEMIE's main glazing type reads: those in every wall (bay, room-in-roof and dormer
+/// walls too) and roof, except a conservatory's, whose glazing is a fraction, not windows.
+fn placed_windows<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+    match value {
+        Value::Object(o) if o.contains_key("window_sections") => out.push(value),
+        Value::Object(o)
+            if o.get("wall_type").is_some_and(|t| t == "conservatory")
+                || o.get("roof_type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| t.starts_with("Conservatory")) => {}
+        Value::Object(o) => o.values().for_each(|v| placed_windows(v, out)),
+        Value::Array(a) => a.iter().for_each(|v| placed_windows(v, out)),
+        _ => {}
+    }
+}
+
 /// Settings rows for the three leakage-estimate inputs the existing-building input cannot derive
 /// from the drawing (HEMIE's `GeometryInfiltrationProperties`).
 pub(crate) const OPEN_FIREPLACES: &str = "HEMIE_number_of_open_fireplaces";
@@ -4295,6 +4313,28 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .errors
             .iter()
             .any(|e| e.path == format!("/Metadata/{DOUBLE_GLAZING_PERIOD}")));
+    }
+
+    #[test]
+    fn main_glazing_reads_placed_windows_outside_conservatories() {
+        let window = |c: &str| json!({"window_sections": [], "construction": c});
+        let parts = json!({
+            "Main": {
+                "walls": [{"wall_type": "external", "windows": [window("w1")]}],
+                "roof": {"roof_type": "Room In Roof", "windows_front": [window("w2")]}
+            },
+            "Cons": {
+                "walls": [{"wall_type": "conservatory", "windows": [window("w3")]}],
+                "roof": {"roof_type": "Conservatory Pitched", "windows": [window("w4")]}
+            }
+        });
+        let mut found = Vec::new();
+        placed_windows(&parts, &mut found);
+        let names: Vec<&str> = found
+            .iter()
+            .map(|w| w["construction"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["w1", "w2"]);
     }
 
     #[test]
