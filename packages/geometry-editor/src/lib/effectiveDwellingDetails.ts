@@ -70,6 +70,17 @@ export interface EffectiveVentilationBaseHeightInputs extends EffectiveDwellingD
 const BASE_HEIGHT_ROW = 'Ventilation_ventilation_zone_base_height';
 
 /**
+ * Whether a loaded file lacks the Metadata base row or has it blank: no defaults template sets the
+ * base, so the converter measures from 0 (with no Metadata value or Systems row).
+ */
+export function fileStatesNoVentilationBase(settings: {
+  absentMetadataRows?: readonly string[];
+  unreadMetadataRows?: Readonly<Record<string, string>>;
+}): boolean {
+  return !!settings.absentMetadataRows?.includes(BASE_HEIGHT_ROW) || settings.unreadMetadataRows?.[BASE_HEIGHT_ROW] !== undefined;
+}
+
+/**
  * The ventilation zone base a Systems InfiltrationVentilation row sets, as the converter merges
  * those rows: in order, the last one wins. A Metadata row takes precedence over it.
  */
@@ -101,7 +112,7 @@ export function resolveEffectiveVentilationBaseHeight(
     inputs.elementIds.flatMap((id) => inputs.elementsById[id] ?? []),
   );
   if (systemsBase !== undefined) return systemsBase;
-  if (settings.absentMetadataRows?.includes(BASE_HEIGHT_ROW) || settings.unreadMetadataRows?.[BASE_HEIGHT_ROW] !== undefined) return 0;
+  if (fileStatesNoVentilationBase(settings)) return 0;
   return derivedVentilationBaseHeight(inputs);
 }
 

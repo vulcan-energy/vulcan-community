@@ -269,6 +269,42 @@ describe('FHS window base-height validation', () => {
   });
 });
 
+// The checks measure from the base the file converts with (see resolveEffectiveVentilationBaseHeight):
+// a Systems row's, or 0 where a loaded file lacks the Metadata row or has it blank.
+describe('ventilation zone base the checks measure from', () => {
+  const BASE_ROW = 'Ventilation_ventilation_zone_base_height';
+  // Derives a 2.4 m base with `floors`.
+  const upperFlat = { build_type: 'flat', storeys_in_dwelling: 1, storey_of_dwelling: 2 };
+  const systemsRow = {
+    id: 'sys', name: 'Ventilation', type: 'System', subcategory: 'InfiltrationVentilation',
+    extra_json: { InfiltrationVentilation: { ventilation_zone_base_height: 2.8 } }, coordinates: [], isPlaceholder: false,
+  } as unknown as Element;
+  const terminalAt = (z: number) => ({ ...hostedTerminal('Wall A'), coordinates: [{ x: 1, y: 0, z }] }) as Element;
+  const mvhrParts = [mvhrUnit(), terminalHost('wall-a', 'Wall A', 'zone-1')];
+  const baseIssue = (element: Element, others: Element[], settings: object) => validateElementCore(element, {
+    ...baseContext(element),
+    elementsById: Object.fromEntries([element, ...others].map((e) => [e.id, e])),
+    floors,
+    complianceSettings: settings,
+  }).issues.find((issue) => issue.message.includes('ventilation zone base'))?.message;
+  const noBase = [{ absentMetadataRows: [BASE_ROW] }, { unreadMetadataRows: { [BASE_ROW]: '' } }];
+
+  it('checks a window and a terminal against a Systems row base', () => {
+    expect(baseIssue(window(2.6), [systemsRow], upperFlat)).toContain('(2.80 m)');
+    expect(baseIssue(terminalAt(3.5), [...mvhrParts, systemsRow], upperFlat)).toContain('1 to 60 m above');
+  });
+
+  it.each(noBase)('checks a window and a terminal against 0 where the file states no base (%o)', (fileRow) => {
+    expect(baseIssue(window(2.3), [], { ...upperFlat, ...fileRow })).toBeUndefined();
+    expect(baseIssue(terminalAt(2), mvhrParts, { ...upperFlat, ...fileRow })).toBeUndefined();
+  });
+
+  it('checks against the derived base otherwise', () => {
+    expect(baseIssue(window(2.3), [], upperFlat)).toContain('(2.40 m)');
+    expect(baseIssue(terminalAt(2), mvhrParts, upperFlat)).toContain('1 to 60 m above');
+  });
+});
+
 describe('name-scoped hosted validation', () => {
   it('resolves a unique MVHR unit and wall when an unrelated global name collides', () => {
     const terminal = hostedTerminal('Wall A', 'Shared name');

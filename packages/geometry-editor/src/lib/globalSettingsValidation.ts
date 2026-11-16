@@ -10,7 +10,7 @@ import type {
 } from '../geometry/types';
 import type { GeometryState } from '../stores/geometryStore';
 import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
-import { derivedVentilationBaseHeight, resolveEffectiveDwellingDetails, systemsRowVentilationBaseHeight } from './effectiveDwellingDetails';
+import { derivedVentilationBaseHeight, fileStatesNoVentilationBase, resolveEffectiveDwellingDetails, systemsRowVentilationBaseHeight } from './effectiveDwellingDetails';
 import { targetFieldAccepts, targetFieldAvailability, targetFieldEnum } from './schemaCache';
 import { resolveBuildingElementPitch } from '../geometry/derivePitchFromGeometry';
 import { getAreaBasedElementExportGeometry } from './elementArea';
@@ -71,6 +71,8 @@ export type GlobalSettingsShape = Partial<{
   ColdWaterSource: 'mains water' | 'header tank';
   AirPermeability_ventilation_zone_height: number;
   Ventilation_ventilation_zone_base_height: number;
+  absentMetadataRows: string[];
+  unreadMetadataRows: Record<string, string>;
 }>;
 
 const STOREY_BASE_HEIGHT_TOLERANCE_M = 0.1;
@@ -129,6 +131,9 @@ export function resolveEffectiveVentilationZoneBaseHeight(args: {
     args.complianceSettings.Ventilation_ventilation_zone_base_height,
   ) ?? systemsRowVentilationBaseHeight(args.elements);
   if (explicit !== undefined) return explicit;
+  // The base the file converts with, as resolveEffectiveVentilationBaseHeight; only a derived base
+  // the dwelling details cannot settle is left unchecked.
+  if (fileStatesNoVentilationBase(args.complianceSettings)) return 0;
 
   const dwelling = calculateDwellingDetailsSuggestion(args.elements);
   const buildType = args.complianceSettings.build_type ?? dwelling.buildType;
