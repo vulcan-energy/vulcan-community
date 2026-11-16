@@ -11,6 +11,7 @@ import {
   FabricTabCloseContext,
   FABRIC_PRESET_KEYS,
   fabricPresetValuesProblem,
+  fabricRowField,
   fabricRowKey,
   ownFabricClear,
   ownFabricKeys,
@@ -369,7 +370,7 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
             const value = values.get(row.key)!;
             return (
               <tr key={row.key} data-fabric-row={row.key}>
-                <td>{row.label}</td>
+                <td data-field-key={fabricRowField(row.key)}>{row.label}</td>
                 <td>
                   <ShowElementsButton ids={elements.map((element) => element.id)} label={`Show the ${row.label.toLowerCase()} on the drawing`}>{elements.length}</ShowElementsButton>
                   {own.length ? (

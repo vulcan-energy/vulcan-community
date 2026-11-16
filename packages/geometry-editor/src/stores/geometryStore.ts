@@ -3262,8 +3262,9 @@ const createGeometryState = (
   fieldSourceOf: () => {
     const { defaultsJson, defaultsLookup, complianceSettings } = get();
     if (!defaultsJson) return null;
-    const { arealHeatCapacity } = targetRules(schemaPort, complianceSettings);
-    return (element, field) => elementFieldSource(element, field, defaultsJson, defaultsLookup, arealHeatCapacity);
+    const rules = targetRules(schemaPort, complianceSettings);
+    const preset = fabricPresetForTarget(get().fabricPreset, rules);
+    return (element, field) => elementFieldSource(element, field, defaultsJson, defaultsLookup, rules.arealHeatCapacity, preset);
   },
   ...createComplianceSlice(set, get, api),
   ...createHeatingSizingSlice(options.heatingSizingProvider)(set, get, api),

@@ -3,11 +3,11 @@
 
 // Helpers behind the one source treatment in components/FieldSource.tsx.
 
-// ponytail: the Defaults tab is reached through any key its section owns; phase 3 renames the tab.
-const DEFAULTS_TAB_FIELD = 'DefaultAssembly';
+// The Fabric tab is reached through any key its section owns; an element's own row is `fabricRowField`.
+const FABRIC_TAB_FIELD = 'DefaultAssembly';
 
-/** Opens Global Settings on the Defaults tab (the host listens for this event). */
-export function openDefaultsTab(field: string = DEFAULTS_TAB_FIELD): void {
+/** Opens Global Settings on the Fabric tab, at `field` when given (the host listens for this event). */
+export function openFabricTab(field: string = FABRIC_TAB_FIELD): void {
   window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
 }
 

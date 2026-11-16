@@ -580,8 +580,7 @@ export function followGroundUValueOnPresetChange(
     if (takesDerivedValue({ stored, derived: old }, stored, next, 5e-5)) {
       updateElement(ground.id, { extra_json: { ...extra, u_value: next } });
     } else if (next == null && stored != null && old != null && numbersClose(stored, old, 5e-5)) {
-      const { u_value: _derived, ...rest } = extra;
-      updateElement(ground.id, { extra_json: rest });
+      updateElement(ground.id, { extra_json: { ...extra, u_value: undefined } });
     }
   }
 }

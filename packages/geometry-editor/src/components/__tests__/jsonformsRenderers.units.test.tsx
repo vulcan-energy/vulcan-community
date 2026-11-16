@@ -874,6 +874,22 @@ describe('where a value comes from (one source treatment)', () => {
     expect(screen.getByRole('button', { name: 'default' })).toBeInTheDocument();
   });
 
+  it('a fabric preset value reads as "default · Fabric <name>", links to the element\'s Fabric row, and "Use default" clears back to it', () => {
+    const config = { elementType: 'BuildingElementOpaque', opaqueFabricVariant: 'wall' as const, fabricPresetSource: { name: 'Part L 2021', values: { u_value: 0.26 } }, fabricRowField: 'FabricRow_wall' };
+    const opened = vi.fn();
+    window.addEventListener('open-global-settings', opened);
+    const { unmount } = renderControl(NumberControl, { data: null, path: 'u_value', label: 'U-value', config });
+    expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', '0.26');
+    fireEvent.click(screen.getByRole('button', { name: 'default · Fabric Part L 2021' }));
+    expect((opened.mock.calls[0]![0] as CustomEvent).detail).toEqual({ field: 'FabricRow_wall' });
+    window.removeEventListener('open-global-settings', opened);
+    unmount();
+    const handleChange = vi.fn();
+    renderControl(NumberControl, { data: 0.3, path: 'u_value', label: 'U-value', config, handleChange });
+    fireEvent.click(screen.getByRole('button', { name: /U-value: use default, 0.26/ }));
+    expect(handleChange).toHaveBeenLastCalledWith('u_value', undefined);
+  });
+
   it('a stated value with no default keeps a quiet way back to blank', () => {
     renderControl(NumberControl, { data: 3, path: 'flow', label: 'Min flow rate' });
     const clear = screen.getByRole('button', { name: 'Min flow rate: clear' });

@@ -56,7 +56,8 @@ import {
   computeSuspendedThermalTransmWallsAutofillResultForGroundElement,
   hasSuspendedFloorThermalTransmWallsAutofillSourcesForGroundElement,
 } from '../lib/suspendedFloorThermalTransmWallsAutofill';
-import { assemblySourceValuesFor } from '../lib/fieldDefault';
+import { assemblySourceValuesFor, fabricPresetSourceFor } from '../lib/fieldDefault';
+import { fabricPresetForTarget, fabricRowField, fabricRowKey } from '../lib/fabricPreset';
 import {
   applySuspendedThermalTransmWallsManualTracking,
   GROUND_U_VALUE_MANUAL_KEY,
@@ -990,7 +991,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [schemaMode, schemaPort],
   );
-  const { hiddenFields, hemDatabaseProducts, constructionBands, arealHeatCapacity } = useTargetRules();
+  const targetRulesNow = useTargetRules();
+  const { hiddenFields, hemDatabaseProducts, constructionBands, arealHeatCapacity } = targetRulesNow;
   // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
   const defaultsJson = useGeometryStore((state) => state.defaultsJson);
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
@@ -1763,6 +1765,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     () => assemblySourceValuesFor(currentData?.extra_json, elementType, subtype, arealHeatCapacity),
     [arealHeatCapacity, currentData.extra_json, elementType, subtype],
   );
+  // The fabric preset values the converter gives this element read as its default ("default · Fabric <name>").
+  const storedFabricPreset = useGeometryStore((state) => state.fabricPreset);
+  const fabricPresetSource = useMemo(
+    () => currentElementData ? fabricPresetSourceFor(currentElementData, fabricPresetForTarget(storedFabricPreset, targetRulesNow)) : undefined,
+    [currentElementData, storedFabricPreset, targetRulesNow],
+  );
+  const fabricRow = currentElementData ? fabricRowKey(currentElementData) : undefined;
 
   const groundUComputedWPerM2K = useMemo(
     () =>
@@ -1853,6 +1862,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? (elementId: string) => setSelection({ type: 'element', id: elementId })
             : undefined,
         assemblySourceValues,
+        fabricPresetSource,
+        fabricRowField: fabricRow ? fabricRowField(fabricRow) : undefined,
         useFHSSchemaForValidation: useFHSSchema,
         schemaPort,
         // Pass $defs through config so TextControl can resolve references
@@ -1882,6 +1893,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       shouldUseGroundThermalTransmWallsAutofill,
       setSelection,
       assemblySourceValues,
+      fabricPresetSource,
+      fabricRow,
       useFHSSchema,
       subschema,
       systemSampleBaselineAvailable,

@@ -104,6 +104,9 @@ export const BUILT_IN_FABRIC_PRESETS: readonly FabricPreset[] = [
   },
 ];
 
+/** The Fabric tab's row of a construction type, as a Global Settings field key (the "default" link opens it). */
+export const fabricRowField = (row: FabricRow): string => `FabricRow_${row}`;
+
 /** The construction type an element counts under, as the converter matches the defaults file's elements. */
 export function fabricRowKey(element: Element): FabricRow | undefined {
   if ((element as { isPlaceholder?: boolean }).isPlaceholder && !element.coordinates?.length) return undefined;

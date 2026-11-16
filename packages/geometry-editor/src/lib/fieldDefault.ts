@@ -15,6 +15,7 @@ import { parseWindShieldLocation } from './groundUValueCalculator';
 import { readRecord } from './jsonTypes';
 import { normalizeMechanicalVentilationVentType } from './mechanicalVentilationBranches';
 import { classifyOpaqueFabricVariant, classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
+import { presetValueFor, type FabricPreset } from './fabricPreset';
 
 // Every control looks its default up on every render, and a miss walks the whole tree:
 // one answer per defaults document, lookup and query.
@@ -327,16 +328,28 @@ function findDefaultValue(
 export type FieldSourceInfo = {
   value: unknown;
   kind: 'assembly' | 'default';
+  /** The fabric preset that gives the default, by name. */
+  preset?: string;
 };
 
-/** The field's source: the applied assembly's value when it sets the field, else the default. */
+/** The fabric preset values an element takes (`presetValueFor`), with the preset's name. */
+export type FabricPresetSource = Readonly<{ name: string; values: Readonly<Record<string, unknown>> }>;
+
+/**
+ * The field's source: the applied assembly's value when it sets the field, else the fabric
+ * preset's (which the converter gives a blank field), else the default.
+ */
 export function resolveFieldSource(
   propKey: string | undefined,
   defaultValue: unknown,
   assemblySourceValues: Readonly<Record<string, unknown>> = {},
+  fabricPreset?: FabricPresetSource,
 ): FieldSourceInfo {
   if (propKey && Object.prototype.hasOwnProperty.call(assemblySourceValues, propKey)) {
     return { value: assemblySourceValues[propKey], kind: 'assembly' };
+  }
+  if (propKey && fabricPreset && Object.prototype.hasOwnProperty.call(fabricPreset.values, propKey)) {
+    return { value: fabricPreset.values[propKey], kind: 'default', preset: fabricPreset.name };
   }
   /** FHS suspended `shield_fact_location`: template often omits it; ISO 13370 path uses {@link parseWindShieldLocation}. */
   const templateDefault =
@@ -414,9 +427,16 @@ export function elementSubtype(element: Element): string | undefined {
 /** The element fields that pick a type or subtype (they choose which defaults apply, not a value). */
 export const SUBTYPE_FIELDS: ReadonlySet<string> = new Set([...Object.values(SUBTYPE_FIELD), 'duct_type']);
 
+/** The fabric preset values the element takes, for `resolveFieldSource`; undefined when it takes none. */
+export function fabricPresetSourceFor(element: Element, preset: FabricPreset | null): FabricPresetSource | undefined {
+  const values = presetValueFor(element, preset);
+  return preset && Object.keys(values).length ? { name: preset.name, values } : undefined;
+}
+
 /**
  * The value an element field takes when nobody entered it, as its editor shows it: the applied
- * assembly's value, else the default for the element's type, subtype and fabric variant.
+ * assembly's value, else the fabric preset's, else the default for the element's type, subtype
+ * and fabric variant. `preset` is the one the target takes (`fabricPresetForTarget`).
  */
 export function elementFieldSource(
   element: Element,
@@ -424,6 +444,7 @@ export function elementFieldSource(
   defaults: unknown,
   defaultsLookup: Pick<DefaultsLookup, 'getDefaultValueForElementField'>,
   arealHeatCapacity: ArealHeatCapacityInput,
+  preset: FabricPreset | null = null,
 ): unknown {
   const subtype = elementSubtype(element);
   const variant = element.type === 'BuildingElementOpaque'
@@ -433,5 +454,6 @@ export function elementFieldSource(
     field,
     getDefaultValue(defaults, defaultsLookup, field, element.type, subtype, variant),
     assemblySourceValuesFor(element.extra_json, element.type, subtype, arealHeatCapacity),
+    fabricPresetSourceFor(element, preset),
   ).value;
 }

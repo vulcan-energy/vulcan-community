@@ -39,7 +39,7 @@ import {
   WindowDetailMiniButton,
 } from './WindowDetailControls';
 import { ResolvedFieldLabel } from './ResolvedFieldLabel';
-import { getDefaultValue, resolveFieldSource, type FieldSourceInfo } from '../lib/fieldDefault';
+import { getDefaultValue, resolveFieldSource, type FabricPresetSource, type FieldSourceInfo } from '../lib/fieldDefault';
 import { resolveEffectiveVentilationBaseHeight } from '../lib/effectiveDwellingDetails';
 
 type SuspendedThermalTransmWallSource = {
@@ -54,6 +54,9 @@ type RendererConfig = {
   $defs?: unknown;
   advancedEditor?: boolean;
   assemblySourceValues?: Record<string, unknown>;
+  /** The fabric preset values this element takes (they read as its default), and its Fabric row's field key. */
+  fabricPresetSource?: FabricPresetSource;
+  fabricRowField?: string;
   compact?: boolean;
   tableCell?: boolean;
   validateValue?: (value: unknown) => { valid: boolean; errors?: readonly string[] };
@@ -522,6 +525,7 @@ function resolveAdvancedFieldSource(args: {
   isGroundUField: boolean;
   groundUComputedWPerM2K: number | null | undefined;
   openGroundUCalculator: (() => void) | undefined;
+  fabricRowField: string | undefined;
 }): { source: React.ReactNode; followsSource: boolean } {
   const { data, isJsonLike, fieldSource, isSamplePreset, path, handleChange, fieldLabel, unit } = args;
   const hasExplicit = isMeaningfulExplicitValue(data, isJsonLike);
@@ -569,7 +573,7 @@ function resolveAdvancedFieldSource(args: {
   const matches = hasExplicit ? valuesEquivalent(data, sourceValue, isJsonLike) : blankFollowsSource;
   if (matches) {
     return {
-      source: isAssembly ? <SourceNote>from the assembly</SourceNote> : <DefaultNote />,
+      source: isAssembly ? <SourceNote>from the assembly</SourceNote> : <DefaultNote field={args.fabricRowField} preset={fieldSource.preset} />,
       followsSource: hasExplicit,
     };
   }
@@ -730,7 +734,7 @@ function useAdvancedControlPreamble(
   const state = computeFieldPresentationState({
     data,
     isJsonLike,
-    fieldSource: resolveFieldSource(propKey, defaultValue, cfg.assemblySourceValues),
+    fieldSource: resolveFieldSource(propKey, defaultValue, cfg.assemblySourceValues, cfg.fabricPresetSource),
     config: cfg,
     path,
   });
@@ -748,6 +752,7 @@ function useAdvancedControlPreamble(
     isGroundUField,
     groundUComputedWPerM2K,
     openGroundUCalculator: cfg.openGroundUCalculator,
+    fabricRowField: cfg.fabricRowField,
   });
 
   return {
@@ -764,7 +769,8 @@ function useAdvancedControlPreamble(
     fieldUnit,
     indicatorMessages: fieldIndicatorsFor(cfg, propKey),
     hasEvidence: hasEvidenceFor(cfg, propKey),
-    defaultValue,
+    // A fabric preset value is the field's default: the converter gives it a blank field.
+    defaultValue: fieldSource.preset ? fieldSource.value : defaultValue,
     fieldSource,
     source,
     followsSource,

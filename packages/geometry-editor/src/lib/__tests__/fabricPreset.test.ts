@@ -50,6 +50,18 @@ describe("presetValueFor", () => {
   });
 });
 
+describe("an element's field source", () => {
+  it("is the preset's value where the element states none, else the defaults file's", () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const wall = element("BuildingElementOpaque", {}, { pitch: 90 });
+    store.setState({ defaultsJson: { Zone: { z: { BuildingElement: { "wall 0": { type: "BuildingElementOpaque", pitch: 90, u_value: 0.18 } } } } } as never });
+    expect(store.getState().fieldSourceOf()!(wall, "u_value")).toBe(0.18);
+    act(() => store.getState().setFabricPreset(partL!));
+    expect(store.getState().fieldSourceOf()!(wall, "u_value")).toBe(0.26);
+    expect(store.getState().fieldSourceOf()!(element("BuildingElementOpaque", { thermal_resistance_construction: 2 }, { pitch: 90 }), "u_value")).toBe(0.18);
+  });
+});
+
 describe("a fabric preset on a ground floor", () => {
   it("gives the floor calculation its resistance, and a change of preset works the U-value out again", () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
