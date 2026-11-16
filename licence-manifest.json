@@ -2817,6 +2817,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/UnconditionedZoneFields.tsx",
+      "source_path": "packages/geometry-editor/src/components/UnconditionedZoneFields.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/UnheatedSpaceRuCalculator.tsx",
       "source_path": "packages/geometry-editor/src/components/UnheatedSpaceRuCalculator.tsx",
       "license": "AGPL-3.0-only",
@@ -5932,6 +5940,14 @@
     {
       "path": "packages/geometry-editor/src/lib/transparentOpeningDerivedFields.ts",
       "source_path": "packages/geometry-editor/src/lib/transparentOpeningDerivedFields.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/unconditionedZones.ts",
+      "source_path": "packages/geometry-editor/src/lib/unconditionedZones.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
