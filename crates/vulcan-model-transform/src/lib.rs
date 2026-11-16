@@ -710,13 +710,12 @@ pub fn transform_geometry_csv(
     let mut model = builder
         .build_json(&csv_data)
         .map_err(TransformError::Build)?;
+    let mut schema_omissions = builder.take_schema_omissions();
     let mut hidden_inputs = None;
     if request.profile.references_products() {
         epc_mappings::drop_mvhr_vent_type(&mut model);
-        hidden_inputs = hemie::hidden_dwelling_inputs(&model, &csv_data);
+        hidden_inputs = hemie::hidden_dwelling_inputs(&model, &csv_data, &mut schema_omissions);
     }
-
-    let mut schema_omissions = builder.take_schema_omissions();
     let schema: Value = serde_json::from_str(&request.schema_json)
         .map_err(|error| TransformError::Schema(error.to_string()))?;
     let finalized =
