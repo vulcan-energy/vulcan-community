@@ -74,6 +74,7 @@ import {
 } from '../../../lib/pvHostDerivation';
 import {
   getAreaBasedElementExportGeometry,
+  exposedOpaqueCsvBaseHeight,
   getElementGrossArea,
   getOpaqueElementExportGeometry,
 } from '../../../lib/elementArea';
@@ -1252,13 +1253,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
             escapeCSV(formatPositiveFiniteNumberForCsv(exportedGeometry.width)),
             escapeCSV(formatPositiveFiniteNumberForCsv(exportedGeometry.height)),
             escapeCSV(roundOrientation360ForCsv(element.orientation360)),
-            escapeCSV(formatOptionalFiniteNumberForCsv(
-              exportedGeometry.height > 0 ||
-              exportedGeometry.width > 0 ||
-              (typeof element.base_height === 'number' && Number.isFinite(element.base_height))
-                ? exportedGeometry.baseHeight
-                : undefined
-            )),
+            // The value the ventilation zone base frame reads (ventilationZoneBaseFrame).
+            escapeCSV(formatOptionalFiniteNumberForCsv(exposedOpaqueCsvBaseHeight(element))),
             element.is_unheated_pitched_roof === undefined ? '' : element.is_unheated_pitched_roof ? 'TRUE' : 'FALSE',
             element.is_external_door ? 'TRUE' : 'FALSE',
             escapeCSV(element.parent_element || ''),

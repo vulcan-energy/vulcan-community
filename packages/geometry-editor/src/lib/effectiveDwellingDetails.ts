@@ -30,6 +30,7 @@ import {
   type SpaceLabelAggregate,
 } from './spaceLabelDerivation';
 import type { Element, Floor, SpaceLabel, Zone } from '../geometry/types';
+import { exposedOpaqueCsvBaseHeight } from './elementArea';
 
 export interface EffectiveDwellingDetailsInputs {
   zones: Zone[];
@@ -116,26 +117,50 @@ export function resolveEffectiveVentilationBaseHeight(
   return derivedVentilationBaseHeight(inputs);
 }
 
-/** Within this of 0 a dwelling's lowest wall is drawn at zero (as SAME_FLOOR_TOLERANCE_M). */
-const DRAWN_AT_ZERO_TOLERANCE_M = 0.25;
+/** Within this a drawn height is "at" 0 or at the base. */
+export const DRAWN_AT_ZERO_TOLERANCE_M = 0.25;
+
+/** Where the ventilation zone base sits in the drawing; `problem` when the walls cannot place it (drawingZ is then the base). */
+export type VentilationZoneBaseFrame = Readonly<{ drawingZ: number; problem?: string; problemElementIds?: readonly string[] }>;
 
 /**
- * Where the ventilation zone base sits in the drawing: the height a drawn height (window, vent,
- * terminal) is less to give HEM's height above the base. HEM (ventilation.rs) measures window,
- * vent and terminal mid-heights from the ventilation zone and the base from ground. A dwelling
- * whose lowest wall is drawn at zero is drawn from its own floor, the base (overheating's
- * dwellingGroundZ puts ground `base` below it); one drawn elsewhere, or with no wall, is in ground
- * coordinates, so the base is `base` above drawing zero. The converter resolves it the same way
- * from the CSV (ventilation_zone_base_drawing_z), which writes each wall's base height (blank as 0).
+ * Where the ventilation zone base sits in the drawing. HEM measures window, vent and terminal mid-heights from the
+ * ventilation zone and the base, a building element's and a PV array's base_height from ground (ventilation.rs,
+ * building_element.rs), so a drawn height z is `z - drawingZ` above the base and `z - drawingZ + base` above ground.
+ *
+ * The dwelling's level is its lowest opaque element's base height as the CSV writes it (Exposed Elements base_height,
+ * blank as 0). With a base within 0.25 m of 0, or no such element, the drawing is in ground coordinates (drawingZ = base).
+ * Otherwise a level within 0.25 m of 0 (and not of the base) is a dwelling drawn from its own floor, the base
+ * (drawingZ = level); a level within 0.25 m of the base (and not of 0) is in ground coordinates. A level near both, or
+ * near neither, cannot be placed. The converter resolves it the same way (ventilation_zone_base_drawing_z, E069).
  */
-export function ventilationZoneBaseDrawingZ(elements: Iterable<Element>, base: number): number {
-  let lowestWall: number | undefined;
+export function ventilationZoneBaseFrame(elements: Iterable<Element>, base: number): VentilationZoneBaseFrame {
+  const walls: Array<{ id: string; name: string; z: number }> = [];
   for (const element of elements) {
     if (element.type !== 'BuildingElementOpaque') continue;
-    const z = typeof element.base_height === 'number' && Number.isFinite(element.base_height) ? element.base_height : 0;
-    lowestWall = lowestWall === undefined ? z : Math.min(lowestWall, z);
+    walls.push({ id: element.id, name: element.name, z: exposedOpaqueCsvBaseHeight(element) ?? 0 });
   }
-  return lowestWall !== undefined && Math.abs(lowestWall) <= DRAWN_AT_ZERO_TOLERANCE_M ? lowestWall : base;
+  if (!walls.length || Math.abs(base) <= DRAWN_AT_ZERO_TOLERANCE_M) return { drawingZ: base };
+  const level = Math.min(...walls.map((wall) => wall.z));
+  const atZero = Math.abs(level) <= DRAWN_AT_ZERO_TOLERANCE_M;
+  const atBase = Math.abs(level - base) <= DRAWN_AT_ZERO_TOLERANCE_M;
+  if (atZero && !atBase) return { drawingZ: level };
+  if (atBase && !atZero) return { drawingZ: base };
+  const lowest = walls.filter((wall) => Math.abs(wall.z - level) <= DRAWN_AT_ZERO_TOLERANCE_M);
+  const names = lowest.map((wall) => wall.name).join(', ');
+  const drawnAt = Math.round(level * 100) / 100;
+  return {
+    drawingZ: base,
+    problemElementIds: lowest.map((wall) => wall.id),
+    problem: atZero
+      ? `The lowest walls (${names}) are drawn at ${drawnAt} m, near both 0 and the ventilation zone base height (${base} m), so heights cannot be measured. Draw the dwelling at 0 or at its base height.`
+      : `The lowest walls (${names}) are drawn at ${drawnAt} m, but the ventilation zone base height is ${base} m. Draw the dwelling at 0 or at its base height.`,
+  };
+}
+
+/** {@link ventilationZoneBaseFrame}'s drawingZ. */
+export function ventilationZoneBaseDrawingZ(elements: Iterable<Element>, base: number): number {
+  return ventilationZoneBaseFrame(elements, base).drawingZ;
 }
 
 /** {@link resolveEffectiveVentilationBaseHeight} at its height in the drawing ({@link ventilationZoneBaseDrawingZ}). */

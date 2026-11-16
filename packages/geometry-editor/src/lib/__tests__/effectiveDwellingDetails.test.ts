@@ -5,7 +5,7 @@
 // (Part F context, ioSlice CSV export, GeometryBuilder UI) all depend on this contract.
 
 import { describe, it, expect } from 'vitest';
-import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight } from '../effectiveDwellingDetails';
+import { resolveEffectiveDwellingDetails, resolveEffectiveVentilationBaseHeight, ventilationZoneBaseFrame } from '../effectiveDwellingDetails';
 import type { Element, SpaceLabel, Zone } from '../../geometry/types';
 
 const zone = (): Zone => ({
@@ -190,5 +190,37 @@ describe('resolveEffectiveVentilationBaseHeight', () => {
     expect(resolveEffectiveVentilationBaseHeight({
       zones: [zone()], elementsById, elementIds: ['a', '7'], spaceLabelsById: {}, spaceLabelIds: [], complianceSettings: {},
     })).toBe(3.1);
+  });
+});
+
+// The converter's ventilation_zone_base_drawing_z gives the same values and the same E069 messages.
+describe('ventilationZoneBaseFrame', () => {
+  const wall = (id: string, z: number | undefined) => ({
+    id, name: id, type: 'BuildingElementOpaque', width: 4, height: 2.8, base_height: z,
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }],
+  }) as unknown as Element;
+
+  it.each([
+    ['no wall, base 9', [], 9, 9],
+    ['a base within 0.25 m of 0, walls at 0.2', [wall('a', 0.2)], 0, 0],
+    ['a base within 0.25 m of 0, walls at 3', [wall('a', 3)], 0.2, 0.2],
+    ['drawn at zero on a 9 m base', [wall('a', 0), wall('b', 2.8)], 9, 0],
+    ['a wall with no base height is at 0', [wall('a', undefined)], 9, 0],
+    ['drawn at its 9 m base', [wall('a', 9.1), wall('b', 11.8)], 9, 9],
+    ['a basement drawn at zero, base -2.5', [wall('a', 0)], -2.5, 0],
+    ['a basement drawn at its base', [wall('a', -2.5)], -2.5, -2.5],
+  ])('%s', (_, elements, base, drawingZ) => {
+    expect(ventilationZoneBaseFrame(elements as Element[], base)).toEqual({ drawingZ });
+  });
+
+  it('cannot place a base near both 0 and the walls, or near neither', () => {
+    expect(ventilationZoneBaseFrame([wall('a', 0.2), wall('b', 3)], 0.4)).toEqual({
+      drawingZ: 0.4, problemElementIds: ['a'],
+      problem: 'The lowest walls (a) are drawn at 0.2 m, near both 0 and the ventilation zone base height (0.4 m), so heights cannot be measured. Draw the dwelling at 0 or at its base height.',
+    });
+    expect(ventilationZoneBaseFrame([wall('a', 3), wall('b', 3.1)], 9)).toEqual({
+      drawingZ: 9, problemElementIds: ['a', 'b'],
+      problem: 'The lowest walls (a, b) are drawn at 3 m, but the ventilation zone base height is 9 m. Draw the dwelling at 0 or at its base height.',
+    });
   });
 });

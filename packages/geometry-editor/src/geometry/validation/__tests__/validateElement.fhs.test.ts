@@ -296,6 +296,16 @@ describe('ventilation zone base the checks measure from', () => {
     expect(baseIssue(terminalAt(3.5), [...mvhrPartsDrawnAt(2.8), systemsRow], upperFlat)).toContain('1 to 60 m above');
   });
 
+  it('names the lowest walls when they place the base nowhere, as the converter (E069) does', () => {
+    const host = { ...terminalHost('wall-a', 'Wall A', 'zone-1'), base_height: 3, width: 4, height: 2.8 } as Element;
+    const result = validateElementCore(host, {
+      ...baseContext(host), elementsById: { [host.id]: host }, floors,
+      complianceSettings: { Ventilation_ventilation_zone_base_height: 9 },
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({ fieldKey: 'base_height',
+      message: 'Wall A (BuildingElementOpaque): The lowest walls (Wall A) are drawn at 3 m, but the ventilation zone base height is 9 m. Draw the dwelling at 0 or at its base height.' }));
+  });
+
   it('measures from the floor of a dwelling drawn at zero, which is the base', () => {
     expect(baseIssue(terminalAt(0.5), [...mvhrParts, systemsRow], upperFlat)).toContain('1 to 60 m above');
     expect(baseIssue(terminalAt(2), [...mvhrParts, systemsRow], upperFlat)).toBeUndefined();

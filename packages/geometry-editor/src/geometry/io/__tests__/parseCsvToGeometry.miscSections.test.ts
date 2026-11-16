@@ -320,6 +320,20 @@ Ventilation Systems`);
     expect(ventHeights(saved)).toMatchObject({ vent: drawnAt + 1.6, terminal: drawnAt + 2.4 });
   });
 
+  it('never moves heights over a base within 0.25 m of 0, wherever the walls are drawn', () => {
+    const csv = ventCsv('VulcanCsvVersion,4,,,,,,,,,,,,,', 0, 1.6, '2.4', 2.4).replace('\nVentilation Systems', `
+Exposed Elements,,,,,,,,,,,,,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+South Wall,Living,BuildingElementOpaque,9.6,90,4,2.4,180,0.2,FALSE,FALSE,,"0,0,0|4,0,0","{}"
+
+Ventilation Systems`);
+    const loaded = ventHeights(csv);
+    expect(loaded).toMatchObject({ vent: 1.6, terminal: 2.4 });
+    const saved = loaded.store.getState().generateCSV();
+    expect(saved).toContain('Trickle,Vents,,,,,,1.6,');
+    expect(saved).toContain('Intake,MechanicalVentilationTerminal,,,intake,MVHR 1,,2.4,');
+  });
+
   it('adds back a Systems row base and leaves that row to state it', () => {
     const opened = openBaseSource(baseSourceCsv('', 2.8));
     expect(opened).toMatchObject({ vent: 4.3, window: 4.2 });
