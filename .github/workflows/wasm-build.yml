@@ -32,6 +32,15 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # The registry, git dependencies and target directory. Registry sources are left
+      # out; cargo unpacks them again from registry/cache.
+      CARGO_CACHE_PATHS: |
+        ~/.cargo/registry/index/
+        ~/.cargo/registry/cache/
+        ~/.cargo/git/db/
+        ~/.cargo/git/checkouts/
+        target/
     steps:
       # Third-party code is pinned to a full commit SHA rather than a mutable tag.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -39,17 +48,54 @@ jobs:
           submodules: recursive
 
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch; the toolchain input pins the nightly
+        id: toolchain
         with:
           # Keep equal to wasm_toolchain in scripts/build-model-wasm.sh.
           toolchain: nightly-2026-05-22
           components: rust-src
           targets: wasm32-unknown-unknown
 
+      # Pull requests restore the registry and compiled dependencies. Scheduled and
+      # manual runs only look the cache up, so the weekly check still builds every
+      # dependency from scratch; they save it when it is missing, which seeds the
+      # cache pull requests read. No restore-keys: a new Cargo.lock, toolchain or
+      # build script starts a clean cache instead of growing an old one.
+      - name: Restore the Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CARGO_CACHE_PATHS }}
+          key: wasm-build-${{ runner.os }}-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock', 'scripts/build-model-wasm.sh') }}
+          lookup-only: ${{ github.event_name != 'pull_request' }}
+
+      # The prebuilt release binary, checked against the SHA-256 of
+      # wasm-pack-v0.14.0-x86_64-unknown-linux-musl.tar.gz (also the asset digest
+      # GitHub records for the release), instead of a 60-80 s cargo install.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --version 0.14.0 --locked
+        env:
+          WASM_PACK_VERSION: 0.14.0
+          WASM_PACK_SHA256: 278a8d668085821f4d1a637bd864f1713f872b0ae3a118c77562a308c0abfe8d
+        run: |
+          set -euo pipefail
+          name="wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl"
+          dir="$RUNNER_TEMP/wasm-pack"
+          mkdir -p "$dir"
+          curl --fail --silent --show-error --location --retry 3 --output "$dir/$name.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK_VERSION}/$name.tar.gz"
+          echo "$WASM_PACK_SHA256  $dir/$name.tar.gz" | sha256sum --check --strict
+          tar -xzf "$dir/$name.tar.gz" -C "$dir" --strip-components=1 "$name/wasm-pack"
+          test "$("$dir/wasm-pack" --version)" = "wasm-pack $WASM_PACK_VERSION"
+          echo "$dir" >> "$GITHUB_PATH"
 
       - name: Build the Community model WASM
         run: ./scripts/build-model-wasm.sh
+
+      - name: Save the Cargo cache
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.CARGO_CACHE_PATHS }}
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
