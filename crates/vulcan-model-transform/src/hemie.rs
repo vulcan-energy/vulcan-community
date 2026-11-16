@@ -929,7 +929,9 @@ impl Ctx<'_> {
             .map(|u| u.to_string())
             .collect();
         // A wall's applied build-up goes as its layers, in place of the U-value it wrote.
-        let build_up = first.get("vulcan_assembly_v1").filter(|_| walls);
+        let build_up = first
+            .get("vulcan_assembly_v1")
+            .filter(|_| matches!(construction_type, "external_wall" | "sheltered_wall"));
         if construction_type == "party_wall" {
             // DESNZ-defined: a party wall's resistance is fixed; only its cavity and lining count.
         } else if build_up.is_some() {
