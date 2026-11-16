@@ -4390,7 +4390,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .join("\n");
         assert!(party.contains("W00,Z,BuildingElementPartyWall"));
         let (_, errors, _) = run(&party);
-        // The box's door in that wall becomes a party door, which needs its own heat capacity.
+        // No frame error; any error left is about the box's door, now a party door.
         assert!(
             errors
                 .iter()
