@@ -2449,8 +2449,8 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
                 .construction(construction_type)
                 .contains_key("edge_insulation") => {}
             // DESNZ-defined: edge insulation known to be present with no details takes the
-            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool; EPC guidance 03,
-            // Table 3.5.2.3, and HEMIE's EdgeInsulationVertical defaults). The editor
+            // standard configuration (vertical, 0.26 m deep, 25 mm mineral wool; HEMIE's
+            // EdgeInsulationVertical defaults). The editor
             // shows these as the fields' placeholders.
             None => extra.push(("edge_insulation", json!({"vertical": {}}))),
         }
@@ -2503,7 +2503,11 @@ fn edge_insulation(ctx: &mut Ctx, g: &El) -> Option<Value> {
         }
         if let Some(material) = item["material"].as_str() {
             // HEMIE takes a material's conductivity from its own table, which has none for XPS.
-            if material == "XPS" && !value.contains_key("thermal_conductivity") {
+            // A stated resistance needs no conductivity.
+            if material == "XPS"
+                && !value.contains_key("thermal_conductivity")
+                && !value.contains_key("thermal_resistance")
+            {
                 ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' has XPS {kind} edge insulation, which HEM:EPC has no default thermal conductivity for. State its thermal conductivity.", g.name)));
             }
             value.insert("material".into(), json!(material));
@@ -3547,6 +3551,10 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .contains("Ground floor 'Floor' has XPS vertical edge insulation"));
         let with_conductivity = xps.replace(r#""XPS""#, r#""XPS"",""thermal_conductivity"":0.034"#);
         let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge(&with_conductivity)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        // A stated resistance needs no conductivity.
+        let with_resistance = xps.replace(r#""XPS""#, r#""XPS"",""edge_thermal_resistance"":1.2"#);
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge(&with_resistance)));
         assert!(errors.is_empty(), "{errors:#?}");
     }
 

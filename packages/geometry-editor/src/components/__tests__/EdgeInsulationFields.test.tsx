@@ -11,20 +11,24 @@ import { EdgeInsulationFields } from '../EdgeInsulationFields';
 
 const root = { $defs: { WallInsulationMaterial: { enum: ['mineral wool', 'EPS', 'XPS'] } } };
 
-function renderExisting(value: unknown) {
+function renderExisting(value: unknown, elementKey = 'floor') {
   const onChange = vi.fn();
   const port = { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never };
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: port });
   store.setState({ complianceSettings: { IsExistingBuilding: true } } as never);
-  render(
+  const ui = (next: unknown, key: string) => (
     <GeometryEditorServicePortsProvider schemaPort={port} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
       <GeometryStoreProvider store={store}>
-        <EdgeInsulationFields value={value} onChange={onChange} elementType="BuildingElementGround" />
+        <EdgeInsulationFields value={next} onChange={onChange} elementType="BuildingElementGround" elementKey={key} />
       </GeometryStoreProvider>
-    </GeometryEditorServicePortsProvider>,
+    </GeometryEditorServicePortsProvider>
   );
-  return onChange;
+  const { rerender } = render(ui(value, elementKey));
+  return Object.assign(onChange, { show: (next: unknown, key: string) => rerender(ui(next, key)) });
 }
+
+const pressed = (name: string) => within(screen.getByRole('group', { name: 'Edge insulation from' }))
+  .getByRole('button', { name }).getAttribute('aria-pressed');
 
 it('takes thickness and material on an existing building by default, with the defaults as placeholders', () => {
   const onChange = renderExisting(null);
@@ -55,4 +59,16 @@ it('shows the stated method, and switching clears the other method in one change
   expect(onChange).toHaveBeenLastCalledWith([{ type: 'vertical', depth: 0.3 }]);
   expect(screen.getAllByLabelText(/Edge thermal resistance/)).toHaveLength(2);
   expect(screen.queryByPlaceholderText('0.025 m (default)')).not.toBeInTheDocument();
+});
+
+it('stays on Resistance while the resistance is cleared to retype it, and holds the method per floor', () => {
+  const onChange = renderExisting([{ type: 'vertical', depth: 0.3, edge_thermal_resistance: 1.2 }]);
+  fireEvent.change(screen.getAllByLabelText(/Edge thermal resistance/)[1]!, { target: { value: '' } });
+  expect(onChange).toHaveBeenLastCalledWith([{ type: 'vertical', depth: 0.3 }]);
+  onChange.show([{ type: 'vertical', depth: 0.3 }], 'floor');
+  expect(pressed('Resistance')).toBe('true');
+  expect(screen.getAllByLabelText(/Edge thermal resistance/)).toHaveLength(2);
+  // Another floor stating neither method starts on its own default.
+  onChange.show(null, 'other floor');
+  expect(pressed('Thickness and material')).toBe('true');
 });

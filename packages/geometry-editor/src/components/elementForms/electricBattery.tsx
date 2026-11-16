@@ -118,11 +118,12 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
       globalComparisonFieldIndicators,
       commitExistingElementDraft,
     } = ctx;
+    const label = (key: string) => renderFieldLabel(hemieFieldLabel(key), elementType, key);
     const gridLabels = gridInputs ? {
-      age: renderFieldLabel('Battery Age (years):', elementType, 'battery_age'),
-      charging: renderFieldLabel('Grid Charging Possible:', elementType, 'grid_charging_possible'),
-      exporting: renderFieldLabel('Grid Exporting Possible:', elementType, 'grid_exporting_possible'),
-      importLimit: renderFieldLabel(hemieFieldLabel('power_limit_battery_import'), elementType, 'power_limit_battery_import'),
+      age: label('battery_age'),
+      charging: label('grid_charging_possible'),
+      exporting: label('grid_exporting_possible'),
+      importLimit: label('power_limit_battery_import'),
     } : null;
     return (
       <>
@@ -156,7 +157,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value)} issue={getFieldValidationIssue('charge_discharge_efficiency_round_trip', batteryEfficiencyInput.value) || undefined} />
         </div>
         </>}
-        {renderFieldLabel('Battery Location:', elementType)}
+        {label('battery_location')}
         <div className="element-input" ref={registerBaseFieldRefs(['batteryLocation', 'battery_location'])}>
           <StandardDropdown
             value={batteryLocation}
@@ -181,6 +182,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
               <StandardInput
                 type="number"
                 value={typeof extra.battery_age === 'number' ? String(extra.battery_age) : ''}
+                unit={fieldUnit('battery_age')}
                 onChange={(event) => {
                   const value = event.target.value.trim();
                   commitExtra('battery_age', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
@@ -223,7 +225,7 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
                   const value = event.target.value.trim();
                   commitExtra('power_limit_battery_import', value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value));
                 }}
-                // DESNZ-defined (EPC guidance 11, Table 11.8.2b); the target applies it when blank.
+                // DESNZ-defined; the target applies it when blank.
                 placeholder="18.4 (default)"
                 min="0"
                 step="any"

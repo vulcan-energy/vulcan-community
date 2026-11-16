@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { StandardInput } from './StandardInput';
 import { StandardDropdown } from './StandardDropdown';
 import { CompactSegmentedControl } from './WindowDetailControls';
@@ -29,6 +29,8 @@ export interface EdgeInsulationFieldsProps {
   value: unknown;
   onChange: (next: unknown) => void;
   elementType: string;
+  /** The element the fields edit; the chosen method is held per element. */
+  elementKey?: string;
   flat?: boolean;
 }
 
@@ -46,6 +48,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
   value,
   onChange,
   elementType,
+  elementKey,
   flat = false,
 }) => {
   const schemaPort = useGeometrySchemaPort();
@@ -57,13 +60,16 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
     const values = readRecord(readRecord(readRecord(schemaPort.getRootSchema(schemaMode)).$defs).WallInsulationMaterial).enum;
     return Array.isArray(values) ? values.map((value) => ({ value: String(value), label: hemieValueLabel('material', value) })) : [];
   }, [existing, schemaPort, schemaMode]);
-  // With neither method stated, an existing building defaults to thickness and material.
-  const [chosenMethod, setChosenMethod] = useState<EdgeInsulationMethod>('thickness');
   const valueKey = useMemo(() => JSON.stringify(value ?? null), [value]);
   const [form, setForm] = useKeyedState<EdgeInsulationFormValues>(
     valueKey,
     extraJsonEdgeInsulationToFormValues(value),
   );
+  // The method holds per element while a field is cleared to retype it; it follows the method the
+  // values state, and with neither stated an existing building defaults to thickness and material.
+  const statedMethod = edgeInsulationMethod(form);
+  const [chosenMethod, setChosenMethod] = useKeyedState<EdgeInsulationMethod>(String(elementKey), statedMethod ?? 'thickness');
+  if (statedMethod && statedMethod !== chosenMethod) setChosenMethod(statedMethod);
 
   const apply = useCallback(
     (next: EdgeInsulationFormValues) => {
@@ -78,7 +84,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
 
   const compact = Boolean(flat);
   // A new build states resistance; an existing building either method, one at a time.
-  const method: EdgeInsulationMethod = existing ? edgeInsulationMethod(form) ?? chosenMethod : 'resistance';
+  const method: EdgeInsulationMethod = existing ? statedMethod ?? chosenMethod : 'resistance';
   const switchMethod = (to: EdgeInsulationMethod) => {
     setChosenMethod(to);
     apply(switchEdgeInsulationMethod(form, to));
@@ -116,8 +122,8 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
       </div>
     );
     const resistance = number('edgeThermalResistance', <ResolvedFieldLabel presentation={resistancePresentation} useFHSSchema={schemaMode === 'fhs'} />, fieldUnitForAdornment(resistancePresentation));
-    // DESNZ-defined: vertical edge insulation 0.26 m deep, 0.025 m of mineral wool (EPC guidance 03,
-    // Table 3.5.2.3; HEMIE's EdgeInsulationVertical defaults). A horizontal width has no default.
+    // DESNZ-defined: vertical edge insulation 0.26 m deep, 0.025 m of mineral wool (HEMIE's
+    // EdgeInsulationVertical defaults). A horizontal width has no default.
     const dimension = number('widthOrDepth', <ResolvedFieldLabel presentation={dimensionPresentation} useFHSSchema={schemaMode === 'fhs'} />,
       fieldUnitForAdornment(dimensionPresentation), existing && type === 'vertical' ? '0.26 m (default)' : undefined);
     const conductivity = number('thermalConductivity', hemieFieldLabel('thermal_conductivity'), 'W/m·K',

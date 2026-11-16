@@ -72,4 +72,18 @@ describe('edgeInsulation', () => {
     expect(switchEdgeInsulationMethod(both, 'resistance')).toEqual({ horizontal: seg('1', '0.5'), vertical: seg('', '0.3') });
     expect(switchEdgeInsulationMethod(both, 'thickness')).toEqual({ horizontal: seg('', '0.5'), vertical: seg('', '0.3', '0.05', 'EPS', '0.03') });
   });
+
+  it('never states thickness, material or conductivity for a new build', () => {
+    // An existing floor's values, after the building is switched to a new build.
+    const form = extraJsonEdgeInsulationToFormValues([
+      { type: 'horizontal', edge_thermal_resistance: 1, width: 0.5, thickness: 0.03, material: 'PIR', thermal_conductivity: 0.022 },
+      { type: 'vertical', depth: 0.3, thickness: 0.05, material: 'EPS' },
+    ]);
+    expect(formValuesToExtraJsonEdgeInsulation(form)).toEqual({ ok: false, reason: 'incomplete' });
+    form.vertical.edgeThermalResistance = '1.5';
+    expect(formValuesToExtraJsonEdgeInsulation(form)).toEqual({
+      ok: true,
+      value: [{ type: 'horizontal', edge_thermal_resistance: 1, width: 0.5 }, { type: 'vertical', edge_thermal_resistance: 1.5, depth: 0.3 }],
+    });
+  });
 });

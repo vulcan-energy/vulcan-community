@@ -695,8 +695,7 @@ pub(crate) fn apply_desnz_defaults(
     };
     for (supply, value) in model["EnergySupply"].as_object_mut().into_iter().flatten() {
         // The battery states its supply's grid import limit for charging, a supply field. Not
-        // stated, the target's own default applies (18.4 kW, DESNZ-defined: EPC guidance 11,
-        // Table 11.8.2b; the schema default).
+        // stated, the target's own default applies (18.4 kW, DESNZ-defined; the schema default).
         if let Some(limit) = value
             .get_mut("ElectricBattery")
             .and_then(Value::as_object_mut)

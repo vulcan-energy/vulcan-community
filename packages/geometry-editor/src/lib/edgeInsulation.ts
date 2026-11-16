@@ -58,8 +58,10 @@ export type EdgeInsulationSerialized =
  * Turn form state into `extra_json.edge_insulation` (array of the filled segments) or `null` when
  * both are empty. Returns `ok: false` while a segment is half filled or not a finite number.
  */
-export function formValuesToExtraJsonEdgeInsulation(v: EdgeInsulationFormValues, partial = false): EdgeInsulationSerialized {
+export function formValuesToExtraJsonEdgeInsulation(form: EdgeInsulationFormValues, partial = false): EdgeInsulationSerialized {
   const value: Record<string, unknown>[] = [];
+  // Only an existing building states thickness, material and conductivity.
+  const v = partial ? form : switchEdgeInsulationMethod(form, 'resistance');
   for (const type of ['horizontal', 'vertical'] as const) {
     const rStr = v[type].edgeThermalResistance.trim();
     const dimStr = v[type].widthOrDepth.trim();
