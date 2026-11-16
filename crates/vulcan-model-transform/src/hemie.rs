@@ -1022,8 +1022,12 @@ impl Ctx<'_> {
             let stated = c.get("areal_heat_capacity").and_then(Value::as_f64);
             match layers::wall_layer(envelope, stated) {
                 Ok(layer) => {
+                    let insulation = layer["material"]
+                        .as_str()
+                        .map(|m| format!(", insulated: {m}"))
+                        .unwrap_or_default();
                     self.constructions.layered.insert(format!(
-                        "'{}' ({} mm, R {} m²K/W)",
+                        "'{}' ({} mm, R {} m²K/W{insulation})",
                         first.name,
                         layer["thickness_mm"].as_f64().unwrap_or_default(),
                         layer["thermal_resistance_construction"]
@@ -5001,7 +5005,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let envelope = json!({"schemaVersion": 1, "assemblyId": "calculator:layered", "appliedAt": "2026-11-16T00:00:00Z",
             "assemblySnapshot": {"elementMode": "BuildingElementOpaque", "pitchDegrees": 90, "layers": [
                 {"kind": "solid", "materialId": "brick", "thickness_m": 0.2},
-                {"kind": "solid", "materialId": "pir", "thickness_m": 0.1}]},
+                {"kind": "solid", "materialId": "mat.iso.cellular_polyisocyanurate", "thickness_m": 0.1}]},
             "correctedU_W_m2K": 0.2, "uValueWrittenToElement_W_m2K": 0.2,
             "thermalResistanceConstruction_m2K_W": 4.83,
             "arealHeatCapacity_J_m2K": 300_000.0, "arealHeatCapacityWrittenToElement_J_m2K": 300_000.0});
@@ -5024,14 +5028,14 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             .expect("a construction with layers");
         assert_eq!(
             layered["layers"],
-            json!([{"thickness_mm": 300.0, "thermal_resistance_construction": 4.83, "areal_heat_capacity": 300_000.0}])
+            json!([{"thickness_mm": 300.0, "thermal_resistance_construction": 4.83, "areal_heat_capacity": 300_000.0, "material": "PIR"}])
         );
         assert!(layered.get("u_value").is_none());
         // The wall type stays: HEMIE reads it beyond the layers.
         assert_eq!(layered["wall_construction_type"], "cavity");
-        assert!(notices
-            .iter()
-            .any(|n| n.message.contains("'W00' (300 mm, R 4.83 m²K/W)")));
+        assert!(notices.iter().any(|n| n
+            .message
+            .contains("'W00' (300 mm, R 4.83 m²K/W, insulated: PIR)")));
         assert!(!notices
             .iter()
             .any(|n| n.message.contains("documented U-value")));
