@@ -149,7 +149,7 @@ describe('R6 MultiSelect parity fence — DOM, focus and keyboard', () => {
     const window = transparentWindow([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }]);
     const { store } = mount([window]);
     const before = json(store, window.id);
-    const field = input('Base Height (m)');
+    const field = input('Base height (m)');
     for (const value of ['-1', '501']) {
       fireEvent.change(field, { target: { value } });
       expect(json(store, window.id)).toBe(before);

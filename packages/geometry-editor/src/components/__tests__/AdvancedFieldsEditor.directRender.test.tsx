@@ -1024,9 +1024,9 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'u_value | U-Value | textbox | 0 | - | - | tip',
     'thermal_resistance_floor_construction | Floor construction thermal resistance | textbox | 0 | - | - | tip',
     'psi_wall_floor_junc | Wall-floor junction psi | textbox | - | - | - | tip',
-    'height_basement_walls | Basement wall height | textbox | 0 | - | - | tip',
+    'height_basement_walls | Basement wall height above ground | textbox | 0 | - | - | tip',
     'thermal_resist_walls_base | Basement wall thermal resistance | textbox | 0 | - | - | tip',
-    'thermal_transm_envi_base | Basement floor thermal transmittance | textbox | 0 | - | - | tip',
+    'thermal_transm_envi_base | Floor above basement thermal transmittance | textbox | 0 | - | - | tip',
     'thermal_transm_walls | Wall thermal transmittance | textbox | 0 | - | - | tip',
   ],
   'core/BuildingElementAdjacentConditionedSpace [every subtype]': [
@@ -1270,9 +1270,9 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'areal_heat_capacity | Heat capacity per area | select | - | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'thermal_resist_walls_base | Basement wall thermal resistance | textbox | - | - | - | tip',
-    'thermal_transm_envi_base | Basement floor thermal transmittance | textbox | - | - | - | tip',
+    'thermal_transm_envi_base | Floor above basement thermal transmittance | textbox | - | - | - | tip',
     'thermal_transm_walls | Wall thermal transmittance | textbox | - | - | - | tip',
-    'height_basement_walls | Basement wall height | textbox | - | - | - | tip',
+    'height_basement_walls | Basement wall height above ground | textbox | - | - | - | tip',
   ],
   'fhs/BuildingElementAdjacentConditionedSpace [every subtype]': [
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',

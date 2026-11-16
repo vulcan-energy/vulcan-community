@@ -2184,8 +2184,8 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
   thermal_transm_walls: 'Wall thermal transmittance',
   depth_basement_floor: 'Basement floor depth',
   thermal_resist_walls_base: 'Basement wall thermal resistance',
-  height_basement_walls: 'Basement wall height',
-  thermal_transm_envi_base: 'Basement floor thermal transmittance',
+  height_basement_walls: 'Basement wall height above ground',
+  thermal_transm_envi_base: 'Floor above basement thermal transmittance',
 };
 
 /** Step 0 of the override ladder: an explicit `label` for this key. */

@@ -7330,7 +7330,7 @@ impl JSONBuilder {
                                                     "E060",
                                                     &format!(
                                                         "Systems rows '{previous_row}' and '{element_name}' both define \
-                                                         unconditioned zone '{name}'. Rename one of the zones, or remove one row."
+                                                         unconditioned zone '{name}'. Rename one of the zones, remove one row, or move both rows' parts into one row."
                                                     ),
                                                 ));
                                             }
