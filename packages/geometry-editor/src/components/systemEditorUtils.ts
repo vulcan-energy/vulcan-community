@@ -14,6 +14,7 @@ export const SYSTEM_SUBCATEGORY_TO_DIR: Record<string, string> = {
 };
 
 export const SYSTEM_SUBCATEGORY_LABELS: Record<string, string> = {
+  HeatSourceWarmAir: 'Warm air heater',
   HeatSourceWet: 'Heat source',
   HotWaterSource: 'Hot water',
   SpaceCoolSystem: 'Space cooling',

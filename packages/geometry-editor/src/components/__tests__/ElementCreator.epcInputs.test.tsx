@@ -92,3 +92,52 @@ it('asks for no battery grid input on a target without them', () => {
   expect(screen.queryByText(/\(default\)/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Grid Charging/)).not.toBeInTheDocument();
 });
+
+function renderElement(element: Element, schemaPort: Partial<GeometrySchemaPort>) {
+  const port = { ...canonicalGeometrySchemaPort, ...schemaPort };
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: port });
+  store.setState({ elementsById: { [element.id]: element }, elementIds: [element.id], defaultsLoading: false } as never);
+  render(
+    <GeometryEditorServicePortsProvider schemaPort={port} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+      <GeometryStoreProvider store={store}>
+        <ElementCreator selection={{ type: 'element', id: element.id } as never} setSelection={vi.fn()} useCard={false}
+          inspectorContributions={emptyGeometryInspectorContributions} />
+      </GeometryStoreProvider>
+    </GeometryEditorServicePortsProvider>,
+  );
+  return store;
+}
+
+// An existing building's window states whether it has a trickle vent; unticked writes nothing.
+it('saves a trickle vent on an existing-building window', async () => {
+  const window = {
+    id: 'w', name: 'Window', type: 'BuildingElementTransparent', zoneId: 'z', floorId: '0',
+    coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }], width: 1, height: 1, area: 1, pitch: 90, base_height: 1,
+    extra_json: { window_sections: [{ window_type: 'casement' }] },
+  } as unknown as Element;
+  const store = renderElement(window, { targetRules: () => ({ constructionBands: true }) });
+  const box = screen.getByLabelText('Trickle vent');
+  expect(box).not.toBeChecked();
+  const user = userEvent.setup();
+  await user.click(box);
+  expect(store.getState().elementsById.w.extra_json).toMatchObject({ window_sections: [{ window_type: 'casement' }], has_trickle_vent: true });
+  await user.click(box);
+  expect(store.getState().elementsById.w.extra_json).toMatchObject({ window_sections: [{ window_type: 'casement' }] });
+  expect(store.getState().elementsById.w.extra_json).not.toHaveProperty('has_trickle_vent');
+});
+
+// A warm-air heater is a system category wherever the target schema has one.
+const warmAirRoot = {
+  properties: {
+    General: {},
+    HeatSourceWarmAir: { anyOf: [{ type: 'object', additionalProperties: { oneOf: [{ $ref: '#/$defs/Combustion' }] } }, { type: 'null' }] },
+  },
+  $defs: { Combustion: { type: 'object', properties: { type: { const: 'WarmAirCombustion' } } } },
+};
+const system = { id: 's', name: 'System', type: 'System', coordinates: [{ x: 1, y: 1, z: 0 }] } as unknown as Element;
+
+it.each([[warmAirRoot, true], [fhsRoot, false]])('offers a warm-air heater category where the target has one', (root, offered) => {
+  renderGlobal(system, { getRootSchema: () => root as never });
+  const category = screen.getByText('Heat source').closest('select')!;
+  expect([...category.options].map((option) => option.text).includes('Warm air heater')).toBe(offered);
+});

@@ -77,6 +77,34 @@ pub(crate) fn check_party_wall_lining(model: &Value, errors: &mut Vec<Validation
     }
 }
 
+/// A dwelling with an electricity smart meter states the meter's GUID: 16 hexadecimal
+/// characters, or eight pairs of them separated by hyphens or colons (DESNZ-defined; the schema
+/// takes any string). A missing or malformed GUID is an error.
+pub(crate) fn check_smart_meter_guid(model: &Value, errors: &mut Vec<ValidationError>) {
+    let guid = model["ElectricitySmartMeterGUID"].as_str();
+    let message = match guid {
+        None if model["HasElectricitySmartMeter"] == true => "The dwelling has an electricity smart meter, so its GUID is required. Enter Smart meter GUID in Global Settings.".to_string(),
+        Some(guid) if !smart_meter_guid_is_valid(guid) => format!("Smart meter GUID '{guid}' must be 16 hexadecimal characters, or eight pairs separated by hyphens or colons. Correct it in Global Settings."),
+        _ => return,
+    };
+    errors.push(error(
+        "E_EPC_SMART_METER_GUID",
+        "/ElectricitySmartMeterGUID".into(),
+        message,
+    ));
+}
+
+fn smart_meter_guid_is_valid(guid: &str) -> bool {
+    let hex = |s: &str| s.chars().all(|c| c.is_ascii_hexdigit());
+    if guid.len() == 16 {
+        return hex(guid);
+    }
+    ['-', ':'].into_iter().any(|sep| {
+        let pairs: Vec<&str> = guid.split(sep).collect();
+        pairs.len() == 8 && pairs.iter().all(|p| p.len() == 2 && hex(p))
+    })
+}
+
 /// DESNZ-defined colour to solar absorption map (also the FHS wrapper's
 /// `COLOUR_TO_SOLAR_ABSORPTION_MAP`).
 pub(crate) fn solar_absorption_coeff(colour: &str) -> Option<f64> {
@@ -1700,6 +1728,40 @@ pub(crate) fn collect<'a>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn smart_meter_guid_required_and_formatted() {
+        let check = |model: Value| {
+            let mut errors = Vec::new();
+            check_smart_meter_guid(&model, &mut errors);
+            errors.len()
+        };
+        assert_eq!(check(json!({"HasElectricitySmartMeter": false})), 0);
+        assert_eq!(check(json!({"HasElectricitySmartMeter": true})), 1);
+        for ok in [
+            "0123456789abcDEF",
+            "01-23-45-67-89-ab-cd-ef",
+            "01:23:45:67:89:AB:CD:EF",
+        ] {
+            assert_eq!(
+                check(json!({"HasElectricitySmartMeter": true, "ElectricitySmartMeterGUID": ok})),
+                0,
+                "{ok}"
+            );
+        }
+        for bad in [
+            "0123456789abcde",
+            "0123456789abcdeg",
+            "01-23:45-67-89-ab-cd-ef",
+            "0123-4567-89ab-cdef",
+        ] {
+            assert_eq!(
+                check(json!({"HasElectricitySmartMeter": true, "ElectricitySmartMeterGUID": bad})),
+                1,
+                "{bad}"
+            );
+        }
+    }
+
     use super::*;
 
     fn party(coords: &str) -> BTreeMap<String, Value> {

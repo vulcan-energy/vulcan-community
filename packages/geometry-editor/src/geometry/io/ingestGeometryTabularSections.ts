@@ -676,6 +676,7 @@ export function ingestGeometryTabularSections(
           const rowType = systemsRowType(d);
           if (rowType === 'System' || rowType === 'SpaceHeatSystem') {
             const subcategory = rowType === 'SpaceHeatSystem' ? 'SpaceHeatSystem' : parseOptionalEnumColumn<SystemSubcategory>(V(d, 'subcategory'), [
+              'HeatSourceWarmAir',
               'HeatSourceWet',
               'HotWaterSource',
               'HotWaterDemand',

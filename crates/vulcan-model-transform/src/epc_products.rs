@@ -1176,10 +1176,102 @@ pub(crate) fn derive_zone_frac_convective(
     }
 }
 
+/// A new build's zone with space cooling states `frac_convective_cooling` (the schema requires
+/// it then). A value on the Zone row wins; otherwise it is the `frac_convective` every cooling
+/// system of the zone states, which the user edits, so it gives no note. Systems that differ, or
+/// one with none, leave it required: an error names the zone. An existing building's zone is
+/// HEMIE Geometry, which takes no such input.
+pub(crate) fn derive_zone_frac_convective_cooling(
+    model: &mut Value,
+    errors: &mut Vec<ValidationError>,
+) {
+    if model["IsExistingBuilding"] == true {
+        return;
+    }
+    let systems = model["SpaceCoolSystem"].clone();
+    for (zone, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
+        let names: Vec<&str> = match &zone_value["SpaceCoolSystem"] {
+            Value::String(name) => vec![name.as_str()],
+            Value::Array(names) => names.iter().filter_map(Value::as_str).collect(),
+            _ => vec![],
+        };
+        if names.is_empty()
+            || zone_value
+                .get("frac_convective_cooling")
+                .is_some_and(|v| !v.is_null())
+        {
+            continue;
+        }
+        let found: Vec<Option<f64>> = names
+            .iter()
+            .map(|name| systems[name]["frac_convective"].as_f64())
+            .collect();
+        let message = match found.iter().position(Option::is_none) {
+            // A meta system takes no convective fraction (`SpaceCoolSystemMeta`), and neither
+            // HEMIE nor the wrapper derives one from its members: the zone states its own.
+            Some(i) if systems[names[i]]["type"] == "meta" => format!("Zone '{zone}': cooling system '{}' combines other systems, so it has no convective fraction. Enter the zone's convective fraction for cooling.", names[i]),
+            Some(i) => format!("Zone '{zone}': cooling system '{}' has no convective fraction, so the zone's fraction cannot be found. Enter its convective fraction.", names[i]),
+            None if found.windows(2).all(|w| w[0] == w[1]) => {
+                zone_value["frac_convective_cooling"] = json!(found[0]);
+                continue;
+            }
+            None => format!("Zone '{zone}': its cooling systems have different convective fractions, so the zone's fraction cannot be found. Give them all the same convective fraction."),
+        };
+        let path = json_pointer(&["Zone", zone, "frac_convective_cooling"]);
+        errors.push(error("E_EPC_ZONE_FRAC_CONVECTIVE", path, message));
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn zone_frac_convective_cooling_from_the_cooling_systems() {
+        let mut model = json!({
+            "SpaceCoolSystem": {
+                "ac": {"type": "AirConditioning", "frac_convective": 0.95},
+                "ac2": {"type": "AirConditioning", "frac_convective": 0.95},
+                "fc": {"type": "HeatPumpFanCoilCooling", "frac_convective": 0.7},
+                "meta": {"type": "meta"}
+            },
+            "Zone": {
+                "a": {"SpaceCoolSystem": "ac"},
+                "b": {"SpaceCoolSystem": ["ac", "ac2"]},
+                "c": {"SpaceCoolSystem": ["ac", "fc"]},
+                "d": {"SpaceCoolSystem": "meta"},
+                "e": {"SpaceCoolSystem": "fc", "frac_convective_cooling": 0.5},
+                "f": {}
+            }
+        });
+        let mut errors = Vec::new();
+        derive_zone_frac_convective_cooling(&mut model, &mut errors);
+        let zone = |name: &str| model["Zone"][name].get("frac_convective_cooling").cloned();
+        assert_eq!(zone("a"), Some(json!(0.95)));
+        assert_eq!(zone("b"), Some(json!(0.95)));
+        assert_eq!(zone("c"), None);
+        assert_eq!(zone("d"), None);
+        assert_eq!(zone("e"), Some(json!(0.5)));
+        assert_eq!(zone("f"), None);
+        let paths: Vec<&str> = errors.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/Zone/c/frac_convective_cooling",
+                "/Zone/d/frac_convective_cooling"
+            ]
+        );
+        assert!(errors[1]
+            .message
+            .contains("Enter the zone's convective fraction for cooling"));
+
+        let mut existing = json!({"IsExistingBuilding": true, "SpaceCoolSystem": {"ac": {"frac_convective": 0.95}}, "Zone": {"a": {"SpaceCoolSystem": "ac"}}});
+        derive_zone_frac_convective_cooling(&mut existing, &mut errors);
+        assert!(existing["Zone"]["a"]
+            .get("frac_convective_cooling")
+            .is_none());
+    }
 
     /// The product data the HEM:EPC 0.13.2 target pins, as a host would pass it.
     pub(crate) fn pinned() -> ProductData {

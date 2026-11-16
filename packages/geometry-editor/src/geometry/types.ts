@@ -422,6 +422,7 @@ export interface ElectricBattery extends BaseElement {
 
 // System rows are a PCDB authoring shell: subcategory is the resolved FHS root family.
 export type SystemSubcategory =
+  | 'HeatSourceWarmAir'
   | 'HeatSourceWet'
   | 'HotWaterSource'
   | 'HotWaterDemand'

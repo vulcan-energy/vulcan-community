@@ -887,6 +887,27 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                 </div>
               );
             })()}
+            {!isConservatoryGlazing(selectedElement, ctx.elementsById) && (
+              <>
+                <div className="element-label">Trickle vent</div>
+                <div className="element-input">
+                  <label className="checkbox-container">
+                    <input
+                      type="checkbox"
+                      className="styled-checkbox"
+                      checked={selectedElement.extra_json?.has_trickle_vent === true}
+                      onChange={(e) => {
+                        const rest = { ...selectedElement.extra_json };
+                        delete rest.has_trickle_vent;
+                        commitExistingElementDraft({ extra_json: e.target.checked ? { ...rest, has_trickle_vent: true } : rest });
+                      }}
+                      aria-label="Trickle vent"
+                    />
+                    <span className="checkbox-custom"></span>
+                  </label>
+                </div>
+              </>
+            )}
           </>
         ) : null}
         {selectedElement?.type === 'BuildingElementTransparent' && (

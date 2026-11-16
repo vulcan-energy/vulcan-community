@@ -415,6 +415,7 @@ const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
   "BuildingWidth",
   "KitchenExtractorHoodExternal",
   "HasElectricitySmartMeter",
+  "ElectricitySmartMeterGUID",
 ]);
 
 /** Where a CSV Metadata key is edited in Global Settings; null when it is not. */
@@ -464,6 +465,7 @@ export const METADATA_INPUT_LABELS: Readonly<Record<string, string>> = {
   General_storey_of_dwelling: 'Storey of dwelling',
   General_storeys_in_building: 'Storeys in building',
   HasElectricitySmartMeter: 'Electricity smart meter',
+  ElectricitySmartMeterGUID: 'Smart meter GUID',
   IsExistingBuilding: 'Existing building',
   Ventilation_cross_vent_possible: 'Cross ventilation possible',
   Appliances_has_dryer: 'Has a clothes dryer',
@@ -616,6 +618,7 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
   rows.push(...TARGET_INPUT_ROWS.map((key): [string, string | undefined] => [key, bool(compliance[key])]));
+  rows.push(['ElectricitySmartMeterGUID', text(compliance.ElectricitySmartMeterGUID)]);
   return rows;
 }
 
@@ -754,6 +757,21 @@ function schemaRequiresMetadataValue(root: unknown, key: string): boolean {
   return required.includes(path[path.length - 1]);
 }
 
+/** A smart meter GUID: 16 hexadecimal characters, or eight pairs separated by hyphens or colons (DESNZ-defined). */
+export const isSmartMeterGuid = (value: string): boolean =>
+  /^[0-9a-f]{16}$/i.test(value) || /^[0-9a-f]{2}(-[0-9a-f]{2}){7}$/i.test(value) || /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/i.test(value);
+
+/**
+ * The smart meter GUID's issue, where the target asks whether the dwelling has a smart meter: the
+ * GUID is required when it has one, and must be in the DESNZ format whenever it is entered.
+ */
+export function smartMeterGuidIssue(settings: MetadataRowInputs['complianceSettings'], required: ReadonlySet<string>): string | undefined {
+  if (!required.has('HasElectricitySmartMeter')) return undefined;
+  const guid = settings.ElectricitySmartMeterGUID;
+  if (!guid) return settings.HasElectricitySmartMeter === true ? 'Global Settings: Smart meter GUID is not set. Enter it in Global Settings.' : undefined;
+  return isSmartMeterGuid(guid) ? undefined : `Global Settings: Smart meter GUID '${guid}' must be 16 hexadecimal characters, or eight pairs separated by hyphens or colons. Enter it in Global Settings.`;
+}
+
 /**
  * One issue per model-input metadata row the save would leave out although the target's schema
  * takes it (or no schema says otherwise): the file had the row blank, the user cleared a value, or
@@ -784,7 +802,9 @@ export function unsetMetadataInputIssues(
     return key.startsWith('NumberOf') ? ` Space labels show ${value}.` : ` The geometry gives ${value}.`;
   };
   const desnzDefault = new Set([...Object.keys(rules.desnzDefaultRows ?? {}), ...(rules.derivedMetadataRows ?? [])]);
-  return metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && !accepted.has(key)
+  const guidIssue = smartMeterGuidIssue(state.complianceSettings, required);
+  // smartMeterGuidIssue alone judges the GUID: it is required only with a smart meter.
+  return [...(guidIssue ? [guidIssue] : []), ...metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && key !== 'ElectricitySmartMeterGUID' && !accepted.has(key)
       && !desnzDefault.has(key)
       && !systemsRowSetsMetadataInput(state.elements, key)
       && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
@@ -794,5 +814,5 @@ export function unsetMetadataInputIssues(
     ? [unread[key]
       ? `Global Settings: ${METADATA_INPUT_LABELS[key]} is '${unread[key]}', which the target does not accept. Enter it in Global Settings.${hint(key)}`
       : `Global Settings: ${METADATA_INPUT_LABELS[key]} is not set. Enter it in Global Settings.${hint(key)}`]
-    : []));
+    : []))];
 }

@@ -1823,13 +1823,29 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     }
 
     // Reference: the first edge of the reference part's lowest storey (derived from the model).
-    let offset = csv
+    // An absent or blank row is no offset; text that is not a number fails, naming the row.
+    let offset = match csv
         .get("Metadata")
         .into_iter()
         .flatten()
         .find(|row| row.get("Field").and_then(Value::as_str) == Some("GlobalOrientationOffset"))
-        .and_then(|row| row.get("Value")?.as_f64())
-        .unwrap_or(0.0);
+        .and_then(|row| row.get("Value"))
+    {
+        None | Some(Value::Null) => 0.0,
+        Some(Value::Number(n)) => n.as_f64()?,
+        Some(other) => {
+            let text = other
+                .as_str()
+                .map_or_else(|| other.to_string(), str::to_string);
+            match text.trim().parse::<f64>().ok().filter(|v| v.is_finite()) {
+                Some(value) => value,
+                None => {
+                    ctx.errors.push(error("ORIENTATION", "/Metadata/GlobalOrientationOffset".into(), format!("GlobalOrientationOffset is '{text}', which is not a number of degrees. Correct it.")));
+                    return None;
+                }
+            }
+        }
+    };
     let base = &parts[0].storeys[0];
     let reference_edge = sub(base[1], base[0]);
     let reference_orientation = (outward_bearing(base[0], base[1]) - offset).rem_euclid(360.0);
@@ -2382,6 +2398,10 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
     }
     if let Some(vents) = systems::host_vents(ctx, e.name) {
         w["mechanical_vents"] = vents;
+    }
+    // Stated by the user (optional; HEMIE takes none as no trickle vent).
+    if e.flag("has_trickle_vent") {
+        w["has_trickle_vent"] = json!(true);
     }
     // Derived from the model: Vulcan's security_risk flag.
     if let Some(risk) = e.get("security_risk").and_then(Value::as_bool) {
@@ -4490,6 +4510,71 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                         .contains("'Roof S', 'Roof N' (mass distribution class I")),
             "{notices:#?}"
         );
+    }
+
+    #[test]
+    fn a_typed_orientation_offset_is_read_and_text_fails() {
+        let with = |offset: &str| {
+            let csv = window_house("", "").replacen(
+                "IsExistingBuilding,TRUE",
+                &format!("IsExistingBuilding,TRUE\nGlobalOrientationOffset,{offset}"),
+                1,
+            );
+            run(&csv)
+        };
+        let (zero, errors, _) = with("0");
+        assert!(errors.is_empty(), "{errors:#?}");
+        let (padded, errors, _) = with("045");
+        assert!(errors.is_empty(), "{errors:#?}");
+        let (turned, _, _) = with("45");
+        assert_eq!(padded["Zone"], turned["Zone"]);
+        assert_ne!(padded["Zone"], zero["Zone"]);
+        let (_, errors, _) = with("north");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.path == "/Metadata/GlobalOrientationOffset"),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn names_that_read_as_numbers_stay_names() {
+        let csv = window_house("", "")
+            .replace("\nZ,Zone\n", "\n007,Zone\n")
+            .replace(",Z,", ",007,")
+            .replace("\nW00,", "\n1,")
+            .replace(",W00,", ",1,")
+            .replace("\nW1,", "\n2,");
+        assert!(csv.contains("\n1,007,BuildingElementOpaque") && csv.contains("\n2,007,"));
+        let (model, errors, _) = run(&csv);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let windows: usize = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w["windows"].as_array().map_or(0, Vec::len))
+            .sum();
+        assert_eq!(windows, 1);
+    }
+
+    #[test]
+    fn a_window_states_its_trickle_vent() {
+        let window = |extra: &str| {
+            let (model, errors, _) = run(&window_house(extra, ""));
+            assert!(errors.is_empty(), "{errors:#?}");
+            model["Zone"]["building_parts"]["Main"]["walls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find_map(|w| w["windows"].get(0).cloned())
+                .expect("window")
+        };
+        assert_eq!(
+            window(r#","has_trickle_vent":true"#)["has_trickle_vent"],
+            true
+        );
+        assert!(window("").get("has_trickle_vent").is_none());
     }
 
     #[test]

@@ -51,6 +51,8 @@ export interface ComplianceSlice {
     KitchenExtractorHoodExternal?: boolean;
     /** Metadata rows only some targets take (TARGET_INPUT_ROWS); unset means the file has no row. */
     HasElectricitySmartMeter?: boolean;
+    /** The smart meter's GUID, as typed; asked for when the dwelling has a smart meter. */
+    ElectricitySmartMeterGUID?: string;
     IsExistingBuilding?: boolean;
     Ventilation_cross_vent_possible?: boolean;
     Appliances_has_dryer?: boolean;
