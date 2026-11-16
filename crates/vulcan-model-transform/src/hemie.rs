@@ -813,8 +813,9 @@ impl Ctx<'_> {
         Some(profile_low.unwrap_or(height))
     }
 
-    /// The model setting for a construction type, overlaid with what the elements state. A
-    /// U-value on the element is a documented U-value (derived from the model).
+    /// The model setting for a construction type, overlaid with what the elements state, then
+    /// with `extra`, values the converter sets for these elements. A U-value on the element is a
+    /// documented U-value (derived from the model).
     fn construction(
         &mut self,
         construction_type: &str,
@@ -1021,13 +1022,13 @@ impl Ctx<'_> {
                 .extend(elements.iter().map(|e| e.name.to_string()));
         }
         for (key, value) in extra {
-            c.entry(*key).or_insert_with(|| value.clone());
+            c.insert((*key).into(), value.clone());
         }
         // Whether any value came from the elements rather than the model's setting.
         let mut setting = self.settings.construction(construction_type);
         setting.insert("construction_type".into(), json!(construction_type));
         for (key, value) in extra {
-            setting.entry(*key).or_insert_with(|| value.clone());
+            setting.insert((*key).into(), value.clone());
         }
         let from_elements = c != setting;
         let stated = |key: &str| c.get(key).is_some_and(|v| !v.is_null());
@@ -2595,25 +2596,29 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
             None => extra.push(("edge_insulation", json!({"vertical": {}}))),
         }
     }
-    let key = ctx.construction(construction_type, &[g], &extra);
     let band = g.text("age_band").map(str::to_string).or_else(|| {
         ctx.settings
             .raw(&format!("{SETTING}age_band"))
             .and_then(Value::as_str)
             .map(str::to_string)
     });
-    let construction = &mut ctx.constructions.by_name[&key];
-    let uninsulated = match construction
-        .get("insulation_thickness")
-        .and_then(Value::as_f64)
-    {
+    // Decided before the construction is registered, from the element's own thickness or else
+    // the setting's, so the assumption gives this floor its own construction rather than
+    // changing one it shares with an insulated floor.
+    let stated = g.get("insulation_thickness").cloned().or_else(|| {
+        ctx.settings
+            .construction(construction_type)
+            .remove("insulation_thickness")
+    });
+    let uninsulated = match stated.as_ref().and_then(Value::as_f64) {
         Some(thickness) => thickness == 0.0,
         // HEMIE's default by age band: none for A to H.
         None => band.as_deref().is_some_and(|b| ("A"..="H").contains(&b)),
     };
     if floor_type != "suspended" && uninsulated {
-        construction["insulation_thickness"] = json!(UNINSULATED_FLOOR_MM);
+        extra.push(("insulation_thickness", json!(UNINSULATED_FLOOR_MM)));
     }
+    let key = ctx.construction(construction_type, &[g], &extra);
     Some(ctx.with_age_band(
         &[g],
         json!({"floor_type": floor_type, "construction": key, "total_area": total_area}),
@@ -4362,6 +4367,70 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let (model, errors, _) = run(&house(gable_roof()));
         assert!(errors.is_empty(), "{errors:#?}");
         assert_eq!(model["Zone"]["wind_sheltering_level"], "Average");
+    }
+
+    #[test]
+    fn an_uninsulated_slab_does_not_change_a_construction_it_would_share_in_either_order() {
+        let row = |band: &str| -> Row {
+            [
+                ("floor_type", json!("Slab_no_edge_insulation")),
+                ("age_band", json!(band)),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
+        };
+        let (d, k) = (row("D"), row("K"));
+        let el = |row: &'static Row, name: &'static str| El {
+            row,
+            name,
+            zone: "z",
+            ty: "BuildingElementGround",
+            pts: Vec::new(),
+            level: 0,
+        };
+        let (d, k): (&'static Row, &'static Row) = (Box::leak(Box::new(d)), Box::leak(Box::new(k)));
+        let model = full_input();
+        let rows = Rows::new();
+        for order in [[("D", d), ("K", k)], [("K", k), ("D", d)]] {
+            let mut ctx = Ctx {
+                settings: Settings {
+                    csv: &rows,
+                    missing: BTreeMap::new(),
+                },
+                constructions: Constructions::default(),
+                errors: Vec::new(),
+                notices: Vec::new(),
+                model: &model,
+                unshaded_windows: Vec::new(),
+            };
+            let keys: Vec<(&str, String)> = order
+                .into_iter()
+                .map(|(name, row)| {
+                    let floor = floor(&mut ctx, &el(row, name), 50.0).unwrap();
+                    (name, floor["construction"].as_str().unwrap().to_string())
+                })
+                .collect();
+            let thickness: BTreeMap<&str, Value> = keys
+                .into_iter()
+                .map(|(name, key)| {
+                    (
+                        name,
+                        ctx.constructions.by_name[&key]["insulation_thickness"].clone(),
+                    )
+                })
+                .collect();
+            // Read after both: the K floor keeps no stated thickness, so HEMIE's band default
+            // applies; the D floor alone takes the assumption.
+            assert_eq!(thickness["D"], json!(UNINSULATED_FLOOR_MM));
+            assert!(thickness["K"].is_null(), "{thickness:?}");
+            assert_eq!(ctx.constructions.by_name.len(), 2);
+            assert!(ctx
+                .constructions
+                .by_name
+                .values()
+                .any(|c| c.get("insulation_thickness").is_none()));
+        }
     }
 
     #[test]

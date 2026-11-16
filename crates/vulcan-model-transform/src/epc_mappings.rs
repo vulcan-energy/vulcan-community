@@ -910,12 +910,14 @@ pub(crate) fn apply_desnz_defaults(
         }
     }
     // DESNZ-defined: an unstated design outdoor air flow rate is the greater of 13 l/s plus
-    // 6 l/s per bedroom and 0.3 l/s per m² of total floor area, in m³/h.
+    // 6 l/s per bedroom and 0.3 l/s per m² of total floor area, in m³/h. The total floor area is
+    // the EPC wrapper's: each zone's living room and rest-of-dwelling areas.
     let area: f64 = model["Zone"]
         .as_object()
         .into_iter()
         .flatten()
-        .filter_map(|(_, z)| z["area"].as_f64())
+        .flat_map(|(_, z)| [&z["livingroom_area"], &z["restofdwelling_area"]])
+        .filter_map(Value::as_f64)
         .sum();
     let by_rooms = model["NumberOfBedrooms"]
         .as_u64()
@@ -2047,7 +2049,7 @@ mod tests {
         }
         let mut model = json!({
             "NumberOfBedrooms": 3,
-            "Zone": {"z": {"area": 90.0}},
+            "Zone": {"z": {"livingroom_area": 30.0, "restofdwelling_area": 60.0}},
             "HotWaterSource": {"combi": {"type": "CombiBoiler"}, "stated": {"type": "CombiBoiler", "daily_HW_usage": 120}}
         });
         let mut derived = Vec::new();
@@ -2065,6 +2067,43 @@ mod tests {
                 && derived[0].path == "/HotWaterSource/combi"
                 && derived[0].field == "daily_HW_usage"
         );
+    }
+
+    #[test]
+    fn the_floor_area_for_combi_usage_and_outdoor_air_is_the_zones_living_and_rest_areas() {
+        let run = |bedrooms: u64, living: f64, rest: f64| {
+            let mut model = json!({
+                "NumberOfBedrooms": bedrooms,
+                "Zone": {"z": {"livingroom_area": living, "restofdwelling_area": rest}},
+                "HotWaterSource": {"combi": {"type": "CombiBoiler"}},
+                "InfiltrationVentilation": {"MechanicalVentilation": {"mv": {"vent_type": "MVHR"}}}
+            });
+            let mut notices = Vec::new();
+            apply_desnz_defaults(
+                &mut model,
+                false,
+                &mut Vec::new(),
+                &mut notices,
+                &mut Vec::new(),
+            );
+            (model, notices)
+        };
+        let flow = |model: &Value| {
+            model["InfiltrationVentilation"]["MechanicalVentilation"]["mv"]
+                ["design_outdoor_air_flow_rate"]
+                .as_f64()
+                .unwrap()
+        };
+        // One bedroom at 20 m²: the wrapper's 53.43 litres; 13 + 6 l/s beats 0.3 × 20 l/s.
+        let (model, notices) = run(1, 8.0, 12.0);
+        assert_eq!(model["HotWaterSource"]["combi"]["daily_HW_usage"], 53);
+        assert!((flow(&model) - 19.0 * 3.6).abs() < 1e-9);
+        assert!(notices
+            .iter()
+            .any(|n| n.message.contains("the 20.0 m² floor area")));
+        // Three bedrooms at 200 m²: the floor term, 0.3 × 200 = 60 l/s, beats 13 + 18 l/s.
+        let (model, _) = run(3, 50.0, 150.0);
+        assert!((flow(&model) - 60.0 * 3.6).abs() < 1e-9);
     }
 
     #[test]
