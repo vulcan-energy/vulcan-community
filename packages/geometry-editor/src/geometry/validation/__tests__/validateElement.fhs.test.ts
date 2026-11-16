@@ -299,6 +299,25 @@ describe('ventilation zone base the checks measure from', () => {
     expect(baseIssue(terminalAt(2), mvhrParts, { ...upperFlat, ...fileRow })).toBeUndefined();
   });
 
+  it('skips the terminal check when the base cannot be settled, as the window check does', () => {
+    expect(baseIssue(terminalAt(0.5), mvhrParts, {})).toBeUndefined();
+    expect(baseIssue(window(0), [], {})).toBeUndefined();
+  });
+
+  it('takes the last Systems row base in load order (elementIds), as the save and converter do', () => {
+    const systemsAt = (id: string, base: number) => ({
+      ...systemsRow, id, name: `Ventilation ${id}`,
+      extra_json: { InfiltrationVentilation: { ventilation_zone_base_height: base } },
+    }) as unknown as Element;
+    const element = window(3);
+    // An all-digit id enumerates first in Object.values, ahead of load order.
+    const elementsById = { [element.id]: element, a: systemsAt('a', 2.8), 7: systemsAt('7', 3.1) };
+    const issue = validateElementCore(element, {
+      ...baseContext(element), elementsById, elementIds: [element.id, 'a', '7'], floors, complianceSettings: upperFlat,
+    }).issues.find((i) => i.message.includes('ventilation zone base'))?.message;
+    expect(issue).toContain('(3.10 m)');
+  });
+
   it('checks against the derived base otherwise', () => {
     expect(baseIssue(window(2.3), [], upperFlat)).toContain('(2.40 m)');
     expect(baseIssue(terminalAt(2), mvhrParts, upperFlat)).toContain('1 to 60 m above');

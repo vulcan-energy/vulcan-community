@@ -24,6 +24,7 @@ import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoerci
 import {
   CURRENT_VULCAN_CSV_VERSION,
   convertGroundRelativeWindowExtraJsonForCsv,
+  hydrateForDefaultsFilledVentilationBase,
   parseCsvToGeometry,
   VULCAN_CSV_VERSION_METADATA_KEY,
 } from '../../../geometry/io/parseCsvToGeometry';
@@ -2505,7 +2506,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       )
       : undefined;
     if (fill) {
-      set({ complianceSettings: { ...loaded.complianceSettings, ...fill.patch }, loadAwaitsDefaults: false, lateLoadNotice: fill.notice ?? null });
+      const hydrated = hydrateForDefaultsFilledVentilationBase(loaded.elementsById, loaded.sourceCsvVersion, fill.patch);
+      set({
+        ...(hydrated ? { elementsById: hydrated } : {}),
+        complianceSettings: { ...loaded.complianceSettings, ...fill.patch }, loadAwaitsDefaults: false, lateLoadNotice: fill.notice ?? null,
+      });
     } else {
       set({ loadAwaitsDefaults: true, lateLoadNotice: null });
     }
@@ -2554,11 +2559,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const fill = state.loadAwaitsDefaults && state.defaultsJson && !state.defaultsLoading
       ? absentMetadataRowFill({ ...state, complianceSettings: settings, elements: Object.values(state.elementsById) }, state.defaultsJson, rules, root)
       : undefined;
-    const shieldLocations = missingSuspendedShieldLocations(state.elementsById, acceptsSuspendedShieldLocation(options.schemaPort));
+    // This fill completes the load (loadAwaitsDefaults), so a base it states is the file's.
+    const elementsById = (fill && hydrateForDefaultsFilledVentilationBase(state.elementsById, state.sourceCsvVersion, fill.patch)) || state.elementsById;
+    const shieldLocations = missingSuspendedShieldLocations(elementsById, acceptsSuspendedShieldLocation(options.schemaPort));
     const hasShieldLocations = Object.keys(shieldLocations).length > 0;
     if (!fill && settings === state.complianceSettings && !hasShieldLocations) return;
     get().writeAs('default', () => set({
-      ...(hasShieldLocations ? { elementsById: { ...state.elementsById, ...shieldLocations } } : {}),
+      ...(hasShieldLocations || elementsById !== state.elementsById ? { elementsById: { ...elementsById, ...shieldLocations } } : {}),
       complianceSettings: fill ? { ...settings, ...fill.patch } : settings,
       ...(fill ? { loadAwaitsDefaults: false, ...(fill.notice ? { lateLoadNotice: fill.notice } : {}) } : {}),
     }));

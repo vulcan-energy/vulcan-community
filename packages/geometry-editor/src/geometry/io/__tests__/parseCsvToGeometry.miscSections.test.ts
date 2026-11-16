@@ -317,6 +317,30 @@ Ventilation,,System,InfiltrationVentilation,,,,"{""InfiltrationVentilation"":{""
     expect(openBaseSource(csv).store.getState().generateCSV()).toBe(csv);
   });
 
+  // The converter measures a file that lacks the row from the defaults template's base, and the
+  // defaults fill writes that row: the heights take it, whether the defaults are at hand at the load
+  // or arrive after it.
+  it.each(['before', 'after'])('measures a file that lacks the row from a defaults template base read %s the load', (when) => {
+    const template = { InfiltrationVentilation: { ventilation_zone_base_height: 2.8 } };
+    const open = (csv: string) => {
+      const store = createGeometryStore({ defaultDefaultsPath: null });
+      if (when === 'before') store.setState({ defaultsJson: template, defaultsLoading: false } as never);
+      store.getState().loadFromCSV(csv, when === 'before' ? { keepUnchangedDefaults: true } : undefined);
+      if (when === 'after') store.setState({ defaultsJson: template, defaultsLoading: false } as never);
+      const byName = (name: string) => Object.values(store.getState().elementsById).find((e) => e.name === name) as any;
+      return { store, vent: byName('Trickle').mid_height_air_flow_path, window: byName('Window 1').mid_height };
+    };
+    const opened = open(baseSourceCsv(''));
+    expect(opened).toMatchObject({ vent: 4.3, window: 4.2 });
+    const csv = opened.store.getState().generateCSV();
+    expect(csv).toContain('Ventilation_ventilation_zone_base_height,2.8,');
+    expect(csv).toContain('Trickle,Vents,,,,,,1.5,');
+    expect(csv).toContain(',1.4,0.4,');
+    const reopened = open(csv);
+    expect(reopened).toMatchObject({ vent: 4.3, window: 4.2 });
+    expect(reopened.store.getState().generateCSV()).toBe(csv);
+  });
+
   it('writes the derived base of a model the editor built and adds it back on reload', () => {
     const opened = openBaseSource(baseSourceCsv(flatRows));
     opened.store.setState({ complianceSettings: { ...opened.store.getState().complianceSettings, absentMetadataRows: undefined } });

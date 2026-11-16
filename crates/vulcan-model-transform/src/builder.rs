@@ -13718,6 +13718,45 @@ Name,Type,floor_id,length,duct_type,terminal_type,parent_element,host_element,mi
         }
     }
 
+    /// A defaults template base measures a file that lacks the Metadata row and a Systems row; the
+    /// editor's save writes that base as the Metadata row, which measures the same heights.
+    #[test]
+    fn a_defaults_template_base_measures_a_file_that_states_none() {
+        for metadata_row in ["", "Ventilation_ventilation_zone_base_height,2.8\n"] {
+            let csv = format!(
+                "Metadata\nGlobalOrientationOffset,0\nVulcanCsvVersion,4\n{metadata_row}\n{}vent_1,Vents,,,,,,,1.5,30,180,90,,\"0,0,1\",\"{{}}\"\n\nWindow Elements\nName,Zone,Type,area,pitch,width,height,orientation360,base_height,mid_height,extra_json\nwindow 0,Default Zone,BuildingElementTransparent,1.2,90,1,1.2,180,3.6,1.4,{{}}\n",
+                mvhr_terminal_csv(true)
+                    .replace(
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,2.4\"",
+                        "intake,mvhr_1,wall_1,,,,,,\"0,0,4.7\"",
+                    )
+                    .replace(
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,2.5\"",
+                        "exhaust,mvhr_1,wall_1,,,,,,\"1,0,4.6\"",
+                    )
+            );
+            let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            builder.defaults["InfiltrationVentilation"]["ventilation_zone_base_height"] =
+                serde_json::json!(2.8);
+            let result = builder.build_json(&data).expect("CSV should merge");
+            let inf = &result["InfiltrationVentilation"];
+            assert_eq!(inf["ventilation_zone_base_height"].as_f64(), Some(2.8));
+            assert_eq!(
+                inf["Vents"]["vent_1"]["mid_height_air_flow_path"].as_f64(),
+                Some(1.5),
+                "{metadata_row:?}"
+            );
+            assert_eq!(
+                result["Zone"]["Default Zone"]["BuildingElement"]["window 0"]["mid_height"]
+                    .as_f64(),
+                Some(1.4),
+                "{metadata_row:?}"
+            );
+        }
+    }
+
     /// Native hash maps take a new seed for each map, so a repeat build in one process sees the
     /// row maps in a different order. The bytes must not change.
     #[test]

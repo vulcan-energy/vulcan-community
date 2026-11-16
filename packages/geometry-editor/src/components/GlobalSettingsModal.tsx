@@ -582,6 +582,7 @@ export function GlobalSettingsModal({
   const {
     zones,
     elementsById,
+    elementIds,
     defaultsPath,
     propertyPostcode,
     complianceSettings,
@@ -597,6 +598,7 @@ export function GlobalSettingsModal({
     useShallow((state) => ({
       zones: state.zones,
       elementsById: state.elementsById,
+      elementIds: state.elementIds,
       defaultsPath: state.defaultsPath,
       propertyPostcode: state.propertyPostcode,
       complianceSettings: state.complianceSettings,
@@ -1110,7 +1112,7 @@ export function GlobalSettingsModal({
   const globalSettingsWarnings = useMemo(
     () =>
       collectGlobalSettingsWarnings({
-        elements: Object.values(elementsById),
+        elements: elementIds.flatMap((id) => elementsById[id] ?? []),
         floors,
         zones,
         complianceValidationEnabled: targetValidationFlags(schemaPort, complianceSettings).complianceValidationEnabled,
@@ -1121,6 +1123,7 @@ export function GlobalSettingsModal({
       complianceSettings,
       schemaPort,
       elementsById,
+      elementIds,
       floors,
       globalOrientationOffset,
       zones,

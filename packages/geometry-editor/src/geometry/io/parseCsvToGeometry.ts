@@ -158,6 +158,24 @@ function migrateVulcanCsvElementsForEditor(
   });
 }
 
+/**
+ * The elements once the defaults fill that completes a load states the ventilation zone base for a
+ * file that lacks the row: the import added 0, but the converter measures such a file from the
+ * defaults template's base (Metadata, then a Systems row, then the template), which the fill writes.
+ * Undefined when the fill states no non-zero base.
+ */
+export function hydrateForDefaultsFilledVentilationBase(
+  elementsById: Record<string, Element>,
+  csvVersion: number,
+  fillPatch: Record<string, unknown>,
+): Record<string, Element> | undefined {
+  const base = fillPatch.Ventilation_ventilation_zone_base_height;
+  if (typeof base !== 'number' || !Number.isFinite(base) || base === 0) return undefined;
+  return Object.fromEntries(
+    migrateVulcanCsvElementsForEditor(Object.values(elementsById), csvVersion, base).map((element) => [element.id, element]),
+  );
+}
+
 function parseVulcanCsvVersion(rawVersion: string | undefined): number {
   if (rawVersion === undefined) return LEGACY_VULCAN_CSV_VERSION;
   if (!/^\d+$/.test(rawVersion)) {
@@ -861,6 +879,7 @@ export const parseCsvToGeometry = (
     }
   }
   // The base the file states, where the converter reads it: the Metadata row, else a Systems row.
+  // A defaults template base for a file that lacks both comes with the fill (hydrateForDefaultsFilledVentilationBase).
   const referenceNormalizedElements = migrateVulcanCsvElementsForEditor(
     newElements,
     csvVersion,
