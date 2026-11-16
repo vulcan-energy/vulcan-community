@@ -9,7 +9,8 @@ import { HEMIE_DETAIL_FIELDS } from './hemieFabric';
 /**
  * How an element's U-value is known ("Thermal values from"): from its age band and construction
  * (existing building only), from a calculation (the assembly layers, or the ground floor's ISO
- * 13370 calculation), or entered.
+ * 13370 calculation), or entered. On an existing wall the converter sends a calculation's
+ * build-up as HEM:EPC wall layers, not as an entered U-value (`hemie_layers.rs`).
  */
 export type ThermalMethod = 'band' | 'calculation' | 'u_value';
 
@@ -74,8 +75,9 @@ export function inferThermalMethod(
 /**
  * The existing-building construction fields that only work out the U-value, so a stated U-value
  * or calculation replaces them. What else HEM:EPC reads stays:
- * - a wall's age band, wall type and added insulation (its layers give the heat capacity, and the
- *   converter needs the wall type without layers);
+ * - a wall's age band, wall type and added insulation (with no build-up its default layers give the
+ *   heat capacity and the added insulation applies; with one, HEM:EPC reads only the wall type and
+ *   ignores `retrofit_insulation`);
  * - a window's glazing type (its g-value unless one is stated, `window.py` `g_value`);
  * - a roof's age band (its rooflights take it, `roof.py`) and insulation location (the roof type
  *   and its default mass distribution class).
