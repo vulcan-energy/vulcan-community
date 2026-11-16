@@ -11,17 +11,24 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  # Runs the required checks on a merge queue's temporary branch, so a queue can be
+  # switched on without pull requests waiting forever for checks that never start.
+  merge_group:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels that pull request's older run. Every other
+# event groups by ref. Merge-queue refs (gh-readonly-queue/main/pr-<n>-<sha>) are
+# unique per queue entry, so a queue run never shares a group and is never cancelled
+# by another queue entry, a pull-request push or a push to main.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  js-tests:
     runs-on: ubuntu-latest
     steps:
       # Third-party code is pinned to a full commit SHA rather than a mutable tag.
@@ -40,6 +47,32 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Run tests
+        run: npm test
+
+      - name: Build CLI
+        run: npm run build -w apps/cli
+
+  # Runs beside js-tests. None of these checks reads test or build output: both
+  # TypeScript configs are noEmit, and the ratchet's ESLint ignores dist, coverage and
+  # generated files.
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # Same tree as js-tests, so the licence check and the ratchet see exactly what
+          # they saw when they ran in one job.
+          submodules: recursive
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
       - name: Enforce licence policy
         run: npm run licence
 
@@ -47,20 +80,33 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: node scripts/validate-licensing.mjs --release
 
-      - name: Run tests
-        run: npm test
-
       - name: Typecheck editor packages
         run: npm run typecheck
 
       - name: Typecheck geometry document
         run: npm run typecheck:document
 
-      - name: Build CLI
-        run: npm run build -w apps/cli
-
       - name: Enforce static-analysis ratchet
         run: npm run quality
+
+  # Branch protection requires a check named `test`, so this job reports the parallel
+  # jobs above under that name. GitHub treats a skipped required check as passing, so
+  # this job must never be skipped: always() runs it even when a needed job failed or
+  # the run was cancelled, and it fails unless every needed job succeeded.
+  test:
+    needs: [js-tests, static-checks]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every needed job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if ! echo "$NEEDS" | jq -e 'length > 0 and all(.[]; .result == "success")' > /dev/null; then
+            echo "::error::A job that test depends on did not succeed."
+            exit 1
+          fi
 
   rust:
     runs-on: ubuntu-latest
@@ -73,6 +119,19 @@ jobs:
         with:
           toolchain: "1.97.1"
           components: clippy, rustfmt
+
+      # Caches the registry and compiled dependencies; the workspace crates and the
+      # path-patched HEM upstreams are always rebuilt. Keyed on the rustc version,
+      # Cargo.lock and the member manifests, so it must follow the toolchain step. Tag runs
+      # skip it so release validation never builds on a restored cache.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          # Only main writes this cache. A pull request restores main's cache but cannot
+          # save one of its own, so a commit on a PR cannot leave build artefacts for that
+          # PR's later runs of this required check to trust. It also stops merge-queue
+          # runs writing caches under refs that are deleted straight afterwards.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check Rust formatting
         run: cargo fmt --check
