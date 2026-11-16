@@ -4240,9 +4240,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             json!({"number_of_open_fireplaces": 1})
         );
         assert!(leaks.get("test_result").is_none() && leaks["ventilation_zone_height"].is_number());
-        assert!(notices
-            .iter()
-            .any(|n| n.message.starts_with("Airtightness: estimated (no air test).")));
+        assert!(notices.iter().any(|n| n
+            .message
+            .starts_with("Airtightness: estimated (no air test).")));
     }
 
     #[test]
@@ -4300,7 +4300,10 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     #[test]
     fn wind_sheltering_follows_the_shield_class_or_the_terrain() {
         for (ventilation, level) in [
-            (json!({"shield_class": "Shielded", "terrain_class": "OpenField"}), Some("Sheltered")),
+            (
+                json!({"shield_class": "Shielded", "terrain_class": "OpenField"}),
+                Some("Sheltered"),
+            ),
             (json!({"terrain_class": "Urban"}), Some("Sheltered")),
             (json!({"terrain_class": "Suburban"}), Some("Average")),
             (json!({"terrain_class": "OpenWater"}), Some("Exposed")),
