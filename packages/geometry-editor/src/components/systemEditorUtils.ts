@@ -19,6 +19,7 @@ export const SYSTEM_SUBCATEGORY_LABELS: Record<string, string> = {
   HotWaterSource: 'Hot water',
   SpaceCoolSystem: 'Space cooling',
   SpaceHeatSystem: 'Space heating',
+  ZoneUnconditioned: 'Unconditioned zone',
 };
 
 /**

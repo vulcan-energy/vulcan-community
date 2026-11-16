@@ -30,6 +30,7 @@ import {
 import { parseCsvLine, parseCsvSections } from '../../../geometry/io/csvSectionRows';
 import { derivePvDimensionsFromCoords } from '../../../lib/pvPanelFootprint';
 import { BUILDING_ALIASES } from '../../../geometry/io/ingestGeometryTabularSections';
+import { ADJACENT_UNCONDITIONED_ZONE_TYPE, adjacentUnconditionedZone } from '../../../lib/unconditionedZones';
 import { absentMetadataRowFill, METADATA_INPUT_LABELS, metadataRowValues, withoutTargetInitialValues } from '../../../lib/globalSettingsValidation';
 import { csvModelProfile } from '../../../geometry/io/modelSchemaProfile';
 import {
@@ -1472,7 +1473,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           const nonExposedRow = [
             escapeCSV(element.name),
             escapeCSV(zone.name),
-            escapeCSV(element.type),
+            escapeCSV(element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && adjacentUnconditionedZone(element) ? ADJACENT_UNCONDITIONED_ZONE_TYPE : element.type),
             escapeCSV(formatPositiveFiniteNumberForCsv(getElementGrossArea(element))),
             escapeCSV(formatBuildingElementPitchForCsv(resolveBuildingElementPitch(element))),
             escapeCSV(formatPositiveFiniteNumberForCsv(element.width)),

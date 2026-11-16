@@ -174,7 +174,9 @@ const REQUIRED_ROW_KEYS: Readonly<Record<string, readonly ('Zone' | 'Type')[]>> 
  * The row Types the editor loads, by section. The Rust test editor_row_types_match_the_converter
  * (crates/vulcan-model-transform/src/builder.rs) reads the JSON between the markers and runs every
  * Type through the converter, so this table cannot drift from the Types the converter accepts.
- * Aliases load as their type, which gives the converter the same model. Unkept Types are ones the
+ * Aliases load as their type, which gives the converter the same model. An element next to an
+ * unconditioned zone (HEM:EPC only, so the test runs it on that schema) loads as an unheated-space
+ * element naming the zone, and saves with its own Type again. Unkept Types are ones the
  * converter accepts that no editor element reproduces; the load stops with the message given.
  */
 // csv-row-types:begin
@@ -196,6 +198,9 @@ const CSV_ROW_TYPES = {
     "Internal": "BuildingElementAdjacentConditionedSpace",
     "Basement": "BuildingElementGround"
   },
+  "epcBuildingAliases": {
+    "BuildingElementAdjacentUnconditionedZone": "BuildingElementAdjacentUnconditionedSpace_Simple"
+  },
   "rowTypes": {
     "Thermal Bridging Elements": ["ThermalBridgeLinear", "ThermalBridgePoint"],
     "Systems": ["System", "ElectricBattery", "SpaceHeatSystem"],
@@ -214,7 +219,7 @@ const CSV_ROW_TYPES = {
 };
 // csv-row-types:end
 const BUILDING_SECTIONS = new Set(['Exposed Elements', 'Window Elements', 'Ground Elements', 'Non-Exposed Elements']);
-export const BUILDING_ALIASES: Readonly<Record<string, string>> = CSV_ROW_TYPES.buildingAliases;
+export const BUILDING_ALIASES: Readonly<Record<string, string>> = { ...CSV_ROW_TYPES.buildingAliases, ...CSV_ROW_TYPES.epcBuildingAliases };
 const UNKEPT_TYPES: Readonly<Record<string, Readonly<Record<string, string>>>> = CSV_ROW_TYPES.unkeptTypes;
 /**
  * The row types the editor reads (CSV_ROW_TYPES), where the converter routes the row by its Type
@@ -684,6 +689,7 @@ export function ingestGeometryTabularSections(
               'SpaceCoolSystem',
               'SpaceHeatSystem',
               'WWHRS',
+              'ZoneUnconditioned',
             ]);
             const systemPreset = V(d, 'system_preset');
             const extraJson = parseExtraJson(V(d, 'extra_json'), V(d, 'Name')) || {};

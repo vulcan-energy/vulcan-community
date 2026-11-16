@@ -140,6 +140,7 @@ import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/m
 import { getHemieBundle, hemieBundleHostProblem } from '../../lib/hemieBundles';
 import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../../lib/hemieFabric';
 import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
+import { adjacentUnconditionedZone, takesUnconditionedZones, unconditionedZoneIssues, unconditionedZoneNames, ZONE_UNCONDITIONED } from '../../lib/unconditionedZones';
 
 // ---------------- Module-level pure helpers ----------------
 // Hoisted from inside `validateElementCore` because they have no closure state. Available to
@@ -1266,6 +1267,10 @@ const CONVERTER_BUILT_FIELDS: Readonly<Record<string, readonly string[]>> = {
 const converterBuilds = (type: string, field: string): boolean =>
   field === 'is_adjacent_space_within_dwelling' || !!CONVERTER_BUILT_FIELDS[type]?.includes(field);
 
+/** The target's root schema, or none when the host gives no schema. */
+const rootSchemaFor = (context: ValidationContext): unknown =>
+  context.schemaPort.availability === 'available' ? context.schemaPort.getRootSchema(targetSchemaMode(context.schemaPort)) : undefined;
+
 /** An existing-building model: the EPC conversion reads categories and defaults where a new build reads drawn detail. */
 const isExistingBuildingContext = (context: ValidationContext): boolean =>
   (context.complianceSettings as { IsExistingBuilding?: boolean } | undefined)?.IsExistingBuilding === true;
@@ -1728,7 +1733,14 @@ export const validateElementCore = (
         }
       }
 
-      if (element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && !element.isPlaceholder
+      const namedZone = element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' ? adjacentUnconditionedZone(element) : undefined;
+      if (namedZone !== undefined && !element.isPlaceholder) {
+        if (!takesUnconditionedZones(rootSchemaFor(context), isExistingBuildingContext(context))) {
+          issues.push(schema('This model cannot have unconditioned zones. Choose Resistance and enter the unheated space\'s resistance.', ZONE_UNCONDITIONED));
+        } else if (elementsById && !unconditionedZoneNames(Object.values(elementsById)).includes(namedZone)) {
+          issues.push(schema(`Next to unconditioned zone '${namedZone}', which the model does not have. Choose a zone or add one.`, ZONE_UNCONDITIONED));
+        }
+      } else if (element.type === 'BuildingElementAdjacentUnconditionedSpace_Simple' && !element.isPlaceholder
         && !leftToTarget(element.type, 'thermal_resistance_unconditioned_space')) {
         const unheated = element as BuildingElementAdjacentUnconditionedSpace_Simple;
         const ru = unheated.extra_json?.thermal_resistance_unconditioned_space;
@@ -2439,9 +2451,19 @@ export const validateElementCore = (
         'SpaceCoolSystem',
         'SpaceHeatSystem',
         'WWHRS',
+        ZONE_UNCONDITIONED,
       ];
       if (!sysElement.subcategory || !validSubcategories.includes(sysElement.subcategory)) {
         issues.push(geo('System target root must be a supported FHS family', 'subcategory'));
+      }
+      if (sysElement.subcategory === ZONE_UNCONDITIONED && !sysElement.isPlaceholder) {
+        const root = rootSchemaFor(context);
+        const problems = takesUnconditionedZones(root, isExistingBuildingContext(context))
+          ? Object.values(readRecord(readRecord(sysElement.extra_json)[ZONE_UNCONDITIONED])).flatMap((zone) => unconditionedZoneIssues(zone, root))
+          : ['This model cannot have unconditioned zones. Delete this row.'];
+        // One issue: issues are kept one per field.
+        if (problems.length) issues.push(schema(problems.join(' '), 'extra_json'));
+        break;
       }
       const preset = sysElement.system_preset;
       const hasPresetName = typeof preset === 'string' && preset.trim() !== '';

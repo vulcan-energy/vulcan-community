@@ -180,6 +180,26 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'number',
     units: '°C',
   },
+  // Unconditioned zone (HEM:EPC): plain labels for the ISO 52016-1 coefficients.
+  'coeff_ventilation_unconditioned_zone': {
+    label: 'Ventilation coefficient',
+    description: 'How much the zone’s air leakage adds to its heat loss to outside (c_ztu,ve; 0 = none). Blank: HEM uses 0.5 (BS EN ISO 52016-1 Table B.5).',
+    type: 'number',
+  },
+  'coeff_temp_limit_unconditioned_zone': {
+    label: 'Temperature limit coefficient',
+    description: 'Caps the zone temperature between the dwelling and outdoor air temperatures (c_ztu,h,max). 1 caps it at the warmer of the two; above 1 lets a sunspace get warmer. Blank: 1.',
+    type: 'number',
+  },
+  'factor_adjustment_unconditioned_zone': {
+    label: 'Adjustment factor',
+    type: 'number',
+  },
+  'heat_transfer_coeff_unconditioned_zone_total': {
+    label: 'Total heat transfer coefficient',
+    type: 'number',
+    units: 'W/K',
+  },
   // Wet distribution flow rates are litres per minute: HEM divides design, minimum and maximum flow by 60 (emitters).
   'design_flow_rate': {
     label: 'Design flow rate',

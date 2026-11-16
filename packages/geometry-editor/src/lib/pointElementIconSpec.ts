@@ -31,6 +31,7 @@ import {
   Thermometer,
   ThermometerSnowflake,
   WashingMachine,
+  Warehouse,
   Waves,
   Wind,
   Zap,
@@ -144,6 +145,7 @@ const SYSTEM_SUBCATEGORY_ICONS: Record<SystemSubcategory, IconNode> = {
   SpaceCoolSystem: Snowflake,
   SpaceHeatSystem: Heater,
   WWHRS: Recycle,
+  ZoneUnconditioned: Warehouse,
 };
 
 function iconForSystem(element: Element & { type: 'System' }): IconNode {

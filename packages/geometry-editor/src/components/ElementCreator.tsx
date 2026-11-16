@@ -5292,7 +5292,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           dormerThermalRepresentatives.window,
                         )}
                       </div>
-                    ) : hasAppliedPcdbSystemData ? (
+                    ) : hasAppliedPcdbSystemData || (elementType === 'System' && systemFormState.systemSubcategory === 'ZoneUnconditioned') ? (
+                      // An unconditioned zone's fields are its panel's own (UnconditionedZoneFields).
                       null
                     ) : (
                       <React.Suspense fallback={<LazyInlineFallback label="Opening advanced fields..." />}>

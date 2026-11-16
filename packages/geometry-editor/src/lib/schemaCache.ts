@@ -250,6 +250,9 @@ export function getSchemaSubtypeForElementData(
       return s('shading_type');
     case 'System':
       return s('subcategory');
+    case 'BuildingElementAdjacentUnconditionedSpace_Simple':
+      // Next to an unconditioned zone: the zone element form, which names the zone and has no resistance.
+      return (elementData.extra_json as { ZoneUnconditioned?: unknown } | undefined)?.ZoneUnconditioned ? 'ZoneUnconditioned' : undefined;
     default:
       return undefined;
   }
@@ -1685,6 +1688,10 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
         }
       }
 
+      if (elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && subtype === 'ZoneUnconditioned') {
+        return title === 'BuildingElementAdjacentUnconditionedZone';
+      }
+
       // Check exact match first
       if (title === elementType) return true;
 
@@ -1868,7 +1875,7 @@ export function getBaseFieldsForElementType(elementType: string): string[] {
       'width', 'height', 'area', 'pitch', 'parent_element', 'Type', 'type'
     ],
     'BuildingElementAdjacentUnconditionedSpace_Simple': [
-      'width', 'height', 'area', 'pitch', 'parent_element', 'Type', 'type'
+      'width', 'height', 'area', 'pitch', 'parent_element', 'Type', 'type', 'ZoneUnconditioned'
     ],
     'BuildingElementPartyWall': [
       'u_value', 'u_value_whole_wall', 'thermal_resistance_construction',

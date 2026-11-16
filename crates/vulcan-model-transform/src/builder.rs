@@ -11731,6 +11731,38 @@ mod wet_emitter_tests {
                 );
             }
         }
+        // An element next to an unconditioned zone exists on the HEM:EPC schema only.
+        for candidate in names(&editor["epcBuildingAliases"]) {
+            let csv = format!(
+                "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\nNon-Exposed Elements\nName,Zone,Type,area,pitch,extra_json\nR1,Living,{candidate},10,90,\"{{\"\"ZoneUnconditioned\"\":\"\"Garage\"\"}}\"\n"
+            );
+            let mut builder = JSONBuilder::from_json_inputs(
+                include_str!("../../../data/schemas/hem_epc_orchestrator_input.schema.json"),
+                include_str!("../../../data/defaults/defaults_template_epc.json"),
+                ModelProfile::Epc,
+                &crate::VersionMetadata {
+                    hem_core_version: "2.0.0a4".into(),
+                    wrapper_version: Some("0.13.2".into()),
+                },
+            )
+            .expect("EPC builder");
+            builder.set_product_database(
+                crate::epc_products::ProductDatabase::parse(&crate::epc_products::tests::pinned())
+                    .unwrap(),
+            );
+            let model = builder.build_json(&parse_csv(&csv)).expect("EPC build");
+            assert!(
+                !builder
+                    .take_non_fatal_errors()
+                    .iter()
+                    .any(|e| ["E028", "E056", "E065"].contains(&e.code.as_str())),
+                "EPC Non-Exposed Type '{candidate}'"
+            );
+            assert_eq!(
+                model["Zone"]["Living"]["BuildingElement"]["R1"]["type"],
+                candidate
+            );
+        }
     }
 
     #[test]
