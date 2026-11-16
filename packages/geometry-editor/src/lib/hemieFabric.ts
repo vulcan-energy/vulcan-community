@@ -94,12 +94,36 @@ export function hemieHeatCapacityBands(constructionType: string | undefined): re
   return BANDED.has(constructionType) ? HEAT_CAPACITY_BANDS : NUMBER_ONLY.has(constructionType) ? [] : undefined;
 }
 
+/** EPC 03 Table 3.6.2.3 (`RoofCharacteristics.TILED_WITH_FELT` in HEMIE `roof_construction.py`). */
+const DEFAULT_ROOF_CHARACTERISTICS = 'Sheeted/tiled with felt/boards under tiles, but no cladding';
 /**
- * The placeholder of a construction setting field the converter fills when unset (`require` in
- * `hemie.rs`): a door's and a window's areal heat capacity, in J/m²·K.
+ * What HEMIE takes for a construction field left blank, as a placeholder; undefined when it has
+ * no default (all DESNZ-defined). The heat capacities are the converter's (`require` in `hemie.rs`).
  */
-export function hemieRequiredPlaceholder(constructionType: string, field: string): string | undefined {
-  if (field !== 'areal_heat_capacity') return undefined;
+const DEFAULT_PLACEHOLDERS: Readonly<Record<string, string>> = {
+  // EPC 03 Tables 3.6.1.3, 3.6.2.3 and 3.6.3.3 (HEMIE-TN-026 in `roof_construction.py`).
+  ceiling_thickness: '12.5 (default)',
+  internal_finish_thickness: '12.5 (default)',
+  ceiling_thermal_conductivity: 'Plasterboard (default)',
+  internal_finish_thermal_conductivity: 'Plasterboard (default)',
+  joist_depth: 'By age band (default)',
+  rafter_depth: 'By age band (default)',
+  percentage_area_of_timber_joists: '13 (default)',
+  percentage_area_of_timber_rafters: '13 (default)',
+  roof_characteristics: `${DEFAULT_ROOF_CHARACTERISTICS} (default)`,
+  // HEMIE `roof.py` `air_space_resistance`: from the cold roof characteristics.
+  air_gap_thermal_resistance: 'By roof characteristics (default)',
+  // EPC 03 Tables 3.5.1.3 to 3.5.4.2 and 3.6.1.3 to 3.6.3.3 (mineral wool).
+  insulation_thermal_conductivity: 'Mineral wool (default)',
+  // EPC 03 Tables 3.5.1.3 to 3.5.4.2.
+  insulation_type: 'As built (default)',
+  // EPC 03 Table 3.11.2.3.
+  colour: 'Intermediate (default)',
+};
+
+/** The placeholder of a construction field HEMIE or the converter fills when blank: "12.5 (default)". */
+export function hemieDefaultPlaceholder(constructionType: string, field: string): string | undefined {
+  if (field !== 'areal_heat_capacity') return DEFAULT_PLACEHOLDERS[field];
   if (constructionType.endsWith('_door')) return '50,000 (default)';
   return constructionType === 'window' ? '20,000 (default)' : undefined;
 }
@@ -110,35 +134,145 @@ export const hemieConstructionSetting = (constructionType: string): string => `H
 
 /**
  * The construction fields offered per construction type: those the converter needs a value for,
- * the simpler insulation inputs (retrofit insulation, insulation thickness, the roof's insulation
- * location), and the outside colour (a stated solar absorption coefficient wins over it). An
- * element may override them (see `Ctx::construction` in `hemie.rs`).
+ * and the simpler insulation inputs (retrofit insulation, insulation thickness, the roof's
+ * insulation location). The details (`HEMIE_DETAIL_FIELDS`) and the outside surface
+ * (`hemieOutsideSurface`) go under More. An element may override them (see
+ * `element_override_keys` in `hemie.rs`).
  */
 export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  external_wall: ['wall_construction_type', 'retrofit_insulation', 'colour'],
+  external_wall: ['wall_construction_type', 'retrofit_insulation'],
   sheltered_wall: ['wall_construction_type', 'retrofit_insulation'],
   window: ['glazing_type', 'frame_material', 'glazing_gap', 'areal_heat_capacity'],
-  external_door: ['areal_heat_capacity', 'colour'],
+  external_door: ['areal_heat_capacity'],
   party_or_sheltered_door: ['areal_heat_capacity'],
-  flat_roof: ['insulation_location', 'insulation_thickness', 'colour'],
-  unheated_pitched_roof: ['insulation_location', 'insulation_thickness', 'colour'],
-  heated_pitched_roof: ['insulation_thickness', 'colour'],
-  mini_flat_roof: ['insulation_location', 'insulation_thickness', 'colour'],
-  mini_pitched_roof: ['insulation_location', 'insulation_thickness', 'colour'],
+  flat_roof: ['insulation_location', 'insulation_thickness'],
+  unheated_pitched_roof: ['insulation_location', 'insulation_thickness'],
+  heated_pitched_roof: ['insulation_thickness'],
+  mini_flat_roof: ['insulation_location', 'insulation_thickness'],
+  mini_pitched_roof: ['insulation_location', 'insulation_thickness'],
   suspended_floor: ['insulation_thickness'],
   not_edge_insulated_ground_attached_floor: ['insulation_thickness'],
   edge_insulated_ground_attached_floor: ['insulation_thickness'],
   heated_basement_floor: ['insulation_thickness'],
   unheated_basement_floor: ['insulation_thickness'],
-  above_external_area_floor: ['insulation_thickness', 'colour'],
+  above_external_area_floor: ['insulation_thickness'],
   above_internal_unconditioned_area_floor: ['insulation_thickness'],
   party_floor: ['construction_weight'],
   party_ceiling: ['construction_weight'],
-  park_home_wall: ['colour'],
-  park_home_floor: ['colour'],
-  park_home_flat_roof: ['colour'],
-  park_home_pitched_roof: ['colour'],
+  park_home_wall: [],
+  park_home_floor: [],
+  park_home_flat_roof: [],
+  park_home_pitched_roof: [],
 };
+
+// The details HEMIE takes (`element_override_keys` in `hemie.rs`; keep the two in step).
+const ROOF_DETAILS = ['ceiling_thickness', 'ceiling_thermal_conductivity', 'joist_depth', 'percentage_area_of_timber_joists', 'insulation_thermal_conductivity'];
+const LOFT_DETAILS = [...ROOF_DETAILS, 'rafter_depth', 'percentage_area_of_timber_rafters', 'roof_characteristics', 'air_gap_thermal_resistance'];
+const FLOOR_DETAILS = ['insulation_type', 'insulation_thermal_conductivity'];
+/**
+ * The construction details that only refine the U-value worked out from the age band, by
+ * construction type (EPC 03 3.5 and 3.6, option 2): each has a DESNZ default, so they go under More.
+ */
+export const HEMIE_DETAIL_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  flat_roof: ROOF_DETAILS,
+  mini_flat_roof: ROOF_DETAILS,
+  unheated_pitched_roof: LOFT_DETAILS,
+  mini_pitched_roof: LOFT_DETAILS,
+  heated_pitched_roof: ['internal_finish_thickness', 'internal_finish_thermal_conductivity', 'rafter_depth', 'percentage_area_of_timber_rafters', 'insulation_thermal_conductivity'],
+  suspended_floor: FLOOR_DETAILS,
+  not_edge_insulated_ground_attached_floor: FLOOR_DETAILS,
+  edge_insulated_ground_attached_floor: FLOOR_DETAILS,
+  heated_basement_floor: FLOOR_DETAILS,
+  unheated_basement_floor: FLOOR_DETAILS,
+  above_external_area_floor: FLOOR_DETAILS,
+  above_internal_unconditioned_area_floor: FLOOR_DETAILS,
+  // An unheated pitched roof that is thatched (`ThatchedRoofConstruction`): its insulation is the thatch plus any retrofit.
+  thatched_roof: ['insulation_thermal_conductivity'],
+};
+
+/**
+ * How an outside surface is described (EPC 03 Table 3.11.2.2): by its colour (the simple
+ * default), its material and finish, or a documented solar absorption coefficient. HEMIE ranks
+ * the coefficient first, then the material and finish, then the colour.
+ */
+export type OutsideSurfaceMethod = 'colour' | 'material' | 'coefficient';
+export const OUTSIDE_SURFACE_METHOD_LABELS: Readonly<Record<OutsideSurfaceMethod, string>> = {
+  colour: 'Colour', material: 'Material and finish', coefficient: 'Coefficient',
+};
+const WALL_FINISHES = {
+  Brick: 'BrickFinish', Render: 'RenderFinish', Timber: 'TimberFinish', 'Metal (uncoated)': 'MetalUncoatedFinish',
+  'Metal (coated)': 'MetalCoatedFinish', 'Fibre-cement': 'FibreCementWallFinish', 'Composite panels (metal skins)': 'CompositePanelsFinish',
+};
+const ROOF_FINISHES = {
+  'Concrete roof tile': 'ConcreteRoofTileFinish', 'Clay tile': 'ClayTileFinish', Slate: 'SlateFinish', Asphalt: 'AsphaltFinish',
+  Timber: 'TimberFinish', 'Metal (uncoated)': 'MetalUncoatedFinish', 'Metal (coated)': 'MetalCoatedFinish',
+  'Fibre-cement': 'FibreCementRoofFinish', 'Composite panels (metal skins)': 'CompositePanelsFinish',
+};
+const DOOR_FINISHES = {
+  Timber: 'TimberFinish', 'Metal (uncoated)': 'MetalUncoatedFinish', 'Metal (coated)': 'MetalCoatedFinish',
+  'Composite panels (metal skins)': 'CompositePanelsFinish',
+};
+const PARK_HOME_WALL_FINISHES = {
+  'uPVC vinyl / Plastic': 'ParkHomePlasticFinish', 'Stucco / Aggregate paint': 'ParkHomePaintFinish',
+  'Timber / Wood cladding': 'ParkHomeTimberFinish', 'CanExel / Engineered HDF': 'ParkHomeHDFFinish',
+};
+/**
+ * The schema enum of each surface material's finishes, by construction type: HEMIE's
+ * `*_SURFACE_MATERIAL_TO_FINISH` (`hemie/models/constructions`), which checks a finish against its
+ * material (EPC 03 Table 3.11.2.5). The schema states the pairing only in HEMIE's code.
+ */
+const SURFACE_FINISHES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  external_wall: WALL_FINISHES, external_door: DOOR_FINISHES, park_home_wall: PARK_HOME_WALL_FINISHES,
+  flat_roof: ROOF_FINISHES, unheated_pitched_roof: ROOF_FINISHES, heated_pitched_roof: ROOF_FINISHES,
+  mini_flat_roof: ROOF_FINISHES, mini_pitched_roof: ROOF_FINISHES, park_home_flat_roof: ROOF_FINISHES, park_home_pitched_roof: ROOF_FINISHES,
+};
+/** Construction types with an outside surface (`takes_outside_surface` in `hemie.rs`), as the editor offers them. */
+const OUTSIDE_SURFACE_TYPES = new Set([...Object.keys(SURFACE_FINISHES), 'above_external_area_floor', 'park_home_floor', 'thatched_roof']);
+
+/** The ways a construction type's outside surface can be described; undefined when it has none. */
+export function hemieOutsideSurface(constructionType: string | undefined): readonly OutsideSurfaceMethod[] | undefined {
+  if (!constructionType || !OUTSIDE_SURFACE_TYPES.has(constructionType)) return undefined;
+  return SURFACE_FINISHES[constructionType] ? ['colour', 'material', 'coefficient'] : ['colour', 'coefficient'];
+}
+
+/** The schema enum that lists a surface material's finishes, on its construction type. */
+export function hemieFinishEnum(constructionType: string, material: unknown): string | undefined {
+  return typeof material === 'string' ? SURFACE_FINISHES[constructionType]?.[material] : undefined;
+}
+
+/**
+ * The fields of each outside surface method. The coefficient is `solar_absorption_coefficient` in
+ * a construction setting and `solar_absorption_coeff` on an element.
+ */
+export function outsideSurfaceKeys(coefficientKey: string): Readonly<Record<OutsideSurfaceMethod, readonly string[]>> {
+  return { colour: ['colour'], material: ['surface_material', 'finish'], coefficient: [coefficientKey] };
+}
+
+/** The method the stated values use, HEMIE's ranking first; undefined when none is stated. */
+export function statedOutsideSurfaceMethod(values: Readonly<Record<string, unknown>>, coefficientKey: string): OutsideSurfaceMethod | undefined {
+  const keys = outsideSurfaceKeys(coefficientKey);
+  return (['coefficient', 'material', 'colour'] as const).find((method) => keys[method].some((key) => values[key] !== undefined && values[key] !== null && values[key] !== ''));
+}
+
+/** "ceiling thickness", "outside surface": what an element's More holds for its construction type, for the group's hint. */
+export function hemieMoreLabels(constructionType: string, details: boolean): string[] {
+  const label = (field: string) => { const text = hemieFieldLabel(field).replace(/ \(.*\)$/, ''); return text.charAt(0).toLowerCase() + text.slice(1); };
+  return [...(details ? HEMIE_DETAIL_FIELDS[constructionType] ?? [] : []).map(label), ...(hemieOutsideSurface(constructionType) ? ['outside surface'] : [])];
+}
+
+/** The element fields under its editor's More: the details and the outside surface. */
+export function hemieMoreKeys(constructionType: string): string[] {
+  return [...(HEMIE_DETAIL_FIELDS[constructionType] ?? []), ...(hemieOutsideSurface(constructionType) ? ['colour', 'surface_material', 'finish', 'solar_absorption_coeff'] : [])];
+}
+
+/**
+ * Every construction field an element or setting may state for its type: the main fields, the
+ * details and the outside surface.
+ */
+export function hemieConstructionKeys(constructionType: string): string[] {
+  return [...(HEMIE_CONSTRUCTION_FIELDS[constructionType] ?? []), ...(HEMIE_DETAIL_FIELDS[constructionType] ?? []),
+    ...(hemieOutsideSurface(constructionType) ? ['colour'] : []), ...(SURFACE_FINISHES[constructionType] ? ['surface_material', 'finish'] : [])];
+}
 
 /**
  * Element fields only the existing-building converter reads (`ELEMENT_ONLY_KEYS` in `hemie.rs`);
@@ -147,7 +281,10 @@ export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[
 export const HEMIE_ELEMENT_KEYS = [
   'age_band', HEMIE_FRONT_DOOR, 'wall_construction_type', 'glazing_type', 'frame_material', 'glazing_gap',
   'insulation_location', 'construction_weight', 'retrofit_insulation', 'insulation_thickness', 'adjacent_space_type',
-  'basement_depth_descriptor', 'basement_air_volume', 'thatched',
+  'basement_depth_descriptor', 'basement_air_volume', 'thatched', 'insulation_type', 'insulation_thermal_conductivity',
+  'ceiling_thickness', 'ceiling_thermal_conductivity', 'joist_depth', 'percentage_area_of_timber_joists', 'roof_characteristics',
+  'rafter_depth', 'percentage_area_of_timber_rafters', 'air_gap_thermal_resistance', 'internal_finish_thickness',
+  'internal_finish_thermal_conductivity', 'surface_material', 'finish',
 ] as const;
 
 /** The existing-building fields an element holds in its extra_json. */
@@ -159,6 +296,9 @@ export function hemieLeftoverKeys(element: Element): string[] {
 const UNITS: Readonly<Record<string, string>> = {
   glazing_gap: 'mm', insulation_thickness: 'mm', areal_heat_capacity: 'J/m²·K', basement_air_volume: 'm³',
   power_limit_battery_import: 'kW',
+  ceiling_thickness: 'mm', internal_finish_thickness: 'mm', joist_depth: 'mm', rafter_depth: 'mm',
+  percentage_area_of_timber_joists: '%', percentage_area_of_timber_rafters: '%', air_gap_thermal_resistance: 'm²·K/W',
+  insulation_thermal_conductivity: 'W/m·K', ceiling_thermal_conductivity: 'W/m·K', internal_finish_thermal_conductivity: 'W/m·K',
 };
 /** A flat roof's insulation location, as the converter takes it: at the joists is a cold roof, above them a warm roof. */
 const FLAT_ROOF_LOCATIONS: Readonly<Record<string, string>> = { at_joists: 'At joists (cold roof)', above_joists: 'Above joists (warm roof)' };
@@ -166,6 +306,15 @@ const FLAT_ROOF_LOCATIONS: Readonly<Record<string, string>> = { at_joists: 'At j
 const FIELD_LABELS: Readonly<Record<string, string>> = {
   areal_heat_capacity: 'Heat capacity per area',
   power_limit_battery_import: 'Grid import limit for charging',
+  percentage_area_of_timber_joists: 'Timber joist area',
+  percentage_area_of_timber_rafters: 'Timber rafter area',
+  insulation_thermal_conductivity: 'Insulation conductivity',
+  ceiling_thermal_conductivity: 'Ceiling conductivity',
+  internal_finish_thermal_conductivity: 'Internal finish conductivity',
+  air_gap_thermal_resistance: 'Air gap resistance',
+  roof_characteristics: 'Cold roof characteristics',
+  solar_absorption_coefficient: 'Solar absorption coefficient',
+  solar_absorption_coeff: 'Solar absorption coefficient',
 };
 const words = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, ' ');
 
@@ -399,7 +548,7 @@ export function hemieFabric(
   if (!constructionType) return undefined;
   const model = parseHemieConstruction(settings?.[hemieConstructionSetting(constructionType)]) ?? {};
   const values: Record<string, unknown> = {};
-  for (const key of HEMIE_CONSTRUCTION_FIELDS[constructionType] ?? []) {
+  for (const key of hemieConstructionKeys(constructionType)) {
     const value = hemieElementValue(element, key) ?? model[key];
     if (value !== undefined && value !== null && value !== '') values[key] = value;
   }

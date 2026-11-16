@@ -140,3 +140,30 @@ it('keeps the HEMIE_ model settings as typed through load and save', () => {
   expect(csv).toMatch(/^HEMIE_age_band,D,/m);
   expect(csv).toMatch(/^HEMIE_construction_external_wall,"\{""wall_construction_type"":""cavity""\}",/m);
 });
+
+it('keeps roof, floor and outside surface details through save and load, on the setting row and the element', () => {
+  const row = '{""joist_depth"":100,""roof_characteristics"":""Lined with boards and felt"",""surface_material"":""Slate"",""finish"":""Dense, dark slate""}';
+  const own = '{""insulation_type"":""retrofitted"",""insulation_thermal_conductivity"":0.022,""surface_material"":""Fibre-cement"",""finish"":""Wall finishes"",""ceiling_thickness"":12.5}';
+  const store = createGeometryStore({ defaultDefaultsPath: null });
+  store.getState().loadFromCSV(`Metadata,,
+IsExistingBuilding,TRUE
+HEMIE_construction_unheated_pitched_roof,"${row}"
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Living,Zone,60,25,2.4,FALSE
+
+Exposed Elements,,
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Wall,Living,BuildingElementOpaque,10,90,4,2.5,180,0,FALSE,FALSE,,"0,0,0|4,0,0","${own}"
+`);
+  const state = () => ({
+    row: JSON.parse(store.getState().complianceSettings.hemieSettings!.HEMIE_construction_unheated_pitched_roof!),
+    own: Object.values(store.getState().elementsById).find((e) => e.type === 'BuildingElementOpaque')!.extra_json,
+  });
+  const before = state();
+  expect(before.row).toEqual({ joist_depth: 100, roof_characteristics: 'Lined with boards and felt', surface_material: 'Slate', finish: 'Dense, dark slate' });
+  expect(before.own).toMatchObject({ insulation_type: 'retrofitted', insulation_thermal_conductivity: 0.022, surface_material: 'Fibre-cement', finish: 'Wall finishes', ceiling_thickness: 12.5 });
+  store.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
+  expect(state()).toEqual(before);
+});

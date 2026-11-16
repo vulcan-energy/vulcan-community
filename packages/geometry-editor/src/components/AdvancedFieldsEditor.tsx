@@ -987,6 +987,8 @@ interface AdvancedFieldsEditorProps {
   thermalMethod?: ThermalMethod;
   /** Host fields for the element, shown after its fields and before "More". */
   hostFields?: React.ReactNode;
+  /** Host fields for the element's "More" group; `stated` opens it. */
+  hostMoreFields?: { fields: React.ReactNode; stated: boolean; labels: readonly string[] };
   /** Show only these fields (a window's thermal values, placed with its other thermal inputs). */
   onlyFields?: readonly string[];
   /** Leave these fields out (shown by another editor instance). */
@@ -1011,6 +1013,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   arealHeatCapacityBands,
   thermalMethod,
   hostFields,
+  hostMoreFields,
   onlyFields,
   omitFields,
 }) => {
@@ -2891,6 +2894,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         layout={systemAdvancedUischema}
         onDataChange={(data) => handleAdvancedFieldsChange({ data, errors: [] })}
         beforeMore={hostFields}
+        hostMore={hostMoreFields}
       />
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (
         <UnheatedSpaceRuCalculatorModal

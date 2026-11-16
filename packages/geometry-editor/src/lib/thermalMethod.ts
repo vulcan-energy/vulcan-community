@@ -4,6 +4,7 @@
 import type { Element } from '../geometry/types';
 import { parseVulcanAssemblyV1FromExtraJson } from './assemblyAppliedUi';
 import { GROUND_U_VALUE_MANUAL_KEY } from './groundSuspendedFabricSync';
+import { HEMIE_DETAIL_FIELDS } from './hemieFabric';
 
 /**
  * How an element's U-value is known ("Thermal values from"): from its age band and construction
@@ -78,12 +79,14 @@ export function inferThermalMethod(
  * - a window's glazing type (its g-value unless one is stated, `window.py` `g_value`);
  * - a roof's age band (its rooflights take it, `roof.py`) and insulation location (the roof type
  *   and its default mass distribution class).
+ * The roof and floor details (`HEMIE_DETAIL_FIELDS`) only refine the band's U-value, so they go too.
  */
 export function bandOnlyFields(constructionType: string | undefined): readonly string[] {
   if (!constructionType || constructionType.endsWith('_wall')) return [];
   if (constructionType === 'window') return ['age_band', 'glazing_gap'];
-  if (constructionType.endsWith('_roof')) return ['insulation_thickness'];
-  return ['age_band', 'insulation_location', 'insulation_thickness'];
+  const details = HEMIE_DETAIL_FIELDS[constructionType] ?? [];
+  if (constructionType.endsWith('_roof')) return ['insulation_thickness', ...details];
+  return ['age_band', 'insulation_location', 'insulation_thickness', ...details];
 }
 
 /**

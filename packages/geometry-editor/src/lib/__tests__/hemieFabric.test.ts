@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieRequiredPlaceholder, hemieValueLabel, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
+import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieDefaultPlaceholder, hemieValueLabel,
+  HEMIE_DETAIL_FIELDS, hemieConstructionKeys, hemieFinishEnum, hemieOutsideSurface, statedOutsideSurfaceMethod, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
 const plane = [...line, { x: 4, y: 4, z: 0 }];
@@ -153,8 +154,65 @@ it('offers each construction type the areal heat capacity the converter takes', 
 it('shows the door and window heat capacity the converter fills as the placeholder', () => {
   const rust = readFileSync(join(import.meta.dirname, '../../../../../crates/vulcan-model-transform/src/hemie.rs'), 'utf8');
   const value = (name: string) => Number(new RegExp(`const ${name}: f64 = ([\\d_.]+);`).exec(rust)![1].replace(/_/g, '')).toLocaleString('en-GB');
-  expect(hemieRequiredPlaceholder('external_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
-  expect(hemieRequiredPlaceholder('party_or_sheltered_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
-  expect(hemieRequiredPlaceholder('window', 'areal_heat_capacity')).toBe(`${value('WINDOW_HEAT_CAPACITY')} (default)`);
-  expect(hemieRequiredPlaceholder('window', 'glazing_type')).toBeUndefined();
+  expect(hemieDefaultPlaceholder('external_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
+  expect(hemieDefaultPlaceholder('party_or_sheltered_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
+  expect(hemieDefaultPlaceholder('window', 'areal_heat_capacity')).toBe(`${value('WINDOW_HEAT_CAPACITY')} (default)`);
+  expect(hemieDefaultPlaceholder('window', 'glazing_type')).toBeUndefined();
+});
+
+const schema = JSON.parse(readFileSync(join(import.meta.dirname, '../../../../../data/schemas/hem_epc_orchestrator_input.schema.json'), 'utf8')) as {
+  $defs: Record<string, { properties?: Record<string, unknown>; enum?: string[] }>;
+};
+const mapping = (schema.$defs.Geometry!.properties!.constructions as { additionalProperties: { discriminator: { mapping: Record<string, string> } } })
+  .additionalProperties.discriminator.mapping;
+const fieldsOf = (type: string) => Object.keys(schema.$defs[mapping[type]!.split('/').pop()!]!.properties ?? {});
+const DETAILS = new Set(['insulation_type', 'insulation_thermal_conductivity', 'ceiling_thickness', 'ceiling_thermal_conductivity', 'joist_depth',
+  'percentage_area_of_timber_joists', 'roof_characteristics', 'rafter_depth', 'percentage_area_of_timber_rafters', 'air_gap_thermal_resistance',
+  'internal_finish_thickness', 'internal_finish_thermal_conductivity', 'surface_material', 'finish']);
+
+it('offers every roof, floor and outside surface detail a construction type takes, and no other', () => {
+  for (const type of Object.keys(mapping)) {
+    const offered = hemieConstructionKeys(type);
+    const takes = fieldsOf(type);
+    for (const key of offered) expect(takes, `${type} ${key}`).toContain(key);
+    for (const key of takes.filter((k) => DETAILS.has(k))) expect(offered, `${type} ${key}`).toContain(key);
+  }
+});
+
+it('lists each surface material\'s finishes from its schema enum, as HEMIE pairs them', () => {
+  for (const type of Object.keys(mapping)) {
+    const material = schema.$defs[mapping[type]!.split('/').pop()!]!.properties?.surface_material as { anyOf?: { $ref?: string }[] } | undefined;
+    const materials = schema.$defs[material?.anyOf?.[0]?.$ref?.split('/').pop() ?? '']?.enum ?? [];
+    expect(hemieOutsideSurface(type)?.includes('material') ?? false, type).toBe(materials.length > 0);
+    for (const value of materials) expect(schema.$defs[hemieFinishEnum(type, value) ?? '']?.enum?.length, `${type} ${value}`).toBeGreaterThan(0);
+  }
+  expect(hemieFinishEnum('external_wall', 'Fibre-cement')).toBe('FibreCementWallFinish');
+  expect(hemieFinishEnum('flat_roof', 'Fibre-cement')).toBe('FibreCementRoofFinish');
+  expect(hemieFinishEnum('park_home_wall', 'CanExel / Engineered HDF')).toBe('ParkHomeHDFFinish');
+  expect(hemieOutsideSurface('above_external_area_floor')).toEqual(['colour', 'coefficient']);
+  expect(hemieOutsideSurface('suspended_floor')).toBeUndefined();
+});
+
+it('ranks the stated outside surface as HEMIE does', () => {
+  expect(statedOutsideSurfaceMethod({}, 'solar_absorption_coeff')).toBeUndefined();
+  expect(statedOutsideSurfaceMethod({ colour: 'Dark' }, 'solar_absorption_coeff')).toBe('colour');
+  expect(statedOutsideSurfaceMethod({ colour: 'Dark', surface_material: 'Brick' }, 'solar_absorption_coeff')).toBe('material');
+  expect(statedOutsideSurfaceMethod({ colour: 'Dark', solar_absorption_coefficient: 0.5 }, 'solar_absorption_coefficient')).toBe('coefficient');
+});
+
+it('shows the DESNZ defaults of the details as placeholders', () => {
+  expect(hemieDefaultPlaceholder('flat_roof', 'ceiling_thickness')).toBe('12.5 (default)');
+  expect(hemieDefaultPlaceholder('suspended_floor', 'insulation_thermal_conductivity')).toBe('Mineral wool (default)');
+  expect(hemieDefaultPlaceholder('suspended_floor', 'insulation_type')).toBe('As built (default)');
+  expect(hemieDefaultPlaceholder('external_wall', 'colour')).toBe('Intermediate (default)');
+  expect(hemieDefaultPlaceholder('unheated_pitched_roof', 'joist_depth')).toBe('By age band (default)');
+  // The percentage HEMIE takes (`roof_defaults.csv`, beam_fractional_area 0.13).
+  expect(hemieDefaultPlaceholder('flat_roof', 'percentage_area_of_timber_joists')).toBe('13 (default)');
+  expect(hemieDefaultPlaceholder('external_wall', 'surface_material')).toBeUndefined();
+  for (const fields of Object.values(HEMIE_DETAIL_FIELDS)) {
+    for (const field of fields) expect(hemieDefaultPlaceholder('flat_roof', field), field).toMatch(/\(default\)$/);
+  }
+  expect(hemieFieldLabel('percentage_area_of_timber_joists')).toBe('Timber joist area (%)');
+  expect(hemieFieldLabel('insulation_thermal_conductivity')).toBe('Insulation conductivity (W/m·K)');
+  expect(hemieValueLabel('insulation_type', 'as built')).toBe('As built');
 });

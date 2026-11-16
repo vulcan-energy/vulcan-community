@@ -71,6 +71,8 @@ export type DirectAdvancedFieldsProps = {
   onDataChange: (next: Record<string, unknown>) => void;
   /** Shown after the fields and before the "More" group (`config.collapsedEngineFields`). */
   beforeMore?: React.ReactNode;
+  /** Host fields shown last inside the "More" group, named in its hint; `stated` opens it. */
+  hostMore?: { fields: React.ReactNode; stated: boolean; labels: readonly string[] };
 };
 
 // Prop shape accepted by the five custom controls, inferred (not imported) from the
@@ -863,6 +865,7 @@ export function DirectAdvancedFields({
   layout,
   onDataChange,
   beforeMore,
+  hostMore,
 }: DirectAdvancedFieldsProps): React.ReactElement {
   const properties = readRecord(schema.properties);
   const requiredList = Array.isArray(schema.required)
@@ -1013,10 +1016,11 @@ export function DirectAdvancedFields({
     <div data-testid="direct-advanced-fields">
       {layout ? laidOut : flatEntries.map((entry) => (inMore(entry.key) ? null : renderFlatEntry(entry)))}
       {beforeMore}
-      {(layout ? moreNodes.length : engineEntries.length) > 0 && (
+      {((layout ? moreNodes.length : engineEntries.length) > 0 || hostMore) && (
         // Open while the user has stated one of these; otherwise their defaults stay out of the way.
-        <GroupAccordion label="More" hint={moreHint([...new Set(moreLabels)])} openInitially={moreStated}>
+        <GroupAccordion label="More" hint={moreHint([...new Set([...moreLabels, ...(hostMore?.labels ?? [])])])} openInitially={moreStated || hostMore?.stated}>
           {layout ? moreNodes.map((node, i) => renderLayoutNode(node, `more-${i}`)) : engineEntries.map(renderFlatEntry)}
+          {hostMore?.fields}
         </GroupAccordion>
       )}
     </div>

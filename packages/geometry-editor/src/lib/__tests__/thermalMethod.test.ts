@@ -40,7 +40,9 @@ it('clears the old method only, in one patch', () => {
   // A wall's band and type give its heat capacity, so a U-value keeps them.
   expect(bandOnlyFields('external_wall')).toEqual([]);
   expect(bandOnlyFields('window')).toEqual(['age_band', 'glazing_gap']);
-  expect(bandOnlyFields('flat_roof')).toEqual(['insulation_thickness']);
+  expect(bandOnlyFields('flat_roof')).toEqual(['insulation_thickness', 'ceiling_thickness', 'ceiling_thermal_conductivity', 'joist_depth',
+    'percentage_area_of_timber_joists', 'insulation_thermal_conductivity']);
+  expect(bandOnlyFields('suspended_floor')).toEqual(['age_band', 'insulation_location', 'insulation_thickness', 'insulation_type', 'insulation_thermal_conductivity']);
   expect(thermalMethodSwitchPatch(wall({ age_band: 'D', wall_construction_type: 'cavity' }), 'band', 'u_value', { constructionBands: true, constructionType: 'external_wall' }).extra_json)
     .toEqual({ age_band: 'D', wall_construction_type: 'cavity' });
   // A window with no g-value takes it from its glazing type, so the glazing type stays.
