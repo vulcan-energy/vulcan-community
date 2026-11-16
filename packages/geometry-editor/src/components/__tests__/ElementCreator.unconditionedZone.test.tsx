@@ -133,3 +133,32 @@ it('fills a zone window in order, with its area from width × height and shading
   await user.click(screen.getByRole('button', { name: 'Remove shading 1' }));
   expect(window()).not.toHaveProperty('shading');
 });
+
+it('keeps a stored window area that differs from width × height until the user resets it', async () => {
+  const store = renderSelected([garage({ method: 'Calculated', building_element: { Window: {
+    type: 'BuildingElementZoneUnconditionedTransparent', width: 1, height: 1, area: 2, g_value: 0.6,
+  } } })], 'garage');
+  const window = () => (store.getState().elementsById.garage.extra_json as any).ZoneUnconditioned.Garage.building_element.Window;
+  expect(screen.queryByText('from width × height')).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  const gValue = within(document.querySelector<HTMLElement>('[data-field-key="g_value"]')!).getByRole('textbox');
+  await user.clear(gValue);
+  await user.type(gValue, '0.5');
+  await user.tab();
+  expect(window()).toMatchObject({ g_value: 0.5, area: 2 });
+  await user.click(screen.getByRole('button', { name: 'Use width × height' }));
+  expect(window()).toMatchObject({ area: 1 });
+  expect(screen.getByText('from width × height')).toBeInTheDocument();
+});
+
+it('keeps the shading values the new kind takes', async () => {
+  const store = renderSelected([garage({ method: 'Calculated', building_element: { Window: {
+    type: 'BuildingElementZoneUnconditionedTransparent', shading: [{ type: 'overhang', depth: 0.5, distance: 0.2 }],
+  } } })], 'garage');
+  const shading = () => (store.getState().elementsById.garage.extra_json as any).ZoneUnconditioned.Garage.building_element.Window.shading;
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText('Shading 1'), 'sidefinleft');
+  expect(shading()).toEqual([{ type: 'sidefinleft', depth: 0.5, distance: 0.2 }]);
+  await user.selectOptions(screen.getByLabelText('Shading 1'), 'obstacle');
+  expect(shading()).toEqual([{ type: 'obstacle', distance: 0.2 }]);
+});

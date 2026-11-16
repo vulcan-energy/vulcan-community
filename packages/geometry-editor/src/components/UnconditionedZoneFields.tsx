@@ -11,6 +11,8 @@ import { isExistingBuilding } from '../lib/windowOpenings';
 import {
   adjacentUnconditionedZone,
   METHOD_FORBIDS,
+  OBSTACLE,
+  shadingDef,
   takesUnconditionedZones,
   unconditionedZoneNames,
   ZONE_UNCONDITIONED,
@@ -149,14 +151,20 @@ function formOf(root: unknown, def: string, extraRequired: readonly string[] = [
 // A window as a user fills it: its thermal values, then where it is, then its shading.
 const WINDOW_ORDER = ['u_value', 'g_value', 'frame_area_fraction', 'orientation360', 'pitch', 'width', 'height', 'base_height'];
 const OPAQUE_ORDER = ['area', 'u_value'];
-const OBSTACLE = 'obstacle';
 
-/** A zone window's area is its width × height, written with them (HEM takes all three). */
-function withWindowArea(next: Record<string, unknown>): Record<string, unknown> {
-  const { width, height } = next;
-  if (typeof width !== 'number' || typeof height !== 'number') return next;
-  return { ...next, area: Math.round(width * height * 1000) / 1000 };
+/** A zone window's width × height, or undefined without both (HEM takes all three). */
+function widthByHeight({ width, height }: Record<string, unknown>): number | undefined {
+  return typeof width === 'number' && typeof height === 'number' ? Math.round(width * height * 1000) / 1000 : undefined;
 }
+
+/** A width or height edit writes the area as width × height; any other edit keeps the stored area. */
+function withWindowArea(prev: Record<string, unknown>, next: Record<string, unknown>): Record<string, unknown> {
+  const derived = widthByHeight(next);
+  if (derived === undefined || (next.width === prev.width && next.height === prev.height)) return next;
+  return { ...next, area: derived };
+}
+
+const shadingForm = (root: unknown, kind: string) => formOf(root, shadingDef(kind));
 
 const shadingLabel = (kind: string) => (kind === OBSTACLE ? WINDOW_SHADING_TYPE_LABELS.object : WINDOW_SHADING_TYPE_LABELS[kind as keyof typeof WINDOW_SHADING_TYPE_LABELS] ?? kind);
 
@@ -191,8 +199,12 @@ function ShadingRows({ value, onChange, root, config }: {
               <StandardDropdown
                 aria-label={`Shading ${index + 1}`}
                 value={String(row.type ?? '')}
-                // Another kind keeps only the distance, which every kind takes.
-                onChange={(kind) => set(rows.map((r, i) => (i === index ? { type: kind, ...(r.distance !== undefined ? { distance: r.distance } : {}) } : r)))}
+                // Another kind keeps the values its form takes.
+                onChange={(kind) => set(rows.map((r, i) => {
+                  if (i !== index) return r;
+                  const takes = readRecord(shadingForm(root, String(kind)).properties);
+                  return { ...Object.fromEntries(Object.entries(r).filter(([key]) => key in takes)), type: kind };
+                }))}
                 options={kinds.map((kind) => ({ value: kind, label: shadingLabel(kind) }))}
                 variant="ghost"
                 size="md"
@@ -204,7 +216,7 @@ function ShadingRows({ value, onChange, root, config }: {
             </button>
           </div>
           <DirectAdvancedFields
-            schema={formOf(root, row.type === OBSTACLE ? 'WindowShadingObstacle' : 'WindowShadingObject')}
+            schema={shadingForm(root, String(row.type))}
             data={row}
             config={config}
             onDataChange={(next) => set(rows.map((r, i) => (i === index ? { ...next, type: row.type } : r)))}
@@ -302,22 +314,34 @@ export function UnconditionedZoneFields({ row, commit }: {
                     Remove
                   </button>
                 </div>
-                {transparent && (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-                      <span className="element-label">Area</span>
-                      <SourceNote>from width × height</SourceNote>
-                    </div>
-                    <Readout value={typeof p.area === 'number' ? p.area : null} unit="m²" label={`${part} area`} />
-                  </>
-                )}
+                {transparent && (() => {
+                  // A stored area other than width × height (from a CSV) is its own value until reset.
+                  const derived = widthByHeight(p);
+                  const own = p.area !== derived;
+                  return (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                        <span className="element-label">Area</span>
+                        {!own && <SourceNote>from width × height</SourceNote>}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Readout value={typeof p.area === 'number' ? p.area : null} unit="m²" label={`${part} area`} />
+                        {own && derived !== undefined && (
+                          <button type="button" className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action" onClick={() => setPart(part, { ...p, area: derived })}>
+                            Use width × height
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
                 <DirectAdvancedFields
                   schema={transparent
                     ? formOf(root, TRANSPARENT, ['u_value'], ['area', 'shading'], WINDOW_ORDER)
                     : formOf(root, OPAQUE, ['u_value'], [], OPAQUE_ORDER)}
                   data={p}
                   config={config(transparent ? 'BuildingElementTransparent' : 'BuildingElementOpaque')}
-                  onDataChange={(next) => setPart(part, transparent ? withWindowArea({ ...p, ...next }) : { ...next, type: p.type })}
+                  onDataChange={(next) => setPart(part, transparent ? withWindowArea(p, { ...p, ...next }) : { ...next, type: p.type })}
                 />
                 {transparent && (
                   <ShadingRows

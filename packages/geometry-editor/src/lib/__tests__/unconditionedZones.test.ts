@@ -84,3 +84,27 @@ Garage,Living,System,ZoneUnconditioned,,,"1,1,0","{""ZoneUnconditioned"":{""Gara
   expect(saved).toMatch(/Garage wall,Living,BuildingElementAdjacentUnconditionedZone,/);
   expect(saved).toMatch(/Garage,Living,System,ZoneUnconditioned,/);
 });
+
+it('names a missing shading input, and a window area width and height cannot give', () => {
+  const window = { type: 'BuildingElementZoneUnconditionedTransparent', u_value: 1.4, pitch: 90, orientation360: 180, base_height: 1, height: 1, g_value: 0.6, frame_area_fraction: 0.2 };
+  expect(issues(garage({ method: 'Calculated', building_element: { Window: window } }))).toEqual([
+    "extra_json: Garage (System): Enter the Area of 'Window'. Enter the Width of 'Window'.",
+  ]);
+  expect(issues(garage({ method: 'Calculated', building_element: {
+    Window: { ...window, width: 1, area: 1, shading: [{ type: 'overhang', depth: 0.5 }, { type: 'obstacle', distance: 3, height: 2 }] },
+  } }))).toEqual([
+    "extra_json: Garage (System): Enter the Distance of shading 1 on 'Window'. Enter the Transparency of shading 2 on 'Window'.",
+  ]);
+});
+
+it('keys the zone by its row name: an auto-name, a rename and the linked walls follow', () => {
+  const store = createGeometryStore();
+  const row = { id: 'sys', name: 'System 1', type: 'System', zoneId: 'z', coordinates: [{ x: 0, y: 0, z: 0 }], _nameAutoSync: true } as unknown as Element;
+  const linked = wall({ ZoneUnconditioned: 'Unconditioned zone' });
+  store.setState({ elementsById: { sys: row, wall: linked }, elementIds: ['sys', 'wall'] } as never);
+  store.getState().updateElement('sys', { subcategory: 'ZoneUnconditioned', extra_json: { ZoneUnconditioned: { 'System 1': { method: 'Calculated' } } } } as Partial<Element>);
+  expect(store.getState().elementsById.sys).toMatchObject({ name: 'Unconditioned zone', extra_json: { ZoneUnconditioned: { 'Unconditioned zone': { method: 'Calculated' } } } });
+  store.getState().updateElement('sys', { name: 'Garage' });
+  expect(store.getState().elementsById.sys.extra_json).toEqual({ ZoneUnconditioned: { Garage: { method: 'Calculated' } } });
+  expect(store.getState().elementsById.wall.extra_json).toMatchObject({ ZoneUnconditioned: 'Garage' });
+});

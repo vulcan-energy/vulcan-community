@@ -41,6 +41,10 @@ export const METHOD_FORBIDS: Readonly<Record<string, readonly string[]>> = {
   Direct: ['coeff_ventilation_unconditioned_zone'],
 };
 
+/** A zone window's shading row kinds: the schema's WindowShadingType values, and an obstacle. */
+export const OBSTACLE = 'obstacle';
+export const shadingDef = (kind: string) => (kind === OBSTACLE ? 'WindowShadingObstacle' : 'WindowShadingObject');
+
 /** The zone's problems, each with its fix. Calculated needs an envelope; each part states what its form requires. */
 export function unconditionedZoneIssues(zone: unknown, root: unknown): string[] {
   const z = readRecord(zone);
@@ -49,15 +53,22 @@ export function unconditionedZoneIssues(zone: unknown, root: unknown): string[] 
   const envelope = Object.entries(readRecord(z.building_element));
   if (envelope.length === 0) return ['Add the zone\'s outside walls, roof and windows.'];
   const defs = readRecord(readRecord(root).$defs);
+  const missing = (value: Record<string, unknown>, def: string, of: string, extra: readonly string[] = []) => {
+    const form = readRecord(defs[def]);
+    return [...(Array.isArray(form.required) ? form.required as string[] : []), ...extra].flatMap((key) => (
+      key === 'type' || (value[key] !== undefined && value[key] !== null && value[key] !== '')
+        ? []
+        : [`Enter the ${resolveFieldLabelContent(key, readRecord(readRecord(form.properties)[key]).title)} of ${of}.`]));
+  };
   return envelope.flatMap(([part, value]) => {
     const p = readRecord(value);
-    const form = readRecord(defs[String(p.type)]);
     // Calculated sums U-value × area over the envelope, so every part needs its U-value.
-    // A window's area comes from its width and height, which are asked for themselves.
-    const required = [...(Array.isArray(form.required) ? form.required as string[] : []), 'u_value']
-      .filter((key) => !(key === 'area' && p.type === 'BuildingElementZoneUnconditionedTransparent'));
-    return required.flatMap((key) => (key === 'type' || (p[key] !== undefined && p[key] !== null && p[key] !== '')
-      ? []
-      : [`Enter the ${resolveFieldLabelContent(key, readRecord(readRecord(form.properties)[key]).title)} of '${part}'.`]));
+    // A window's area is written from its width and height; one loaded without it takes them in one click.
+    const areaIssue = `Enter the ${resolveFieldLabelContent('area')} of '${part}'.`;
+    const derivable = typeof p.width === 'number' && typeof p.height === 'number';
+    const issues = missing(p, String(p.type), `'${part}'`, ['u_value'])
+      .map((issue) => (derivable && issue === areaIssue ? `Use width × height for the area of '${part}'.` : issue));
+    const shading = Array.isArray(p.shading) ? p.shading.map(readRecord) : [];
+    return [...issues, ...shading.flatMap((row, i) => missing(row, shadingDef(String(row.type)), `shading ${i + 1} on '${part}'`))];
   });
 }

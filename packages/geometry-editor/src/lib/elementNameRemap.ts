@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element } from '../geometry/types';
+import { ZONE_UNCONDITIONED } from './unconditionedZones';
 
 /** Resolve a unique name within the requested zone, or globally for unscoped links. */
 export function createElementNameLookup(elements: Iterable<Element>) {
@@ -166,6 +167,7 @@ const collectElementReferenceNames = (element: Element): Set<string> => {
     if (hemie && typeof hemie === 'object' && !Array.isArray(hemie)) {
       add((hemie as Record<string, unknown>).host_wall);
     }
+    add((extraJson as Record<string, unknown>)[ZONE_UNCONDITIONED]);
   }
 
   return names;
@@ -300,6 +302,11 @@ export const remapElementNameReferences = (
         hemie_bundle: { ...hemie, host_wall: hostWall },
       } as Element['extra_json'];
     }
+    // An element next to an unconditioned zone names the zone's Systems row.
+    const zone = resolveName(extraObj[ZONE_UNCONDITIONED], renameMap);
+    if (zone !== extraObj[ZONE_UNCONDITIONED]) {
+      patch.extra_json = { ...(patch.extra_json ?? extraObj), [ZONE_UNCONDITIONED]: zone } as Element['extra_json'];
+    }
   }
 
   if (Object.keys(patch).length === 0) return element;
@@ -361,6 +368,16 @@ export const buildUnambiguousElementNameMap = (
   return { nameMap, skippedAmbiguousNameCount };
 };
 
+/** An unconditioned zone's HEM key is its Systems row's name, so a renamed row renames its zone. */
+const rekeyUnconditionedZone = (element: Element, from: string, to: string | undefined): Element => {
+  if (to === undefined || element.type !== 'System' || element.subcategory !== ZONE_UNCONDITIONED) return element;
+  const extra = element.extra_json as Record<string, unknown> | undefined;
+  const zones = extra?.[ZONE_UNCONDITIONED] as Record<string, unknown> | undefined;
+  if (!zones || typeof zones !== 'object' || !(from in zones)) return element;
+  const rekeyed = Object.fromEntries(Object.entries(zones).map(([key, value]) => [key === from ? to : key, value]));
+  return { ...element, extra_json: { ...extra, [ZONE_UNCONDITIONED]: rekeyed } } as Element;
+};
+
 export const applyElementRenamePlanToElementsById = (
   elementsById: Record<string, Element>,
   elementIds: string[],
@@ -395,12 +412,12 @@ export const applyElementRenamePlanToElementsById = (
     const host = oldElement.type === 'MechanicalVentilationTerminal'
       ? resolveOldHost(oldElement.host_element)
       : undefined;
-    const nextElement = remapElementNameReferences(
+    const nextElement = rekeyUnconditionedZone(remapElementNameReferences(
       element,
       scopedNameMap,
       parent ? renameTargetById.get(parent.id) ?? parent.name : element.parent_element,
       host ? renameTargetById.get(host.id) ?? host.name : (element as ElementWithNameRefs).host_element,
-    );
+    ), oldElement.name, renameTargetById.get(elementId));
     if (nextElement === element) continue;
 
     if (!changed) {
