@@ -684,7 +684,6 @@ fn combi_daily_hot_water(bedrooms: u64, floor_area: f64) -> u64 {
     volume.round() as u64
 }
 
-
 /// DESNZ's defaults for HEM:EPC inputs, each applied only when the input is absent and
 /// reported; values the converter works out from the model are reported too.
 /// - Battery: location outside, age 5 years, grid charging possible, no grid export
@@ -950,9 +949,15 @@ pub(crate) fn apply_desnz_defaults(
             .into_iter()
             .flatten()
         {
-            if source["type"] == "CombiBoiler" && source.get("daily_HW_usage").is_none_or(Value::is_null) {
+            if source["type"] == "CombiBoiler"
+                && source.get("daily_HW_usage").is_none_or(Value::is_null)
+            {
                 source["daily_HW_usage"] = json!(usage);
-                derive(json_pointer(&["HotWaterSource", name]), "daily_HW_usage", json!(usage));
+                derive(
+                    json_pointer(&["HotWaterSource", name]),
+                    "daily_HW_usage",
+                    json!(usage),
+                );
             }
         }
     }
@@ -2025,8 +2030,20 @@ mod tests {
     fn a_combi_with_no_daily_usage_takes_the_wrappers_daily_average_for_its_occupancy() {
         // The EPC wrapper's hot_water_volume_daily_average, rounded: 81.83, 99.98, 109.15,
         // 121.03 litres for 2 to 5 bedrooms; one bedroom by floor area (57.24 at 30 m², 59.57 at 60 m²).
-        for (bedrooms, area, litres) in [(2, 80.0, 82), (3, 80.0, 100), (4, 80.0, 109), (5, 80.0, 121), (7, 80.0, 121), (1, 30.0, 57), (1, 60.0, 60)] {
-            assert_eq!(combi_daily_hot_water(bedrooms, area), litres, "{bedrooms} bedrooms");
+        for (bedrooms, area, litres) in [
+            (2, 80.0, 82),
+            (3, 80.0, 100),
+            (4, 80.0, 109),
+            (5, 80.0, 121),
+            (7, 80.0, 121),
+            (1, 30.0, 57),
+            (1, 60.0, 60),
+        ] {
+            assert_eq!(
+                combi_daily_hot_water(bedrooms, area),
+                litres,
+                "{bedrooms} bedrooms"
+            );
         }
         let mut model = json!({
             "NumberOfBedrooms": 3,
@@ -2034,10 +2051,20 @@ mod tests {
             "HotWaterSource": {"combi": {"type": "CombiBoiler"}, "stated": {"type": "CombiBoiler", "daily_HW_usage": 120}}
         });
         let mut derived = Vec::new();
-        apply_desnz_defaults(&mut model, false, &mut Vec::new(), &mut Vec::new(), &mut derived);
+        apply_desnz_defaults(
+            &mut model,
+            false,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut derived,
+        );
         assert_eq!(model["HotWaterSource"]["combi"]["daily_HW_usage"], 100);
         assert_eq!(model["HotWaterSource"]["stated"]["daily_HW_usage"], 120);
-        assert!(derived.len() == 1 && derived[0].path == "/HotWaterSource/combi" && derived[0].field == "daily_HW_usage");
+        assert!(
+            derived.len() == 1
+                && derived[0].path == "/HotWaterSource/combi"
+                && derived[0].field == "daily_HW_usage"
+        );
     }
 
     #[test]

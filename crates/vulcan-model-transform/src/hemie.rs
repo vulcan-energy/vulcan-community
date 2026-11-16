@@ -4379,7 +4379,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         };
         // Band D: HEMIE's default is no insulation, so the output alone takes the assumption (E12).
         let band_d = house(gable_roof()).replace("HEMIE_age_band,I", "HEMIE_age_band,D");
-        let rows = crate::parser::CSVParser::new().parse_csv(&band_d).expect("csv");
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(&band_d)
+            .expect("csv");
         let before = rows.clone();
         let mut model = full_input();
         let (mut errors, mut notices) = (Vec::new(), Vec::new());
@@ -4395,7 +4397,10 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 &format!("HEMIE_age_band,D\nHEMIE_construction_not_edge_insulated_ground_attached_floor,\"{{\"\"insulation_thickness\"\":{mm}}}\""),
             )
         };
-        assert_eq!(floor_thickness(&run(&stated(0)).0), json!(UNINSULATED_FLOOR_MM));
+        assert_eq!(
+            floor_thickness(&run(&stated(0)).0),
+            json!(UNINSULATED_FLOOR_MM)
+        );
         assert_eq!(floor_thickness(&run(&stated(50)).0), json!(50));
         assert!(floor_thickness(&run(&house(gable_roof())).0).is_null());
     }
