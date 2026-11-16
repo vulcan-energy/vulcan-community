@@ -168,7 +168,6 @@ import {
   buildSlopedPolygonRectangleDimensionPatch,
   slopedPolygonNeedsRectangleRebuild,
 } from '../../lib/slopedElementDimensions';
-import { ParentElementDropdown } from '../ParentElementDropdown';
 import { DerivedSource, ParentSourceNote, Readout, SourceNote } from '../FieldSource';
 import { isOverridden } from '../../lib/fieldSource';
 import { StandardInput } from '../StandardInput';
@@ -544,8 +543,6 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       liveRectArea,
       selectedSlopedDimensions,
       renderLinearDimensionsFields,
-      applyHostedParentElement,
-      elementZoneId,
       openingFields,
     } = ctx;
 
@@ -613,17 +610,6 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
 
     return (
       <>
-        {renderFieldLabel('Linked Wall:', elementType)}
-        <div className="element-input" ref={registerBaseFieldRef('parent_element')}>
-          <ParentElementDropdown
-            value={state.parentElement}
-            onChange={(value) => applyHostedParentElement(value, '')}
-            elementType={elementType}
-            zoneId={elementZoneId}
-            placeholder="Select a parent opaque element"
-            selfId={selection?.type === 'element' ? selection.id : undefined}
-          />
-        </div>
         {selectedShape !== 'polygon' && (
           renderLinearDimensionsFields(registerBaseFieldRef, {
             widthStep: '0.01',
@@ -848,7 +834,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         )}
         {openingFields}
-        {renderFieldLabel('Frame area fraction:', elementType)}
+        {ctx.thermalValues}
+        {renderFieldLabel('Frame area fraction', elementType)}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput
             {...decimalInputProps(state.freeAreaFractionInput)}

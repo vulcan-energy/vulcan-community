@@ -70,6 +70,8 @@ export type DirectAdvancedFieldsProps = {
    */
   layout?: AdvancedFieldsLayoutNode;
   onDataChange: (next: Record<string, unknown>) => void;
+  /** Shown after the fields and before the "More" group (`config.collapsedEngineFields`). */
+  beforeMore?: React.ReactNode;
 };
 
 // Prop shape accepted by the five custom controls, inferred (not imported) from the
@@ -846,6 +848,9 @@ function renderControlForProperty(args: {
 }
 
 const NO_ENGINE_FIELDS: ReadonlySet<string> = new Set();
+const isStated = (value: unknown) => value !== undefined && value !== null && value !== '';
+/** "heat capacity, mass distribution and 3 more": what "More" holds, in a few words. */
+const moreHint = (labels: readonly string[]) => (labels.length > 4 ? `${labels.slice(0, 3).join(', ')} and ${labels.length - 3} more` : labels.join(', '));
 
 export function DirectAdvancedFields({
   schema,
@@ -853,6 +858,7 @@ export function DirectAdvancedFields({
   config,
   layout,
   onDataChange,
+  beforeMore,
 }: DirectAdvancedFieldsProps): React.ReactElement {
   const properties = readRecord(schema.properties);
   const requiredList = Array.isArray(schema.required)
@@ -875,6 +881,9 @@ export function DirectAdvancedFields({
     [data, onDataChange],
   );
 
+  const engineKeys = (config as { collapsedEngineFields?: ReadonlySet<string> }).collapsedEngineFields ?? NO_ENGINE_FIELDS;
+  const moreNodes: AdvancedFieldsLayoutNode[] = [];
+  let collectingMore = true;
   function renderLayoutNode(node: AdvancedFieldsLayoutNode, key: React.Key): React.ReactElement | null {
     if (node.type === 'VerticalLayout') {
       // Stage 2.3: nesting is visual-only today (no Group/accordion chrome in Advanced
@@ -887,6 +896,7 @@ export function DirectAdvancedFields({
     // raw '/' or '.' in a user plant-key name round-trips correctly here.
     const segments = segmentsFromLayoutScope(node.scope);
     const leafKey = segments[segments.length - 1] ?? '';
+
     // Stage 2.3: resolve the property schema by walking the SAME pointer (the node's
     // `scope`) through `schema` that buildSystemAdvancedUischema used to build the
     // scope in the first place, then $ref-resolve exactly like the flat walk does.
@@ -922,6 +932,11 @@ export function DirectAdvancedFields({
     const parentRequired = Array.isArray(parentSchema.required)
       ? (parentSchema.required as unknown[]).filter((v): v is string => typeof v === 'string')
       : [];
+    // A field under "More" renders there, after the others, in the same order; a required one stays in view.
+    if (collectingMore && engineKeys.has(leafKey) && !parentRequired.includes(leafKey)) {
+      moreNodes.push(node);
+      return null;
+    }
     return renderControlForProperty({
       segments,
       resolved,
@@ -955,8 +970,9 @@ export function DirectAdvancedFields({
     }
   }
 
-  const engineKeys = (config as { collapsedEngineFields?: ReadonlySet<string> }).collapsedEngineFields ?? NO_ENGINE_FIELDS;
-  const engineEntries = flatEntries.filter(({ key }) => engineKeys.has(key));
+  // Flat fields: the caller picks only fields with a default (an existing building's construction values, a colour's coefficient).
+  const inMore = (key: string) => engineKeys.has(key);
+  const engineEntries = flatEntries.filter(({ key }) => inMore(key));
   const renderFlatEntry = ({ key, resolved }: { key: string; resolved: Record<string, unknown> }) =>
     renderControlForProperty({
       // R4.3b: flat mode's segments are always a single-element array.
@@ -973,19 +989,26 @@ export function DirectAdvancedFields({
       applyChange,
     });
 
+  const laidOut = layout ? renderLayoutNode(layout, 'root') : null;
+  collectingMore = false;
+  const moreKeys = layout ? moreNodes.map((node) => { const segments = segmentsFromLayoutScope(node.scope ?? ''); return segments[segments.length - 1] ?? ''; }) : engineEntries.map(({ key }) => key);
+  const moreLabels = moreKeys.map((key) => {
+    const label = labelForProperty(key, {}, elementType);
+    return /^[A-Z][a-z]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+  });
+  const moreStated = layout
+    ? moreNodes.some((node) => isStated(getAtPath(data, segmentsFromLayoutScope(node.scope ?? ''))))
+    : engineEntries.some(({ key }) => isStated(data[key]));
   return (
     <div data-testid="direct-advanced-fields">
-      {layout
-        ? renderLayoutNode(layout, 'root')
-        : <>
-          {flatEntries.map((entry) => (engineKeys.has(entry.key) ? null : renderFlatEntry(entry)))}
-          {engineEntries.length > 0 && (
-            // Open while the user has stated one of these; otherwise the DESNZ-defined values stay out of the way.
-            <GroupAccordion label="Advanced" openInitially={engineEntries.some(({ key }) => data[key] !== undefined && data[key] !== null && data[key] !== '')}>
-              {engineEntries.map(renderFlatEntry)}
-            </GroupAccordion>
-          )}
-        </>}
+      {layout ? laidOut : flatEntries.map((entry) => (inMore(entry.key) ? null : renderFlatEntry(entry)))}
+      {beforeMore}
+      {(layout ? moreNodes.length : engineEntries.length) > 0 && (
+        // Open while the user has stated one of these; otherwise their defaults stay out of the way.
+        <GroupAccordion label="More" hint={moreHint([...new Set(moreLabels)])} openInitially={moreStated}>
+          {layout ? moreNodes.map((node, i) => renderLayoutNode(node, `more-${i}`)) : engineEntries.map(renderFlatEntry)}
+        </GroupAccordion>
+      )}
     </div>
   );
 }

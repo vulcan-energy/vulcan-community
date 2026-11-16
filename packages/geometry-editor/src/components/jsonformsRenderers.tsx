@@ -79,6 +79,12 @@ type RendererConfig = {
   systemSampleBaselineExtraJson?: unknown;
   /** The target's default for a blank field of this element, by field key (EPC conversion). */
   derivedDefaults?: Readonly<Record<string, unknown>>;
+  /** Fields with no default here whatever the defaults file says (a new build's tank location). */
+  noDefaultFields?: ReadonlySet<string>;
+  /** Where a `derivedDefaults` value comes from, by field key ("from the colour"), in place of "default". */
+  derivedSourceNotes?: Readonly<Record<string, string>>;
+  /** A control shown at the right of one field's label row (the U-value or resistance switch). */
+  labelAdornment?: Readonly<{ field: string; node: React.ReactNode }>;
   systemSampleMode?: boolean;
   systemSamplePathSegments?: string[];
   /** Default products the target picks, by the model pointer of the plant's `product_id`. */
@@ -359,6 +365,7 @@ function getAdvancedDefaultValue(
     const own = config.defaultProducts[`/${config.systemSamplePathSegments.map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`];
     if (own !== undefined) return own;
   }
+  if (config?.noDefaultFields?.has(propKey)) return undefined;
   if (config?.derivedDefaults && config.derivedDefaults[propKey] !== undefined) return config.derivedDefaults[propKey];
   // R4.6b-2: `path` is gone from this signature. It carried exactly one thing into
   // `getDefaultValue` — the leaf key — which this function was already being handed
@@ -529,6 +536,7 @@ function resolveAdvancedFieldSource(args: {
   groundUFromCalculation: boolean;
   openGroundUCalculator: (() => void) | undefined;
   fabricRowField: string | undefined;
+  derivedNote?: string;
 }): { source: React.ReactNode; followsSource: boolean } {
   const { data, isJsonLike, fieldSource, isSamplePreset, path, handleChange, fieldLabel, unit } = args;
   const hasExplicit = isMeaningfulExplicitValue(data, isJsonLike);
@@ -577,7 +585,7 @@ function resolveAdvancedFieldSource(args: {
   const matches = hasExplicit ? valuesEquivalent(data, sourceValue, isJsonLike) : blankFollowsSource;
   if (matches) {
     return {
-      source: isAssembly ? <SourceNote>from the assembly</SourceNote> : <DefaultNote field={args.fabricRowField} preset={fieldSource.preset} />,
+      source: isAssembly ? <SourceNote>from the assembly</SourceNote> : args.derivedNote ? <SourceNote>{args.derivedNote}</SourceNote> : <DefaultNote field={args.fabricRowField} preset={fieldSource.preset} />,
       followsSource: hasExplicit,
     };
   }
@@ -758,7 +766,9 @@ function useAdvancedControlPreamble(
     groundUFromCalculation: cfg.groundUFromCalculation === true,
     openGroundUCalculator: cfg.openGroundUCalculator,
     fabricRowField: cfg.fabricRowField,
+    derivedNote: propKey ? cfg.derivedSourceNotes?.[propKey] : undefined,
   });
+  const adornment = cfg.labelAdornment && cfg.labelAdornment.field === propKey ? cfg.labelAdornment.node : null;
 
   return {
     cfg,
@@ -777,7 +787,7 @@ function useAdvancedControlPreamble(
     // A fabric preset value is the field's default: the converter gives it a blank field.
     defaultValue: fieldSource.preset ? fieldSource.value : defaultValue,
     fieldSource,
-    source,
+    source: adornment ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{source}{adornment}</span> : source,
     followsSource,
     isRuField: isRuUnheatedSpaceField(propKey),
     isGroundUField,
@@ -2145,8 +2155,10 @@ export const GroupAccordion: React.FC<{
   label: string;
   count?: number;
   openInitially?: boolean;
+  /** What the group holds, in a few words, shown beside the label. */
+  hint?: string;
   children: React.ReactNode;
-}> = ({ label, count, openInitially, children }) => {
+}> = ({ label, count, openInitially, hint, children }) => {
   const [open, setOpen] = useState<boolean>(!!openInitially);
   return (
     <details
@@ -2174,6 +2186,7 @@ export const GroupAccordion: React.FC<{
           {open ? '▼' : '▶'}
         </span>
         <span style={{ fontWeight: 600 }}>{label}</span>
+        {hint ? <span style={{ marginLeft: 'auto', fontWeight: 400, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'right' }}>{hint}</span> : null}
         {count !== undefined && count > 0 ? (
           <span className="badge" style={{ marginLeft: 'auto' }}>{count}</span>
         ) : null}

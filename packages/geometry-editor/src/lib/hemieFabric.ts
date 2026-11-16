@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element } from '../geometry/types';
+import { isPointInPolygon2D } from './pointInPolygon';
 
 /**
  * Construction bands: on an existing-building model the converter (vulcan-model-transform
@@ -259,6 +260,38 @@ function isRoomInRoofCeiling(element: Element, elements: readonly Element[]): bo
   // ponytail: by level, where the converter takes the planes over the room's building part; a flat roof
   // at that level over another part counts too. Match the converter's plan test if models need it.
   return planePitch(element) !== undefined && room !== undefined && (level(element) === room || level(element) === room + 1);
+}
+
+/** Roof constructions the converter builds once per building part, from all of the part's planes. */
+const SHARED_ROOF_TYPES: ReadonlySet<string> = new Set(['flat_roof', 'unheated_pitched_roof', 'heated_pitched_roof',
+  'mini_flat_roof', 'mini_pitched_roof', 'park_home_flat_roof', 'park_home_pitched_roof']);
+
+const planCentroid = (element: Element) => {
+  const points = element.coordinates ?? [];
+  return { x: points.reduce((sum, p) => sum + p.x, 0) / points.length, y: points.reduce((sum, p) => sum + p.y, 0) / points.length };
+};
+
+/**
+ * The other roof planes that share this plane's construction: the converter gives one set of
+ * values to a building part's planes of one roof construction, and fails when their stated
+ * values differ (`Ctx::agreed` in `hemie.rs`). Empty for any other element.
+ */
+export function sharedRoofPlanes(element: Element, elements: readonly Element[], buildType?: string): Element[] {
+  const type = planePitch(element) === undefined ? undefined : hemieConstructionType(element, elements, buildType);
+  if (!type || !SHARED_ROOF_TYPES.has(type)) return [];
+  // ponytail: the building part is the ground floor under the plane's centre, where the converter
+  // uses the storey outlines; a plane over no ground floor matches others over none. Match the
+  // converter's part test if extensions without their own ground floor need it.
+  const grounds = elements.filter((other) => other.type === 'BuildingElementGround' && (other.coordinates?.length ?? 0) >= 3);
+  const part = (plane: Element) => {
+    const centre = planCentroid(plane);
+    return grounds.findIndex((ground) => isPointInPolygon2D(centre, ground.coordinates));
+  };
+  const own = part(element);
+  // Over no ground floor the part is not known here: claim no sharing rather than a false one.
+  if (own < 0) return [];
+  return elements.filter((other) => other.id !== element.id && !other.isPlaceholder && planePitch(other) !== undefined
+    && hemieConstructionType(other, elements, buildType) === type && part(other) === own);
 }
 
 /** The build type that gives the main walls, ground floor and roof the park home constructions. */

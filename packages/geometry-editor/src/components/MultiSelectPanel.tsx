@@ -66,7 +66,7 @@ import {
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
 import type { GeometryInspectorContributions } from '../../../geometry-editor-host/src/inspectorContributions';
-import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../lib/hemieFabric';
+import { HEMIE_CONSTRUCTION_FIELDS, hemieConstructionType, hemieHeatCapacityBands, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
 import { useTargetRules } from '../hooks/useTargetRules';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -1637,7 +1637,12 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     const shared = Object.fromEntries(Object.entries(extraJsonRecord(first!)).filter(([key, value]) =>
       rest.every((el) => extraJsonValuesEqual(extraJsonRecord(el)[key], value))));
     const mixed = [...new Set(activeElements.flatMap((el) => Object.keys(extraJsonRecord(el))))].filter((key) => !(key in shared));
-    return { element: { ...first!, extra_json: shared } as Element, mixed };
+    // The planes of one roof share one construction (`sharedRoofPlanes`).
+    const roof = sharedRoofPlanes(first!, all, buildType);
+    const oneRoof = rest.length > 0 && rest.every((el) => roof.some((plane) => plane.id === el.id));
+    const type = hemieConstructionType(first!, all, buildType) ?? '';
+    const roofFields = new Set(['age_band', 'u_value', 'thermal_resistance_construction', 'mass_distribution_class', 'solar_absorption_coeff', 'thatched', ...(HEMIE_CONSTRUCTION_FIELDS[type] ?? [])]);
+    return { element: { ...first!, extra_json: shared } as Element, mixed, oneRoofMixed: oneRoof && mixed.some((key) => roofFields.has(key)) };
   }, [ElementFieldsRenderer, activeElements, buildType, constructionBands, elementsById, inspectorContributions]);
   const patchActiveExtraJson = useCallback((update: (current: Record<string, unknown>) => Record<string, unknown>) => {
     const patches: Record<string, Record<string, unknown>> = {};
@@ -3858,6 +3863,9 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {sharedFabricElement && ElementFieldsRenderer && (
           <div className="multi-select-field-group">
+            {sharedFabricElement.oneRoofMixed && (
+              <p className="field-source-note" data-shared-roof>One roof: the values must match.</p>
+            )}
             <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>} onPatchExtraJson={patchActiveExtraJson} />
           </div>
         )}

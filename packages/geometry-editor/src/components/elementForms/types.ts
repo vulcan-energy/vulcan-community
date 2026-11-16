@@ -295,6 +295,8 @@ export interface ElementFormRenderCtx {
   productCatalogue: GeometryProductCatalogueContribution | null;
   /** Host fields for the selected glazed element, shown under Open area. */
   openingFields: ReactNode;
+  /** A window's "Thermal values" block (method, then its inputs), shown after its size and position. */
+  thermalValues: ReactNode;
   /** The selected System row has a product slot: its picker chooses the system's product, so
    * the sample Category and Preset do not show. */
   systemHasProductSlot: boolean;

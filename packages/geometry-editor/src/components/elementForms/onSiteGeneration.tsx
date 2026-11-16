@@ -49,6 +49,8 @@ import {
   useIntegerInput,
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
+import { useKeyedState } from '../../hooks/useKeyedState';
+import { CompactSegmentedControl } from '../WindowDetailControls';
 
 function roundToInt(value: number): number {
   return Math.round(value ?? 0);
@@ -67,6 +69,9 @@ export interface OnSiteGenerationFormState {
   getCurrentOrientation: (element: Element) => number;
   /** The panel's ventilation strategies, from the target schema (empty when the schema has none). */
   ventilationStrategies: string[];
+  /** An existing building's array size: from its panel count or its drawn area, once the user picks. */
+  pvSizeChosen: 'count' | 'drawn' | null;
+  setPvSizeChosen: (value: 'count' | 'drawn' | null) => void;
 }
 
 /** The existing-building PV mounting types (schema `PhotovoltaicMountingType`). */
@@ -257,7 +262,11 @@ function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when selection or element version changes
   }, [ctx.selection?.id, ctx.selection?.type, ctx.selectedElementV]);
 
+  const [pvSizeChosen, setPvSizeChosen] = useKeyedState<'count' | 'drawn' | null>(ctx.selection?.id ?? '', null);
+
   return {
+    pvSizeChosen,
+    setPvSizeChosen,
     peakPowerInput,
     onSitePitchInput,
     onSiteOrientationInput,
@@ -369,6 +378,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
     // peak power and inverter defaulted unless stated; the mounting type gives the ventilation.
     const existingPv = hemDatabaseProducts && existingBuilding;
     const pvExtra = readRecord(pvElement?.extra_json);
+    const pvSizeFromCount = Boolean(existingPv && (state.pvSizeChosen ? state.pvSizeChosen === 'count' : pvExtra.panel_count !== undefined));
     const patchPvExtra = (key: string, value: unknown) => {
       if (pvElement) updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), [key]: value } } as Partial<Element>);
     };
@@ -510,6 +520,20 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                 size="md"
               />
             </div>
+            {/* One size: a stated panel count replaces the drawn area (`hemie_systems.rs`). */}
+            <div className="element-label">Size from</div>
+            <div className="element-input">
+              <CompactSegmentedControl
+                ariaLabel="Size from"
+                value={pvSizeFromCount ? 'count' : 'drawn'}
+                options={[{ value: 'count', label: 'Panel count' }, { value: 'drawn', label: 'Drawn area' }]}
+                onChange={(next) => {
+                  state.setPvSizeChosen(next);
+                  if (next === 'drawn' && pvExtra.panel_count !== undefined) patchPvExtra('panel_count', undefined);
+                }}
+              />
+            </div>
+            {pvSizeFromCount ? <>
             <div className="element-label">Panel count</div>
             <div className="element-input">
               <StandardInput
@@ -517,7 +541,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                 min="1"
                 step="1"
                 value={typeof pvExtra.panel_count === 'number' ? String(pvExtra.panel_count) : ''}
-                placeholder="From the drawn area"
+                error={typeof pvExtra.panel_count === 'number' ? undefined : 'Enter the number of panels.'}
                 onChange={(e) => {
                   const count = Number.parseInt(e.target.value, 10);
                   patchPvExtra('panel_count', Number.isFinite(count) && count > 0 ? count : undefined);
@@ -527,6 +551,8 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
                 className="flex-1"
               />
             </div>
+            <div className="field-source-note">The panel count gives the array size; the outline only places it on the roof.</div>
+            </> : null}
           </>
         ) : null}
         {renderFieldLabelWithComparisonIndicator('Peak Power (kWp):', elementType, globalComparisonFieldIndicators.peak_power)}
@@ -670,6 +696,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
             </>
           );
         })()}
+        {pvSizeFromCount ? null : <>
         {renderFieldLabel('Width (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('width')}>
           <StandardInput
@@ -708,6 +735,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
             {selectedPvDimensionNotes.height}
           </div>
         ) : null}
+        </>}
         {/* A products target's PV root has no such field, and the panel needs one: it is stated here. */}
         {hemDatabaseProducts && !existingPv && state.ventilationStrategies.length > 0 && pvElement ? (
           <>

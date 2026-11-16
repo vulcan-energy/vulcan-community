@@ -72,6 +72,7 @@ import { classifyOpaqueFabricVariantFromElement } from '../lib/opaqueFabricVaria
 import { isRecord, readRecord } from '../lib/jsonTypes';
 import { DhwStorageHeatSourcePicker } from './DhwStorageHeatSourcePicker';
 import {
+  CompactSegmentedControl,
   WindowDetailChip,
   WindowDetailCollectionShell,
   WindowDetailSection,
@@ -110,6 +111,9 @@ import {
 } from './systemEditorUtils';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { MVHR_FIXED_ENERGY_SUPPLY } from '../lib/deriveForExport';
+import type { ThermalMethod } from '../lib/thermalMethod';
+import { TANK_METHOD_GROUPS, offeredMethods, statedMethod, storageTank, switchMethod, withoutLayoutLeaves } from '../lib/inputMethods';
+import { encodePointerToken } from '../lib/schemaRefResolver';
 import { WINDOW_SHADING_TYPE_LABELS } from '../lib/windowOpenings';
 import {
   emptyGeometryInspectorContributions,
@@ -122,6 +126,22 @@ const EXTRA_JSON_UI_KEY_SET = new Set<string>(EXTRA_JSON_UI_KEYS);
 
 const EMPTY_ADVANCED_FIELDS: Record<string, unknown> = Object.freeze({});
 const COLLAPSED_ENGINE_FIELDS: ReadonlySet<string> = new Set(['areal_heat_capacity', 'mass_distribution_class', 'solar_absorption_coeff']);
+/** An existing building's window under the age band method takes its g-value from the glazing type. */
+const COLLAPSED_BAND_WINDOW_FIELDS: ReadonlySet<string> = new Set([...COLLAPSED_ENGINE_FIELDS, 'g_value']);
+/** With a colour offered, the solar absorption coefficient is its override. */
+const COLLAPSED_COLOUR_FIELDS: ReadonlySet<string> = new Set(['solar_absorption_coeff']);
+/** A heating circuit's less common inputs: flow limits and rates, thermal mass and the weather curve. */
+const COLLAPSED_HEATING_FIELDS: ReadonlySet<string> = new Set([
+  'bypass_fraction_recirculated', 'design_flow_rate', 'max_flow_rate', 'min_flow_rate', 'variable_flow', 'temp_flow_limit_upper',
+  'thermal_mass', 'min_flow_temp', 'min_outdoor_temp', 'max_outdoor_temp', 'product_id', 'weather_compensation_curve_id',
+  'weather_comp_a', 'weather_comp_b', 'weather_comp_c', 'load_comp_a', 'load_comp_b', 'load_comp_c', 'dispatch_mode',
+]);
+/** An existing building's PV: HEM:EPC defaults the inverter unless stated. */
+const COLLAPSED_PV_FIELDS: ReadonlySet<string> = new Set(['inverter_peak_power_ac', 'inverter_peak_power_dc', 'inverter_is_inside', 'inverter_type']);
+const stated = (value: unknown) => value !== undefined && value !== null && value !== '';
+const NEW_BUILD_TANK_NO_DEFAULT: ReadonlySet<string> = new Set(['location']);
+/** The solar absorption coefficient each outside colour gives (DESNZ-defined). */
+const COLOUR_ABSORPTION: Readonly<Record<string, number>> = { Light: 0.3, Intermediate: 0.6, Dark: 0.9 };
 const PARTY_WALL_HALF_CONSTRUCTION_NOTE =
   'Enter dwelling-side half-construction values: U from the half build-up, half areal heat capacity, and the matching mass class. If using construction R, enter half R. Set cavity treatment separately.';
 const INTERNAL_HALF_CONSTRUCTION_NOTE =
@@ -963,6 +983,14 @@ interface AdvancedFieldsEditorProps {
   /** The areal heat capacity bands this element may state; none offers a number only. Absent: the schema's. */
   /** Under construction bands: the bands the element takes; null when the converter takes no heat capacity from it. */
   arealHeatCapacityBands?: readonly string[] | null;
+  /** The element's "Thermal values from" method: only its inputs show (`lib/thermalMethod.ts`). */
+  thermalMethod?: ThermalMethod;
+  /** Host fields for the element, shown after its fields and before "More". */
+  hostFields?: React.ReactNode;
+  /** Show only these fields (a window's thermal values, placed with its other thermal inputs). */
+  onlyFields?: readonly string[];
+  /** Leave these fields out (shown by another editor instance). */
+  omitFields?: readonly string[];
 }
 
 const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
@@ -981,6 +1009,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   inspectorContributions = emptyGeometryInspectorContributions,
   workspaceResourcePort = unavailableGeometryWorkspaceResourcePort,
   arealHeatCapacityBands,
+  thermalMethod,
+  hostFields,
+  onlyFields,
+  omitFields,
 }) => {
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = useFHSSchema ? 'fhs' : 'core';
@@ -1119,6 +1151,15 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       null,
     );
   const radiatorThermalMode = radiatorThermalModeOverride ?? inferredRadiatorThermalMode;
+  // A hot water cylinder's alternatives (size, heat loss): the method the user picks for each group.
+  const [tankMethodChosen, setTankMethodChosen] = useKeyedState<Record<string, string>>(currentData?.id ?? '', {});
+  // One field for the U-value or the construction resistance: the schema takes one or the other.
+  const [resistanceChosen, setResistanceChosen] = useKeyedState<boolean>(currentData?.id ?? '', false);
+  const takesResistance = thermalMethod === 'u_value' && elementType !== 'BuildingElementTransparent' && elementType !== 'BuildingElementGround'
+    && !!getActiveElementSubschema(elementType, subtype)?.properties?.thermal_resistance_construction;
+  // The converter takes a stated U-value over R, so R shows only while no U-value is stated.
+  const resistanceShown = takesResistance && !stated(advancedFieldsRecord.u_value)
+    && (resistanceChosen || stated(advancedFieldsRecord.thermal_resistance_construction));
   const constructionDetails = inspectorContributions.constructionDetails;
   const externalDetailProfilesEnabled = constructionDetails?.isEnabled() ?? false;
   const currentElementData = useMemo(() => currentDataAsElement(currentData), [currentData]);
@@ -1477,6 +1518,28 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     // four NUMBER rows that gained their schema minima. Its `shield_fact_location`
     // neighbour above is NOT redundant and stays; see the correction there for why.
 
+    // "Thermal values from": the U-value (or construction resistance) shows only under its own
+    // method, first, as one field (a ground floor's calculation shows its calculated U-value);
+    // the age band method takes a window's g-value from the glazing type, so it moves to More.
+    if (thermalMethod) {
+      const keepU = thermalMethod === 'u_value' || (thermalMethod === 'calculation' && elementType === 'BuildingElementGround');
+      if (!keepU || resistanceShown) delete advancedProperties.u_value;
+      if (!keepU || !resistanceShown) delete advancedProperties.thermal_resistance_construction;
+      const first = new Set(['u_value', 'thermal_resistance_construction', ...(thermalMethod === 'band' ? [] : ['g_value'])]);
+      const reordered = Object.fromEntries([
+        ...[...first].flatMap((key) => (advancedProperties[key] ? [[key, advancedProperties[key]] as const] : [])),
+        ...Object.entries(advancedProperties).filter(([key]) => !first.has(key)),
+      ]);
+      for (const key of Object.keys(advancedProperties)) delete advancedProperties[key];
+      Object.assign(advancedProperties, reordered);
+    }
+
+    const only = onlyFields && new Set(onlyFields);
+    const omit = new Set(omitFields);
+    for (const key of Object.keys(advancedProperties)) {
+      if ((only && !only.has(key)) || omit.has(key)) delete advancedProperties[key];
+    }
+
     let result: SchemaNode = {
       ...fullSchema,
       properties: advancedProperties
@@ -1580,6 +1643,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   }, [
     elementType,
     arealHeatCapacityBands,
+    thermalMethod,
+    resistanceShown,
+    onlyFields,
+    omitFields,
     subtype,
     useFHSSchema,
     getActiveElementSubschema,
@@ -1608,10 +1675,33 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     productPickerOwnsId,
   ]);
 
-  const systemAdvancedUischema = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
+  // The storage tank's alternative inputs, one method per group (lib/inputMethods.ts).
+  const tank = elementType === 'System' && subtype === 'HotWaterSource' ? storageTank(advancedFieldsData) : undefined;
+  const tankScope = tank ? `#/properties/HotWaterSource/properties/${encodePointerToken(tank[0])}` : '';
+  const tankSchemaProperties = tank && subschema
+    ? readRecord(readRecord(readRecord(readRecord(readRecord(subschema.properties).HotWaterSource).properties)[tank[0]]).properties)
+    : {};
+  const tankGroups = tank ? TANK_METHOD_GROUPS.flatMap((group) => {
+    const offered = offeredMethods(group, tankSchemaProperties);
+    if (offered.length < 2) return [];
+    // Unstated, an existing building's tank takes the volume category "Inaccessible" and install year "unknown".
+    const current = offered.find((method) => method.value === tankMethodChosen[group.key])
+      ?? statedMethod(offered, tank[1], existingBuilding ? (group.key === 'size' ? 'category' : 'year') : undefined);
+    return [{ group, offered, current }];
+  }) : [];
+  const tankMethodFields = tankGroups.flatMap(({ offered }) => offered.flatMap((method) => method.fields)).join(' ');
+  const systemLayout = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
     if (elementType !== 'System' || !subtype || !subschema) return undefined;
     return buildSystemAdvancedUischema(subtype, subschema as Record<string, unknown>);
   }, [elementType, subtype, subschema]);
+  const systemAdvancedUischema = systemLayout && tankMethodFields
+    ? withoutLayoutLeaves(systemLayout, tankScope, new Set(tankMethodFields.split(' '))) ?? undefined
+    : systemLayout;
+  const patchTank = (next: Record<string, unknown>) => {
+    if (!tank) return;
+    const base = readExtraJsonRecord(currentData.extra_json);
+    onChange({ ...currentData, extra_json: { ...base, HotWaterSource: { ...readRecord(base.HotWaterSource), [tank[0]]: next } } });
+  };
 
   const isSystemPcdbMode = useMemo(() => {
     if (elementType !== 'System') return false;
@@ -1826,6 +1916,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     )),
   ), [productSlots, selectedName]);
 
+  // A stated outside colour gives the solar absorption coefficient unless one is entered.
+  const offersColour = elementType !== 'System' && (hemDatabaseProducts || !!getActiveElementSubschema(elementType, subtype)?.properties?.colour);
+  const statedColour = advancedFieldsRecord.colour;
+  const colourAbsorption = offersColour && typeof statedColour === 'string' ? COLOUR_ABSORPTION[statedColour] : undefined;
   const advancedFieldsConfig = useMemo<Record<string, unknown>>(
     () =>
       ({
@@ -1873,14 +1967,43 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         $defs: subschema?.$defs || getActiveRootSchema()?.$defs,
         systemSampleMode: systemSampleBaselineAvailable,
         systemSampleBaselineExtraJson: systemSampleBaselineExtraJson ?? undefined,
-        // An existing building takes these from the DESNZ-defined construction tables: keep them out of the way.
-        collapsedEngineFields: existingBuilding && hemDatabaseProducts && elementType !== 'System' ? COLLAPSED_ENGINE_FIELDS : undefined,
+        // Under "More": an existing building's construction-table values, a colour's coefficient,
+        // and a heating circuit's less common inputs.
+        collapsedEngineFields: elementType === 'System'
+          ? (subtype === 'SpaceHeatSystem' ? COLLAPSED_HEATING_FIELDS : undefined)
+          : existingBuilding && hemDatabaseProducts
+            ? (elementType === 'OnSiteGeneration' ? COLLAPSED_PV_FIELDS
+              : thermalMethod === 'band' && elementType === 'BuildingElementTransparent' ? COLLAPSED_BAND_WINDOW_FIELDS : COLLAPSED_ENGINE_FIELDS)
+            : offersColour ? COLLAPSED_COLOUR_FIELDS : undefined,
         derivedDefaults: elementType === 'System'
           ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding)
           // The converter gives a blank ground U-value the floor calculation's (`ground_u_value.rs`).
           : elementType === 'BuildingElementGround' && !constructionBands && groundUComputedWPerM2K != null
             ? { u_value: Number(groundUComputedWPerM2K.toFixed(4)) }
-            : undefined,
+            : colourAbsorption !== undefined ? { solar_absorption_coeff: colourAbsorption } : undefined,
+        derivedSourceNotes: colourAbsorption !== undefined ? { solar_absorption_coeff: 'from the colour' } : undefined,
+        // A new build's tank states its location: the converter has no default for it.
+        noDefaultFields: elementType === 'System' && subtype === 'HotWaterSource' && hemDatabaseProducts && !existingBuilding ? NEW_BUILD_TANK_NO_DEFAULT : undefined,
+        labelAdornment: takesResistance ? {
+          field: resistanceShown ? 'thermal_resistance_construction' : 'u_value',
+          node: (
+            <CompactSegmentedControl
+              ariaLabel="Enter as"
+              value={resistanceShown ? 'r' : 'u'}
+              options={[{ value: 'u', label: 'U', title: 'U-value (W/m²·K)' }, { value: 'r', label: 'R', title: 'Construction resistance (m²·K/W)' }]}
+              onChange={(next) => {
+                if ((next === 'r') === resistanceShown) return;
+                // One field: the value stated in the other unit goes.
+                const rest = { ...readExtraJsonRecord(currentData.extra_json) };
+                const had = rest.u_value !== undefined || rest.thermal_resistance_construction !== undefined;
+                delete rest.u_value;
+                delete rest.thermal_resistance_construction;
+                setResistanceChosen(next === 'r');
+                if (had) onChange({ ...currentData, extra_json: rest });
+              }}
+            />
+          ),
+        } : undefined,
         defaultProducts: elementType === 'System' ? defaultProducts : undefined,
       }),
     [
@@ -1914,6 +2037,14 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       existingBuilding,
       constructionBands,
       getActiveRootSchema,
+      thermalMethod,
+      offersColour,
+      colourAbsorption,
+      takesResistance,
+      resistanceShown,
+      setResistanceChosen,
+      currentData,
+      onChange,
     ],
   );
 
@@ -1936,7 +2067,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const shouldRenderEdgeInsulationManually =
     elementType === 'BuildingElementGround' && subtype === 'Slab_edge_insulation';
 
-  const shouldRenderWindowTreatmentManually = elementType === 'BuildingElementTransparent' && !(hiddenFields[elementType] ?? []).includes('treatment');
+  const shouldRenderWindowTreatmentManually = elementType === 'BuildingElementTransparent' && !onlyFields && !(hiddenFields[elementType] ?? []).includes('treatment');
 
   const shouldRenderFancoilTestDataManually =
     elementType === 'WetEmitter' &&
@@ -2093,6 +2224,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       }
     }
     let nextExtra: Record<string, unknown> = dataRecord;
+    // Colour or solar absorption coefficient: stating one removes the other, which would otherwise win.
+    if (offersColour) {
+      const before = readExtraJsonRecord(existingExtra);
+      const statedNow = (key: string) => nextExtra[key] !== undefined && nextExtra[key] !== null && nextExtra[key] !== '' && nextExtra[key] !== before[key];
+      if (statedNow('solar_absorption_coeff')) delete nextExtra.colour;
+      else if (statedNow('colour')) delete nextExtra.solar_absorption_coeff;
+    }
     if (
       useFHSSchema &&
       elementType === 'MechanicalVentilation' &&
@@ -2346,6 +2484,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const propertyCount = subschema.properties ? Object.keys(subschema.properties).length : 0;
   const hasAdvancedFields =
     propertyCount > 0 ||
+    !!hostFields ||
     shouldRenderMechanicalVentilationFixedEnergySupply ||
     shouldRenderJunctionTypeManually ||
     shouldRenderEdgeInsulationManually ||
@@ -2471,6 +2610,20 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         />
       )}
 
+      {/* An existing building states its close shading with the window's own selects. */}
+      {elementType === 'BuildingElementTransparent' && !existingBuilding && !onlyFields &&
+        currentElementData?.type === 'BuildingElementTransparent' && (
+          <AttachedWindowShadingStrip
+            windowElement={currentElementData as BuildingElementTransparent}
+            elementsById={elementsById}
+            elementIds={elementIds}
+            addElement={addElement}
+            setSelection={setSelection}
+            setSelectedElementIds={setSelectedElementIds}
+            useFHSSchema={useFHSSchema}
+          />
+        )}
+
       {shouldRenderWindowTreatmentManually && (
         <WindowTreatmentFields
           treatment={advancedFieldsData.treatment}
@@ -2486,20 +2639,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           note={inspectorContributions.windowTreatmentNote?.note(advancedFieldsData.treatment, advancedFieldsData[TREATMENT_UI_KEY])}
         />
       )}
-
-      {/* An existing building states its close shading with the window's own selects. */}
-      {elementType === 'BuildingElementTransparent' && !existingBuilding &&
-        currentElementData?.type === 'BuildingElementTransparent' && (
-          <AttachedWindowShadingStrip
-            windowElement={currentElementData as BuildingElementTransparent}
-            elementsById={elementsById}
-            elementIds={elementIds}
-            addElement={addElement}
-            setSelection={setSelection}
-            setSelectedElementIds={setSelectedElementIds}
-            useFHSSchema={useFHSSchema}
-          />
-        )}
 
       {shouldRenderFancoilTestDataManually && (
         <FancoilTestDataFields
@@ -2723,12 +2862,35 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           those two slices left behind for web's SnippetEditor/SimplifiedFabricEditor is
           deleted from jsonformsRenderers.tsx, and this package carries no `@jsonforms/*`
           dependency at all any more. */}
+      {tank && tankGroups.map(({ group, offered, current }) => (
+        <div key={group.key} data-input-method={group.key} style={{ display: 'grid', gap: 6, marginBottom: flat ? 10 : 'var(--spacing-md)' }}>
+          <div className="element-label">{group.label}</div>
+          <CompactSegmentedControl
+            ariaLabel={group.label}
+            value={current.value}
+            options={offered.map(({ value, label }) => ({ value, label }))}
+            onChange={(to) => {
+              setTankMethodChosen((chosen) => ({ ...chosen, [group.key]: to }));
+              const next = switchMethod(offered, to, tank[1]);
+              if (Object.keys(next).length !== Object.keys(tank[1]).length) patchTank(next);
+            }}
+          />
+          <DirectAdvancedFields
+            schema={subschema as Record<string, unknown>}
+            data={advancedFieldsData as Record<string, unknown>}
+            config={advancedFieldsConfig}
+            layout={{ type: 'VerticalLayout', elements: current.fields.map((field) => ({ type: 'Control', scope: `${tankScope}/properties/${field}` })) }}
+            onDataChange={(data) => handleAdvancedFieldsChange({ data, errors: [] })}
+          />
+        </div>
+      ))}
       <DirectAdvancedFields
         schema={subschema as Record<string, unknown>}
         data={advancedFieldsData as Record<string, unknown>}
         config={advancedFieldsConfig}
         layout={systemAdvancedUischema}
         onDataChange={(data) => handleAdvancedFieldsChange({ data, errors: [] })}
+        beforeMore={hostFields}
       />
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (
         <UnheatedSpaceRuCalculatorModal

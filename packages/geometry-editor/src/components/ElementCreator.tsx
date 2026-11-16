@@ -44,6 +44,7 @@ import { useWallSharedFormState } from './elementForms/wallShared';
 import { buildingElementGroundFormModule } from './elementForms/buildingElementGround';
 import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
 import { buildingElementTransparentFormModule } from './elementForms/buildingElementTransparent';
+import { WindowWallLink } from './WindowWallLink';
 import { buildingElementOpaqueFormModule } from './elementForms/buildingElementOpaque';
 import { useWallFamilyFormState } from './elementForms/wallFamily';
 import { useDormerBundleEditor } from './DormerBundleEditor';
@@ -125,9 +126,11 @@ import {
   isElementFloorControlledByParent,
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { inferThermalMethod, thermalMethodElementType, thermalMethods, thermalMethodSwitchPatch, type ThermalMethod } from '../lib/thermalMethod';
+import { ThermalMethodControl } from './ThermalMethodControl';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
 import { isExistingBuilding } from '../lib/windowOpenings';
-import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../lib/hemieFabric';
+import { FABRIC_PRESET_TYPES, hemieConstructionType, hemieHeatCapacityBands, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
 import {
   orientation360FromSegmentOutwardModelXY,
   orientation360SlopedFromFirstEdge,
@@ -525,6 +528,10 @@ const intentPrefetchHandlers = (prefetch: () => void) => ({
   onFocus: prefetch,
   onMouseDown: prefetch,
 });
+
+/** A window's U- and g-value, shown with its other thermal values. */
+const WINDOW_THERMAL_FIELDS = ['u_value', 'g_value'] as const;
+const WINDOW_BAND_THERMAL_FIELDS = ['u_value'] as const;
 
 const AdvancedFieldsEditor = React.lazy(async () => {
   const module = await loadAdvancedFieldsEditor();
@@ -3247,6 +3254,41 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   const selectedDormerMetadata = getDormerBundleMetadata(selectedElement);
   const selectedIsDormerAnchor = isDormerAnchorElement(selectedElement);
+
+  // "Thermal values from" (lib/thermalMethod.ts): the stored values say which method an element
+  // uses; a switch is the user's choice until the next element is selected.
+  const thermalElement = selection?.type === 'element' && !selection.isPlaceholder && !selectedIsDormerAnchor
+    && selectedElement && thermalMethodElementType(selectedElement.type) ? selectedElement : null;
+  const thermalGroundU = useMemo(() => (thermalElement?.type === 'BuildingElementGround'
+    ? computeGroundUValueFromElementModel(thermalElement as unknown as Record<string, unknown>, readExtraJsonRecord(thermalElement.extra_json), thermalElement.floor_type)
+    : null), [thermalElement]);
+  // An existing building's floor offers its calculation only when the drawing gives one (or an assembly already does).
+  const thermalMethodOptions = thermalElement
+    ? thermalMethods(thermalElement.type, constructionBands,
+      (thermalGroundU != null && thermalGroundU > 0) || !!parseVulcanAssemblyV1FromExtraJson(thermalElement.extra_json))
+    : [];
+  const [thermalMethodChosen, setThermalMethodChosen] = useKeyedState<ThermalMethod | null>(thermalElement?.id ?? '', null);
+  const thermalMethod: ThermalMethod | undefined = !thermalElement ? undefined
+    : thermalMethodChosen && thermalMethodOptions.some((option) => option.value === thermalMethodChosen)
+      ? thermalMethodChosen
+      : inferThermalMethod(thermalElement, constructionBands, thermalGroundU);
+  // A roof plane that shares its construction with others: their stated values must match.
+  const sharedRoof = useMemo(() => (constructionBands && thermalElement ? sharedRoofPlanes(thermalElement, allElements, buildType) : []),
+    [constructionBands, thermalElement, allElements, buildType]);
+  const switchThermalMethod = (to: ThermalMethod) => {
+    if (!thermalElement || !thermalMethod || to === thermalMethod) return;
+    setThermalMethodChosen(to);
+    const patch = thermalMethodSwitchPatch(thermalElement, thermalMethod, to, {
+      constructionBands,
+      constructionType: constructionBands ? hemieConstructionType(thermalElement, allElements, buildType) : undefined,
+      groundComputedU: thermalGroundU,
+    });
+    const { extra_json: nextExtra, ...top } = patch;
+    // A switch with nothing to clear writes nothing.
+    if (Object.keys(top).length || JSON.stringify(nextExtra) !== JSON.stringify(readExtraJsonRecord(thermalElement.extra_json))) {
+      commitExistingElementDraft(patch);
+    }
+  };
   useEffect(() => {
     selectedIsDormerAnchorRef.current = selectedIsDormerAnchor;
   }, [selectedIsDormerAnchor]);
@@ -4051,6 +4093,81 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // wired onto ElementFormRenderCtx.renderDormerBundleEditor below, unchanged
   // from BuildingElementOpaque's module's perspective.
 
+  // Host fields for the selected element (EPC: age band and construction); under a thermal
+  // method they show only what that method uses.
+  const renderHostElementFields = (method?: ThermalMethod) => (
+    selection?.type === 'element' &&
+    !selection.isPlaceholder &&
+    selectedElement &&
+    ElementFieldsRenderer &&
+    inspectorContributions.elementFields?.elementTypes.includes(selectedElement.type) ? (
+      <div className="element-editor-stack element-editor-section-spacer">
+        <ElementFieldsRenderer
+          element={selectedElement as unknown as Readonly<Record<string, unknown>>}
+          thermalMethod={method}
+          onPatchExtraJson={(update) => {
+            const currentElement = getElementById(selection.id);
+            const currentExtra = readExtraJsonRecord(currentElement?.extra_json);
+            commitExistingElementDraft({ extra_json: update({ ...currentExtra }) });
+          }}
+        />
+      </div>
+    ) : null
+  );
+  const sharedRoofNote = thermalElement && sharedRoof.length ? (
+    <div className="field-source-note element-editor-section-spacer" data-shared-roof>
+      One roof with {sharedRoof.map((plane) => plane.name).join(', ')}: the values must match.{' '}
+      <button type="button" className="field-source-note__link" onClick={() => setSelectedElementIds([thermalElement.id, ...sharedRoof.map((plane) => plane.id)])}>
+        {sharedRoof.length === 1 ? 'Select both' : `Select all ${sharedRoof.length + 1}`}
+      </button>
+    </div>
+  ) : null;
+  const hostElementFieldsForMethod = thermalMethod ? renderHostElementFields(thermalMethod) : null;
+  const hostElementFieldsPlain = thermalMethod ? null : renderHostElementFields();
+  const thermalMethodControl = thermalMethod && thermalMethodOptions.length > 1 ? (
+    <ThermalMethodControl methods={thermalMethodOptions} value={thermalMethod} onChange={switchThermalMethod} />
+  ) : null;
+  // A window's thermal values sit after its size and position: the method, then its U- and
+  // g-value (entered) or its glazing description (age band).
+  const windowThermalValues = thermalElement?.type === 'BuildingElementTransparent' && thermalMethod ? (
+    <div className="element-editor-stack">
+      {thermalMethodControl}
+      {thermalMethod === 'u_value' && (
+        <React.Suspense fallback={<LazyInlineFallback label="Opening thermal values..." />}>
+          <AdvancedFieldsEditor
+            elementType={elementType}
+            subtype={getElementSubtype()}
+            currentData={getCurrentElementData()}
+            onChange={handleAdvancedFieldsChange}
+            collapsible={false}
+            flat
+            useFHSSchema={useFHSSchema}
+            inspectorContributions={inspectorContributions}
+            workspaceResourcePort={workspaceResourcePort}
+            thermalMethod={thermalMethod}
+            onlyFields={WINDOW_THERMAL_FIELDS}
+          />
+        </React.Suspense>
+      )}
+      {hostElementFieldsForMethod}
+    </div>
+  ) : null;
+
+  const windowWallLink = (
+    selection?.type === 'element' && !selection.isPlaceholder && selectedElement?.type === 'BuildingElementTransparent' ? (
+      <WindowWallLink
+        parentName={wallShared.parentElement}
+        zoneId={elementZoneId}
+        selfId={selection.id}
+        onChange={(value) => applyHostedParentElement(value, '')}
+        onSelectWall={() => {
+          const wall = getParentByName(elementsById, elementIds, wallShared.parentElement, elementZoneId);
+          if (wall) setSelection({ type: 'element', id: wall.id });
+        }}
+      />
+    ) : null
+  );
+
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {
       elementType,
@@ -4090,6 +4207,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           }}
         />
       ) : null,
+      thermalValues: windowThermalValues,
       hemDatabaseProducts,
       existingBuilding,
       systemHasProductSlot: !!selectedElement?.name && !!productSlots?.some((slot) => slot.row === selectedElement.name),
@@ -5068,22 +5186,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {renderElementElevationField()}
                 </div>
 
-                {selection.type === 'element' &&
-                  !selection.isPlaceholder &&
-                  selectedElement &&
-                  ElementFieldsRenderer &&
-                  inspectorContributions.elementFields?.elementTypes.includes(selectedElement.type) ? (
-                    <div className="element-editor-stack element-editor-section-spacer">
-                      <ElementFieldsRenderer
-                        element={selectedElement as unknown as Readonly<Record<string, unknown>>}
-                        onPatchExtraJson={(update) => {
-                          const currentElement = getElementById(selection.id);
-                          const currentExtra = readExtraJsonRecord(currentElement?.extra_json);
-                          commitExistingElementDraft({ extra_json: update({ ...currentExtra }) });
-                        }}
-                      />
-                    </div>
-                  ) : null}
+                {hostElementFieldsPlain}
 
                 {/* Advanced Fields Section - Outside grid for full width */}
                 {selection.type === 'element' || selection.type === 'global' ? (
@@ -5134,13 +5237,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                         </label>
                       </div>
                     )}
+                    {sharedRoofNote}
+                    {elementType !== 'BuildingElementTransparent' && thermalMethodControl}
                     {selection.type === 'element' &&
                       !selection.isPlaceholder &&
                       !selectedIsDormerAnchor &&
-                      (elementType === 'BuildingElementOpaque' ||
-                        elementType === 'BuildingElementGround' ||
-                        elementType === 'BuildingElementPartyWall' ||
-                        elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple') && (
+                      (thermalMethod ? thermalMethod === 'calculation' : elementType === 'BuildingElementPartyWall') && (
                       <div className="element-editor-section-spacer">
                         {renderAssemblyActionControl(appliedAssemblyEnvelope, () => {
                           setDormerAssemblySection(null);
@@ -5195,9 +5297,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           inspectorContributions={inspectorContributions}
                           workspaceResourcePort={workspaceResourcePort}
                           className="advanced-fields-section"
+                          thermalMethod={thermalMethod}
+                          hostFields={elementType !== 'BuildingElementTransparent' ? hostElementFieldsForMethod : undefined}
+                          omitFields={thermalMethod && elementType === 'BuildingElementTransparent' ? (thermalMethod === 'band' ? WINDOW_BAND_THERMAL_FIELDS : WINDOW_THERMAL_FIELDS) : undefined}
                         />
                       </React.Suspense>
                     )}
+                    {windowWallLink}
                   </div>
                 ) : null}
               </div>

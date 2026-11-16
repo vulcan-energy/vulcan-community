@@ -1066,7 +1066,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   'core/WetEmitter [- Exposed_floor Heated_basement Slab_edge_insulation Slab_no_edge_insulation Suspended_floor Unheated_basement ceiling door floor roof wall]': [
     'c | c | textbox | 0 | - | - | tip',
     'c_per_m | c per m | textbox | 0 | - | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal mass | textbox | 0 | - | - | tip',
     'thermal_mass_per_m | Thermal Mass Per M | textbox | 0 | - | - | tip',
     'length | Length | textbox | 0 | - | - | tip',
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
@@ -1079,7 +1079,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
   ],
   'core/WetEmitter [radiator]': [
     'c | c | textbox | 0 | - | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal mass | textbox | 0 | - | - | tip',
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
     'n | n | textbox | 0 | - | - | tip',
   ],
@@ -1208,21 +1208,12 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'frac_convective | Frac Convective | textbox | 0 | 1 | - | tip',
   ],
   'core/System:SpaceHeatSystem': [
-    'bypass_fraction_recirculated | Return water recirculated | textbox | 0 | 1 | - | tip',
     'Control | Control | textbox | - | - | - | tip',
-    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
-    'design_flow_temp | Design Flow Temp | textbox | 0 | - | - | tip',
-    'ecodesign_control_class | Ecodesign Controller · Ecodesign Control Class | select | - | - | - | tip',
-    'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | -273.15 | - | - | tip',
-    'min_flow_temp | Ecodesign Controller · Min Flow Temp | textbox | 0 | - | - | tip',
-    'min_outdoor_temp | Ecodesign Controller · Min Outdoor Temp | textbox | -273.15 | - | - | tip',
-    'temp_flow_limit_upper | Upper flow temperature limit | textbox | 0 | - | - | tip',
-    'max_flow_rate | Max Flow Rate | textbox | 0 | - | - | tip',
-    'min_flow_rate | Min Flow Rate | textbox | 0 | - | - | tip',
+    'design_flow_temp | Design flow temperature | textbox | 0 | - | - | tip',
+    'ecodesign_control_class | Ecodesign control class | select | - | - | - | tip',
     'pipework | Pipework | textbox | - | - | [{"external_diameter_mm":1,"insulation_thermal_conductivity":1,"insulation_thickness_mm":0,"internal_diameter_mm":1,"length":1,"location":"internal","pipe_contents":"water","surface_reflectivity":false}] | no-tip',
     'temp_diff_emit_dsgn | Design temperature drop | textbox | 0 | - | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
-    'variable_flow | Variable Flow | checkbox | - | - | - | tip',
+    'variable_flow | Variable flow | checkbox | - | - | - | tip',
   ],
   'fhs/BuildingElementOpaque [every subtype]': [
     'thermal_resistance_construction | Construction thermal resistance | textbox | 0.01 | 50 | - | tip',
@@ -1323,7 +1314,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'frac_convective | Frac Convective | textbox | - | - | - | tip',
     'n | N | textbox | 0 | 2 | - | tip',
     'c | C | textbox | 0 | 2 | - | tip',
-    'thermal_mass | Thermal Mass | textbox | 0 | - | - | tip',
+    'thermal_mass | Thermal mass | textbox | 0 | - | - | tip',
   ],
   'fhs/WetEmitter [ufh]': [
     'frac_convective | Frac Convective | textbox | - | - | - | tip',
@@ -1438,16 +1429,11 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'temp_setback | Temp Setback | textbox | - | - | - | tip',
   ],
   'fhs/System:SpaceHeatSystem': [
-    'bypass_fraction_recirculated | Return water recirculated | textbox | 0 | 1 | - | tip',
-    'design_flow_rate | Design Flow Rate | textbox | 0 | - | - | tip',
-    'design_flow_temp | Design Flow Temp | textbox | 20 | 120 | - | tip',
-    'ecodesign_control_class | Ecodesign Controller · Ecodesign Control Class | select | - | - | - | tip',
-    'max_outdoor_temp | Ecodesign Controller · Max Outdoor Temp | textbox | 10 | 50 | - | tip',
-    'min_flow_temp | Ecodesign Controller · Min Flow Temp | textbox | 20 | 120 | - | tip',
-    'min_outdoor_temp | Ecodesign Controller · Min Outdoor Temp | textbox | -60 | 30 | - | tip',
-    'temp_flow_limit_upper | Upper flow temperature limit | textbox | 0 | - | - | tip',
+    'design_flow_rate | Design flow rate | textbox | 0 | - | - | tip',
+    'design_flow_temp | Design flow temperature | textbox | 20 | 120 | - | tip',
+    'ecodesign_control_class | Ecodesign control class | select | - | - | - | tip',
     'temp_diff_emit_dsgn | Design temperature drop | textbox | 0 | 70 | - | tip',
-    'variable_flow | Variable Flow | checkbox | - | - | - | no-tip',
+    'variable_flow | Variable flow | checkbox | - | - | - | no-tip',
   ],
 };
 
@@ -2086,7 +2072,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         row('frac_convective', 'Frac Convective', TEXT(null)),
         row('n', 'N', TEXT('0', '0')),
         row('c', 'C', TEXT('0', '0')),
-        row('thermal_mass', 'Thermal Mass', TEXT('0', '0')),
+        row('thermal_mass', 'Thermal mass', TEXT('0', '0')),
       ],
     );
   });
@@ -2203,17 +2189,17 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       },
     };
     const singlePlantRows = [
-      row('bypass_fraction_recirculated', 'Return water recirculated', TEXT('0')),
-      row('design_flow_temp', 'Design Flow Temp', TEXT('20')),
-      row('ecodesign_control_class', 'Ecodesign Controller · Ecodesign Control Class', SELECT),
-      row('max_outdoor_temp', 'Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
-      row('min_flow_temp', 'Ecodesign Controller · Min Flow Temp', TEXT('20')),
-      row('min_outdoor_temp', 'Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
-      row('temp_flow_limit_upper', 'Upper flow temperature limit', TEXT('0', '0')),
-      row('max_flow_rate', 'Max Flow Rate', TEXT('0', '0')),
-      row('min_flow_rate', 'Min Flow Rate', TEXT('0', '0')),
+      row('design_flow_temp', 'Design flow temperature', TEXT('20')),
+      row('ecodesign_control_class', 'Ecodesign control class', SELECT),
+      row('max_flow_rate', 'Maximum flow rate', TEXT('0', '0')),
+      row('min_flow_rate', 'Minimum flow rate', TEXT('0', '0')),
       row('temp_diff_emit_dsgn', 'Design temperature drop', TEXT('0', '0')),
-      row('variable_flow', 'Variable Flow', CHECKBOX),
+      row('variable_flow', 'Variable flow', CHECKBOX),
+      row('bypass_fraction_recirculated', 'Return water recirculated', TEXT('0')),
+      row('max_outdoor_temp', 'Outdoor temperature for the lowest flow', TEXT('10')),
+      row('min_flow_temp', 'Lowest flow temperature', TEXT('20')),
+      row('min_outdoor_temp', 'Outdoor temperature for the highest flow', TEXT('-60')),
+      row('temp_flow_limit_upper', 'Upper flow temperature limit', TEXT('0', '0')),
     ];
 
     const onChange = vi.fn();
@@ -2314,19 +2300,19 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
       },
       [
         row('frac_convective', 'Living warm air · Frac Convective', TEXT('0.1')),
-        row('temp_flow_limit_upper', 'Living warm air · Upper flow temperature limit', TEXT('0', '0')),
         row('temp_diff_emit_dsgn', 'Living warm air · Design temperature drop', TEXT(null)),
-        row('bypass_fraction_recirculated', 'Zone 1 circuit · Return water recirculated', TEXT('0')),
-        row('design_flow_temp', 'Zone 1 circuit · Design Flow Temp', TEXT('20')),
-        row('ecodesign_control_class', 'Zone 1 circuit · Ecodesign Controller · Ecodesign Control Class', SELECT),
-        row('max_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
-        row('min_flow_temp', 'Zone 1 circuit · Ecodesign Controller · Min Flow Temp', TEXT('20')),
-        row('min_outdoor_temp', 'Zone 1 circuit · Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
-        row('temp_flow_limit_upper', 'Zone 1 circuit · Upper flow temperature limit', TEXT('0', '0')),
-        row('max_flow_rate', 'Zone 1 circuit · Max Flow Rate', TEXT('0', '0')),
-        row('min_flow_rate', 'Zone 1 circuit · Min Flow Rate', TEXT('0', '0')),
+        row('design_flow_temp', 'Zone 1 circuit · Design flow temperature', TEXT('20')),
+        row('ecodesign_control_class', 'Zone 1 circuit · Ecodesign control class', SELECT),
+        row('max_flow_rate', 'Zone 1 circuit · Maximum flow rate', TEXT('0', '0')),
+        row('min_flow_rate', 'Zone 1 circuit · Minimum flow rate', TEXT('0', '0')),
         row('temp_diff_emit_dsgn', 'Zone 1 circuit · Design temperature drop', TEXT('0', '0')),
-        row('variable_flow', 'Zone 1 circuit · Variable Flow', CHECKBOX),
+        row('variable_flow', 'Zone 1 circuit · Variable flow', CHECKBOX),
+        row('temp_flow_limit_upper', 'Living warm air · Upper flow temperature limit', TEXT('0', '0')),
+        row('bypass_fraction_recirculated', 'Zone 1 circuit · Return water recirculated', TEXT('0')),
+        row('max_outdoor_temp', 'Zone 1 circuit · Outdoor temperature for the lowest flow', TEXT('10')),
+        row('min_flow_temp', 'Zone 1 circuit · Lowest flow temperature', TEXT('20')),
+        row('min_outdoor_temp', 'Zone 1 circuit · Outdoor temperature for the highest flow', TEXT('-60')),
+        row('temp_flow_limit_upper', 'Zone 1 circuit · Upper flow temperature limit', TEXT('0', '0')),
       ],
     );
   });
@@ -2376,20 +2362,20 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         onChange,
       },
       [
-        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · Return water recirculated', TEXT('0')),
-        row('design_flow_temp', 'Kitchen/Diner rads · Design Flow Temp', TEXT('20')),
-        row('ecodesign_control_class', 'Kitchen/Diner rads · Ecodesign Controller · Ecodesign Control Class', SELECT),
-        row('max_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Max Outdoor Temp', TEXT('10')),
-        row('min_flow_temp', 'Kitchen/Diner rads · Ecodesign Controller · Min Flow Temp', TEXT('20')),
-        row('min_outdoor_temp', 'Kitchen/Diner rads · Ecodesign Controller · Min Outdoor Temp', TEXT('-60')),
-        row('temp_flow_limit_upper', 'Kitchen/Diner rads · Upper flow temperature limit', TEXT('0', '0')),
-        row('max_flow_rate', 'Kitchen/Diner rads · Max Flow Rate', TEXT('0', '0')),
-        row('min_flow_rate', 'Kitchen/Diner rads · Min Flow Rate', TEXT('0', '0')),
+        row('design_flow_temp', 'Kitchen/Diner rads · Design flow temperature', TEXT('20')),
+        row('ecodesign_control_class', 'Kitchen/Diner rads · Ecodesign control class', SELECT),
+        row('max_flow_rate', 'Kitchen/Diner rads · Maximum flow rate', TEXT('0', '0')),
+        row('min_flow_rate', 'Kitchen/Diner rads · Minimum flow rate', TEXT('0', '0')),
         row('temp_diff_emit_dsgn', 'Kitchen/Diner rads · Design temperature drop', TEXT('0', '0')),
-        row('variable_flow', 'Kitchen/Diner rads · Variable Flow', CHECKBOX),
+        row('variable_flow', 'Kitchen/Diner rads · Variable flow', CHECKBOX),
         row('frac_convective', 'Zone 1.5 circuit · Frac Convective', TEXT('0.1')),
-        row('temp_flow_limit_upper', 'Zone 1.5 circuit · Upper flow temperature limit', TEXT('0', '0')),
         row('temp_diff_emit_dsgn', 'Zone 1.5 circuit · Design temperature drop', TEXT(null)),
+        row('bypass_fraction_recirculated', 'Kitchen/Diner rads · Return water recirculated', TEXT('0')),
+        row('max_outdoor_temp', 'Kitchen/Diner rads · Outdoor temperature for the lowest flow', TEXT('10')),
+        row('min_flow_temp', 'Kitchen/Diner rads · Lowest flow temperature', TEXT('20')),
+        row('min_outdoor_temp', 'Kitchen/Diner rads · Outdoor temperature for the highest flow', TEXT('-60')),
+        row('temp_flow_limit_upper', 'Kitchen/Diner rads · Upper flow temperature limit', TEXT('0', '0')),
+        row('temp_flow_limit_upper', 'Zone 1.5 circuit · Upper flow temperature limit', TEXT('0', '0')),
       ],
     );
 
@@ -2407,7 +2393,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     // as '/' and the casing/spacing survives as typed, while the schema-derived tail
     // beside it is title-cased.
     expect(fieldLabelText(fieldRowByLabel(container, 'variable_flow', 'Kitchen/Diner rads'))).toBe(
-      'Kitchen/Diner rads · Variable Flow',
+      'Kitchen/Diner rads · Variable flow',
     );
     expect(fieldLabelText(fieldRowByLabel(container, 'frac_convective', 'Zone 1.5 circuit'))).toBe(
       'Zone 1.5 circuit · Frac Convective',
@@ -3407,7 +3393,7 @@ describe('EPC system pickers and defaults', () => {
     const extra = { SpaceHeatSystem: { 'Heating circuit': { type: 'WetDistribution' } }, HeatSourceWet: { feed: { type: 'DirectFeed' } } };
     const derived = [{ path: '/SpaceHeatSystem/Heating circuit', field: 'design_flow_temp', value: 55 },
       { path: '/SpaceHeatSystem/Other', field: 'temp_diff_emit_dsgn', value: 10 }];
-    expect(systemFieldDefaults(derived, extra, true)).toEqual({ design_flow_temp: 55, power_max: 15 });
-    expect(systemFieldDefaults(derived, extra, false)).toEqual({ design_flow_temp: 55 });
+    expect(systemFieldDefaults(derived, extra, true)).toEqual({ design_flow_temp: 55, power_max: 15, bypass_fraction_recirculated: 0 });
+    expect(systemFieldDefaults(derived, extra, false)).toEqual({ design_flow_temp: 55, bypass_fraction_recirculated: 0 });
   });
 });

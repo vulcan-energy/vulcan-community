@@ -2793,6 +2793,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/ThermalMethodControl.tsx",
+      "source_path": "packages/geometry-editor/src/components/ThermalMethodControl.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/Tooltip.css",
       "source_path": "packages/geometry-editor/src/components/Tooltip.css",
       "license": "AGPL-3.0-only",
@@ -2851,6 +2859,14 @@
     {
       "path": "packages/geometry-editor/src/components/WindowTreatmentFields.tsx",
       "source_path": "packages/geometry-editor/src/components/WindowTreatmentFields.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/WindowWallLink.tsx",
+      "source_path": "packages/geometry-editor/src/components/WindowWallLink.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -4586,6 +4602,14 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/thermalMethod.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/thermalMethod.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/transparentOpeningDerivedFields.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/transparentOpeningDerivedFields.test.ts",
       "license": "AGPL-3.0-only",
@@ -5250,6 +5274,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/lib/inputMethods.ts",
+      "source_path": "packages/geometry-editor/src/lib/inputMethods.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/iso6946AnnexF.ts",
       "source_path": "packages/geometry-editor/src/lib/iso6946AnnexF.ts",
       "license": "AGPL-3.0-only",
@@ -5876,6 +5908,14 @@
     {
       "path": "packages/geometry-editor/src/lib/thermalBridgeLineMode.ts",
       "source_path": "packages/geometry-editor/src/lib/thermalBridgeLineMode.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/thermalMethod.ts",
+      "source_path": "packages/geometry-editor/src/lib/thermalMethod.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
