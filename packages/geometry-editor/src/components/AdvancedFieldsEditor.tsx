@@ -2038,7 +2038,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       constructionBands,
       getActiveRootSchema,
       thermalMethod,
-      offersColour,
       colourAbsorption,
       takesResistance,
       resistanceShown,
