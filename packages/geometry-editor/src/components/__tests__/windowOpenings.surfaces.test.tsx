@@ -104,6 +104,13 @@ describe('window_part_list on physical-opening targets', () => {
     expect(screen.queryByText('Presets')).toBeNull();
   });
 
+  it('moves the remaining part\'s host keys onto the window when a table removal leaves one part', () => {
+    const onChange = vi.fn();
+    mount(windowElement({ keep: 1, window_part_list: [part(1.2), { ...part(2), _host_style: 'top_hung' }] }), physicalItems, onChange, false);
+    fireEvent.click(screen.getByRole('button', { name: /Remove .* 1$/ }));
+    expect(onChange).toHaveBeenLastCalledWith({ keep: 1, window_part_list: [{ mid_height_air_flow_path: 2 }], _host_style: 'top_hung' });
+  });
+
   it('leaves a selected window\'s openings to its main form', () => {
     mount(windowElement({ window_part_list: [part(1.2), part(2)] }), physicalItems);
     expect(screen.queryByRole('table')).toBeNull();
