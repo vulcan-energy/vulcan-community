@@ -51,6 +51,14 @@ const EAVES: f64 = 0.6;
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
 const DOOR_HEAT_CAPACITY: f64 = 50_000.0;
 const WINDOW_HEAT_CAPACITY: f64 = 20_000.0;
+/// Assumption pending DESNZ E12 (Vulcan's assumption registry lists it): a solid or basement
+/// floor of age band A to H with no stated insulation has construction resistance 0 in HEMIE (no
+/// insulation by age band, no material resistance), which the EPC wrapper and HEM reject. The
+/// converter output alone gives such a floor this insulation thickness (mm): the smallest the
+/// wrapper accepts for any insulation conductivity up to 1 W/m.K, under 0.02% of the floor's
+/// equivalent thickness. It is never an assessor value. If DESNZ gives these floors a material
+/// resistance instead, results change and this is deleted.
+const UNINSULATED_FLOOR_MM: f64 = 0.001;
 const SETTING: &str = "HEMIE_";
 /// Metadata rows older saved files carry that the converter no longer reads, with the fix.
 const RETIRED_SETTINGS: [(&str, &str); 3] = [
@@ -805,8 +813,9 @@ impl Ctx<'_> {
         Some(profile_low.unwrap_or(height))
     }
 
-    /// The model setting for a construction type, overlaid with what the elements state. A
-    /// U-value on the element is a documented U-value (derived from the model).
+    /// The model setting for a construction type, overlaid with what the elements state, then
+    /// with `extra`, values the converter sets for these elements. A U-value on the element is a
+    /// documented U-value (derived from the model).
     fn construction(
         &mut self,
         construction_type: &str,
@@ -1013,13 +1022,13 @@ impl Ctx<'_> {
                 .extend(elements.iter().map(|e| e.name.to_string()));
         }
         for (key, value) in extra {
-            c.entry(*key).or_insert_with(|| value.clone());
+            c.insert((*key).into(), value.clone());
         }
         // Whether any value came from the elements rather than the model's setting.
         let mut setting = self.settings.construction(construction_type);
         setting.insert("construction_type".into(), json!(construction_type));
         for (key, value) in extra {
-            setting.entry(*key).or_insert_with(|| value.clone());
+            setting.insert((*key).into(), value.clone());
         }
         let from_elements = c != setting;
         let stated = |key: &str| c.get(key).is_some_and(|v| !v.is_null());
@@ -2587,25 +2596,29 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
             None => extra.push(("edge_insulation", json!({"vertical": {}}))),
         }
     }
-    let key = ctx.construction(construction_type, &[g], &extra);
-    // HEMIE gives a solid or basement floor of bands A to H no insulation by default, so its
-    // construction resistance is 0, which the Core input rejects (DESNZ question E12). Stop
-    // here, naming the floor, instead of failing in the run.
     let band = g.text("age_band").map(str::to_string).or_else(|| {
         ctx.settings
             .raw(&format!("{SETTING}age_band"))
             .and_then(Value::as_str)
             .map(str::to_string)
     });
-    let insulated = ctx.constructions.by_name[&key]
-        .get("insulation_thickness")
-        .is_some_and(|v| !v.is_null());
-    if floor_type != "suspended"
-        && !insulated
-        && band.as_deref().is_some_and(|b| ("A"..="H").contains(&b))
-    {
-        ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' (age band {}) states no insulation thickness. HEM:EPC cannot yet run a solid or basement floor of age band A to H with no insulation. If the floor has insulation, state its thickness.", g.name, band.unwrap_or_default())));
+    // Decided before the construction is registered, from the element's own thickness or else
+    // the setting's, so the assumption gives this floor its own construction rather than
+    // changing one it shares with an insulated floor.
+    let stated = g.get("insulation_thickness").cloned().or_else(|| {
+        ctx.settings
+            .construction(construction_type)
+            .remove("insulation_thickness")
+    });
+    let uninsulated = match stated.as_ref().and_then(Value::as_f64) {
+        Some(thickness) => thickness == 0.0,
+        // HEMIE's default by age band: none for A to H.
+        None => band.as_deref().is_some_and(|b| ("A"..="H").contains(&b)),
+    };
+    if floor_type != "suspended" && uninsulated {
+        extra.push(("insulation_thickness", json!(UNINSULATED_FLOOR_MM)));
     }
+    let key = ctx.construction(construction_type, &[g], &extra);
     Some(ctx.with_age_band(
         &[g],
         json!({"floor_type": floor_type, "construction": key, "total_area": total_area}),
@@ -4357,22 +4370,108 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
-    fn an_uninsulated_slab_of_band_a_to_h_stops_naming_the_floor() {
+    fn an_uninsulated_slab_does_not_change_a_construction_it_would_share_in_either_order() {
+        let row = |band: &str| -> Row {
+            [
+                ("floor_type", json!("Slab_no_edge_insulation")),
+                ("age_band", json!(band)),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
+        };
+        let (d, k) = (row("D"), row("K"));
+        let el = |row: &'static Row, name: &'static str| El {
+            row,
+            name,
+            zone: "z",
+            ty: "BuildingElementGround",
+            pts: Vec::new(),
+            level: 0,
+        };
+        let (d, k): (&'static Row, &'static Row) = (Box::leak(Box::new(d)), Box::leak(Box::new(k)));
+        let model = full_input();
+        let rows = Rows::new();
+        for order in [[("D", d), ("K", k)], [("K", k), ("D", d)]] {
+            let mut ctx = Ctx {
+                settings: Settings {
+                    csv: &rows,
+                    missing: BTreeMap::new(),
+                },
+                constructions: Constructions::default(),
+                errors: Vec::new(),
+                notices: Vec::new(),
+                model: &model,
+                unshaded_windows: Vec::new(),
+            };
+            let keys: Vec<(&str, String)> = order
+                .into_iter()
+                .map(|(name, row)| {
+                    let floor = floor(&mut ctx, &el(row, name), 50.0).unwrap();
+                    (name, floor["construction"].as_str().unwrap().to_string())
+                })
+                .collect();
+            let thickness: BTreeMap<&str, Value> = keys
+                .into_iter()
+                .map(|(name, key)| {
+                    (
+                        name,
+                        ctx.constructions.by_name[&key]["insulation_thickness"].clone(),
+                    )
+                })
+                .collect();
+            // Read after both: the K floor keeps no stated thickness, so HEMIE's band default
+            // applies; the D floor alone takes the assumption.
+            assert_eq!(thickness["D"], json!(UNINSULATED_FLOOR_MM));
+            assert!(thickness["K"].is_null(), "{thickness:?}");
+            assert_eq!(ctx.constructions.by_name.len(), 2);
+            assert!(ctx
+                .constructions
+                .by_name
+                .values()
+                .any(|c| c.get("insulation_thickness").is_none()));
+        }
+    }
+
+    #[test]
+    fn an_uninsulated_slab_takes_the_smallest_resistance_only_in_the_output() {
+        let floor_thickness = |model: &Value| {
+            let floor = &model["Zone"]["building_parts"]
+                .as_object()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()["floor"];
+            model["Zone"]["constructions"][floor["construction"].as_str().unwrap()]
+                ["insulation_thickness"]
+                .clone()
+        };
+        // Band D: HEMIE's default is no insulation, so the output alone takes the assumption (E12).
         let band_d = house(gable_roof()).replace("HEMIE_age_band,I", "HEMIE_age_band,D");
-        let (_, errors, _) = run(&band_d);
-        assert!(
-            errors.iter().any(|e| e.path.ends_with("/Floor")
-                && e.message
-                    .contains("Ground floor 'Floor' (age band D) states no insulation thickness")),
-            "{errors:#?}"
-        );
-        // A stated insulation thickness gives the floor a resistance, so it runs.
-        let insulated = band_d.replace(
-            "HEMIE_age_band,D",
-            "HEMIE_age_band,D\nHEMIE_construction_not_edge_insulated_ground_attached_floor,\"{\"\"insulation_thickness\"\":50}\"",
-        );
-        let (_, errors, _) = run(&insulated);
+        let rows = crate::parser::CSVParser::new()
+            .parse_csv(&band_d)
+            .expect("csv");
+        let before = rows.clone();
+        let mut model = full_input();
+        let (mut errors, mut notices) = (Vec::new(), Vec::new());
+        map_existing_building(&mut model, &rows, &json!({}), &mut errors, &mut notices);
         assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(floor_thickness(&model), json!(UNINSULATED_FLOOR_MM));
+        // The model's rows are untouched, so the CSV saves as it was.
+        assert_eq!(rows, before);
+        // A stated 0 mm is the same floor; a stated thickness, or band I's default, is kept.
+        let stated = |mm: u32| {
+            band_d.replace(
+                "HEMIE_age_band,D",
+                &format!("HEMIE_age_band,D\nHEMIE_construction_not_edge_insulated_ground_attached_floor,\"{{\"\"insulation_thickness\"\":{mm}}}\""),
+            )
+        };
+        assert_eq!(
+            floor_thickness(&run(&stated(0)).0),
+            json!(UNINSULATED_FLOOR_MM)
+        );
+        assert_eq!(floor_thickness(&run(&stated(50)).0), json!(50));
+        assert!(floor_thickness(&run(&house(gable_roof())).0).is_null());
     }
 
     #[test]

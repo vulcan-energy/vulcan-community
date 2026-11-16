@@ -1984,7 +1984,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           : elementType === 'BuildingElementGround' && !constructionBands && groundUComputedWPerM2K != null
             ? { u_value: Number(groundUComputedWPerM2K.toFixed(4)) }
             : colourAbsorption !== undefined ? { solar_absorption_coeff: colourAbsorption } : undefined,
-        derivedSourceNotes: colourAbsorption !== undefined ? { solar_absorption_coeff: 'from the colour' } : undefined,
+        // A combi's daily hot water comes from the occupancy (`combi_daily_hot_water`, DESNZ question E33).
+        derivedSourceNotes: elementType === 'System' ? { daily_HW_usage: 'from occupancy' }
+          : colourAbsorption !== undefined ? { solar_absorption_coeff: 'from the colour' } : undefined,
         // A new build's tank states its location: the converter has no default for it.
         noDefaultFields: elementType === 'System' && subtype === 'HotWaterSource' && hemDatabaseProducts && !existingBuilding ? NEW_BUILD_TANK_NO_DEFAULT : undefined,
         labelAdornment: takesResistance ? {
