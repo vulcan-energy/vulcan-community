@@ -76,7 +76,8 @@ export function inferThermalMethod(
  * The existing-building construction fields that only work out the U-value, so a stated U-value
  * or calculation replaces them. What else HEM:EPC reads stays:
  * - a wall's age band, wall type and added insulation (with no build-up its default layers give the
- *   heat capacity; with one, HEM:EPC still reads the wall type);
+ *   heat capacity and the added insulation applies; with one, HEM:EPC reads only the wall type and
+ *   ignores `retrofit_insulation`);
  * - a window's glazing type (its g-value unless one is stated, `window.py` `g_value`);
  * - a roof's age band (its rooflights take it, `roof.py`) and insulation location (the roof type
  *   and its default mass distribution class).

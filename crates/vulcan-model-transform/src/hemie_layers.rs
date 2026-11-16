@@ -82,7 +82,10 @@ fn insulation_material(material_id: &str) -> Option<&'static str> {
         "glass_fibre_organic_bonded" | "glass_fibre_quilt" | "glass_fibre_slab" | "glasswool" => {
             "Fibreglass"
         }
-        "eps_slab" | "expanded_polystyrene_in31" | "dense_eps_slab_insulation_styrofoam" => "EPS",
+        "eps_slab"
+        | "expanded_polystyrene_in31"
+        | "dense_eps_slab_insulation_styrofoam"
+        | "polystyrene" => "EPS",
         "cellular_polyisocyanurate" => "PIR",
         "cellular_polyurethane" | "expanded_polyurethane_in41" | "polyurethane_board" => "PUR",
         _ => return None,
@@ -170,6 +173,7 @@ mod tests {
         for (id, material) in [
             ("mat.iso.glass_fibre_quilt", "Fibreglass"),
             ("mat.iso.eps_slab", "EPS"),
+            ("mat.iso.polystyrene", "EPS"),
             ("mat.iso.cellular_polyisocyanurate", "PIR"),
             ("mat.iso.polyurethane_board", "PUR"),
         ] {
