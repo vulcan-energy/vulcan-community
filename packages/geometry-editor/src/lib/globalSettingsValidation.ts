@@ -288,6 +288,8 @@ export function collectGlobalSettingsWarnings(args: {
   complianceValidationEnabled?: boolean;
   complianceSettings: GlobalSettingsShape;
   globalOrientationOffset?: number;
+  /** The target counts the storeys itself and reads no stated count (`TargetRules.constructionBands`). */
+  storeysFromConversion?: boolean;
 }): string[] {
   const warnings: string[] = [];
   if (args.complianceValidationEnabled && args.zones) {
@@ -327,6 +329,7 @@ export function collectGlobalSettingsWarnings(args: {
   }
 
   if (
+    !args.storeysFromConversion &&
     settings.storeys_in_dwelling !== undefined &&
     dwelling.storeysInDwelling !== undefined &&
     settings.storeys_in_dwelling !== dwelling.storeysInDwelling
@@ -494,6 +497,26 @@ export const TARGET_INPUT_ROWS = [
 export type TargetInputRow = (typeof TARGET_INPUT_ROWS)[number];
 export const TARGET_INPUT_ROW_SET: ReadonlySet<string> = new Set(TARGET_INPUT_ROWS);
 
+/** The appliance elements that say yes to each HEM:EPC appliance row. */
+const APPLIANCE_ROW_KEYS: Readonly<Record<string, readonly string[]>> = {
+  Appliances_has_dryer: ['Clothes_drying'],
+  Appliances_has_dishwasher: ['Dishwasher'],
+  // A fridge-freezer is not a separate fridge or freezer.
+  Appliances_has_separate_fridge_or_freezer: ['Fridge', 'Freezer'],
+};
+
+/** Yes when the drawing has the row's appliance; undefined when it has none (the user states it). */
+export function drawnApplianceValue(elements: readonly Element[], row: string): true | undefined {
+  const keys = APPLIANCE_ROW_KEYS[row];
+  return keys && elements.some((element) => element.type === 'Appliance' && !element.isPlaceholder
+    && keys.includes((element as { appliancekey?: string }).appliancekey ?? '')) ? true : undefined;
+}
+
+/** The drawing's Yes for an appliance row, on a target that takes the row (HEM:EPC); no other target's save gains it. */
+export function derivedApplianceValue(elements: readonly Element[], row: string, targetRoot: unknown): true | undefined {
+  return targetFieldAvailability(targetRoot, metadataSchemaPath(row)) === 'available' ? drawnApplianceValue(elements, row) : undefined;
+}
+
 /** Where the converter writes a metadata input row in the model. */
 const metadataSchemaPath = (key: string): string[] => {
   if (key.startsWith('General_')) return ['General', key.slice('General_'.length)];
@@ -525,7 +548,9 @@ const num = (value: number | undefined) => (finiteNumber(value) === undefined ? 
 const text = (value: string | undefined) => (value ? value : undefined);
 
 /** The target rules the metadata rows follow. */
-export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'> & Partial<Pick<TargetRules, 'desnzDefaultRows' | 'derivedMetadataRows'>>;
+export type MetadataTargetRules = Pick<TargetRules, 'requiredMetadataRows' | 'storeyBuildTypes'> & Partial<Pick<TargetRules, 'desnzDefaultRows' | 'derivedMetadataRows' | 'constructionBands'>>;
+/** The target rules the saved metadata values follow. */
+export type MetadataRowRules = Pick<MetadataTargetRules, 'storeyBuildTypes' | 'derivedMetadataRows'>;
 
 export type MetadataRowInputs = Pick<GeometryState, 'zones' | 'elementsById' | 'spaceLabelsById' | 'spaceLabelIds' | 'complianceSettings'> & {
   floors: Floor[];
@@ -571,7 +596,7 @@ export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | 
  * or space labels give (a build type only where the target takes it, see targetBuildTypes). Rows
  * that do not apply (flat-only rows on a house) are left out.
  */
-function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown, storeyBuildTypes: readonly string[]): Array<[string, string | undefined]> {
+function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown, rules: MetadataRowRules): Array<[string, string | undefined]> {
   const compliance = state.complianceSettings;
   const dd = resolveEffectiveDwellingDetails({
     zones: state.zones as Zone[],
@@ -582,7 +607,10 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
   });
   const buildType = compliance.build_type ?? (dd.buildType && targetBuildTypes(targetRoot).includes(dd.buildType) ? dd.buildType : undefined);
   const derivedGFA = calculateGroundFloorArea(state.elements);
-  const derivedVentHeight = calculateSuggestedVentilationHeight(state.elements, state.floors);
+  // A height the converter works out itself (an existing building) is written only when typed.
+  const derivedVentHeight = rules.derivedMetadataRows?.includes('AirPermeability_ventilation_zone_height')
+    ? 0
+    : calculateSuggestedVentilationHeight(state.elements, state.floors);
   const rows: Array<[string, string | undefined]> = [
     ['PartO_active_cooling_required', bool(compliance.PartO_active_cooling_required)],
     ['NumberOfBedrooms', count(dd.bedrooms)],
@@ -620,10 +648,12 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     ['General_built_form', num(compliance.built_form)],
     ['General_storeys_in_dwelling', count(dd.storeysInDwelling)],
   ];
-  if (buildTypeHasStoreyRows(targetRoot, buildType, storeyBuildTypes)) {
+  if (buildTypeHasStoreyRows(targetRoot, buildType, rules.storeyBuildTypes)) {
     rows.push(['General_storey_of_dwelling', count(dd.storeyOfDwelling)], ['General_storeys_in_building', num(compliance.storeys_in_building)]);
   }
-  rows.push(...TARGET_INPUT_ROWS.map((key): [string, string | undefined] => [key, bool(compliance[key])]));
+  rows.push(...TARGET_INPUT_ROWS.map((key): [string, string | undefined] => [key, bool(compliance[key]
+    // A target that takes the row (HEM:EPC) gets the drawing's Yes; no other target's save gains the row.
+    ?? derivedApplianceValue(state.elements, key, targetRoot))]));
   rows.push(['ElectricitySmartMeterGUID', text(compliance.ElectricitySmartMeterGUID)]);
   return rows;
 }
@@ -634,11 +664,13 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
  * the file has blank stays blank and blocks (E066), a row the file lacks takes the converter's
  * value or none (absentMetadataRowFill), and a setting a Systems row sets is left to that row.
  */
-export function metadataRowValues(state: MetadataRowInputs, targetRoot: unknown, storeyBuildTypes: readonly string[]): Array<[string, string | undefined]> {
+export function metadataRowValues(state: MetadataRowInputs, targetRoot: unknown, rules: MetadataRowRules): Array<[string, string | undefined]> {
   const entered = state.complianceSettings as Record<string, unknown>;
   const fileDecides = new Set([...Object.keys(state.complianceSettings.unreadMetadataRows ?? {}), ...(state.complianceSettings.absentMetadataRows ?? [])]);
-  return enteredOrDerivedRowValues(state, targetRoot, storeyBuildTypes).map(([key, value]) => [key,
-    entered[metadataSettingKey(key)] === undefined && (fileDecides.has(key) || systemsRowSetsMetadataInput(state.elements, key)) ? undefined : value]);
+  return enteredOrDerivedRowValues(state, targetRoot, rules).map(([key, value]) => [key,
+    entered[metadataSettingKey(key)] === undefined && (fileDecides.has(key) || systemsRowSetsMetadataInput(state.elements, key))
+      // A drawn appliance answers its row even where the file left it blank, as Global values show.
+      && derivedApplianceValue(state.elements, key, targetRoot) === undefined ? undefined : value]);
 }
 
 
@@ -692,7 +724,6 @@ export function absentMetadataRowFill(
   targetRoot: unknown,
 ): { patch: Record<string, unknown>; notice?: string } | undefined {
   if (targetRoot === null) return undefined;
-  const { storeyBuildTypes } = rules;
   const settings = state.complianceSettings;
   const required = new Set(rules.requiredMetadataRows);
   // Unset, a DESNZ-default row takes DESNZ's value in the converter, never the template's.
@@ -702,7 +733,7 @@ export function absentMetadataRowFill(
   const blank = new Set(Object.keys(settings.unreadMetadataRows ?? {}));
   const absent = new Set(settings.absentMetadataRows);
   const cleared = new Set(settings.clearedValueRows);
-  for (const [key, value] of metadataRowValues(state, targetRoot, storeyBuildTypes)) {
+  for (const [key, value] of metadataRowValues(state, targetRoot, rules)) {
     if ((value !== undefined && !absent.has(key)) || !(key in METADATA_INPUT_LABELS) || blank.has(key)
       || required.has(key) || desnzDefault.has(key) || cleared.has(metadataSettingKey(key)) || systemsRowSetsMetadataInput(state.elements, key)) continue;
     const template = templateMetadataValue(defaults, key);
@@ -716,7 +747,7 @@ export function absentMetadataRowFill(
       ? 'the converter\'s value for a missing row'
       : 'from the defaults file');
   }
-  const added = metadataRowValues({ ...state, complianceSettings: { ...settings, ...patch } }, targetRoot, storeyBuildTypes)
+  const added = metadataRowValues({ ...state, complianceSettings: { ...settings, ...patch } }, targetRoot, rules)
     .flatMap(([key, value]) => (value !== undefined && absent.has(key)
       ? [`${METADATA_INPUT_LABELS[key] ?? key} ${value} (${sources.get(key) ?? (key.startsWith('NumberOf') ? 'from space labels' : 'from the geometry')})`]
       : []));
@@ -806,7 +837,6 @@ export function unsetMetadataInputIssues(
   rules: MetadataTargetRules,
 ): string[] {
   const required = new Set(rules.requiredMetadataRows);
-  const { storeyBuildTypes } = rules;
   const unread = state.complianceSettings.unreadMetadataRows ?? {};
   // A cell the editor cannot hold that the target's schema takes (an HEM:EPC built form as
   // build_type) is saved as in the file and is no issue.
@@ -814,7 +844,7 @@ export function unsetMetadataInputIssues(
     && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) === 'available'
     && targetFieldAccepts(targetRoot, metadataSchemaPath(key), unread[key])));
   const blank = new Set(Object.keys(unread));
-  const derived = new Map(enteredOrDerivedRowValues(state, targetRoot, storeyBuildTypes));
+  const derived = new Map(enteredOrDerivedRowValues(state, targetRoot, rules));
   // The value the editor can work out, as a hint; the user enters it so the save writes it.
   const hint = (key: string) => {
     const value = derived.get(key);
@@ -824,8 +854,10 @@ export function unsetMetadataInputIssues(
   const desnzDefault = new Set([...Object.keys(rules.desnzDefaultRows ?? {}), ...(rules.derivedMetadataRows ?? [])]);
   const guidIssue = smartMeterGuidIssue(state.complianceSettings, required);
   // smartMeterGuidIssue alone judges the GUID: it is required only with a smart meter.
-  return [...(guidIssue ? [guidIssue] : []), ...metadataRowValues(state, targetRoot, storeyBuildTypes).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && key !== 'ElectricitySmartMeterGUID' && !accepted.has(key)
+  return [...(guidIssue ? [guidIssue] : []), ...metadataRowValues(state, targetRoot, rules).flatMap(([key, value]) => (value === undefined && key in METADATA_INPUT_LABELS && key !== 'ElectricitySmartMeterGUID' && !accepted.has(key)
       && !desnzDefault.has(key)
+      // The save writes no storeys row where the conversion counts the storeys (generateCSV).
+      && !(rules.constructionBands && key === 'General_storeys_in_dwelling')
       && !systemsRowSetsMetadataInput(state.elements, key)
       && (required.has(key) || (!TARGET_INPUT_ROW_SET.has(key)
         && targetFieldAvailability(targetRoot, metadataSchemaPath(key)) !== 'absent'

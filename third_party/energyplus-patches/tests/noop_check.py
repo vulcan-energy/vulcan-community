@@ -8,10 +8,12 @@ Each cases file has one "id<TAB>input<TAB>weather" line per case (blank lines an
 --wait is a shell command run before every EnergyPlus run, for hosts that allow one run at a time.
 Every output file must match byte for byte after removing the lines that carry the run's date and
 elapsed time. A case whose input and weather are byte-identical to an earlier case's is listed with
-"sameInputAs" and not run again. Run it at every EnergyPlus re-pin, with the engine built with and without
-0006-afn-zero-leakage.patch, on models that have a path to outdoors.
+"sameInputAs" and not run again. Where eplusout.csv differs, the report gives the largest absolute
+difference per unit and the column that has it (csvMaxAbsDiff). Run it at every EnergyPlus re-pin, with
+the engine built with and without a patch, on models that have a path to outdoors.
 """
 import argparse
+import csv
 import hashlib
 import json
 import re
@@ -29,6 +31,21 @@ def stable(path):
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def csv_max_diff(baseline, patched):
+    """Largest absolute difference between two eplusout.csv files, per unit, with the column that has it."""
+    with open(baseline, newline='') as a, open(patched, newline='') as b:
+        rows_a, rows_b = list(csv.reader(a)), list(csv.reader(b))
+    if rows_a[0] != rows_b[0] or len(rows_a) != len(rows_b):
+        return {'shapeDiffers': True}
+    worst = {}
+    for column, name in enumerate(rows_a[0][1:], 1):
+        unit = re.search(r'\[([^\]]*)\]', name).group(1) if '[' in name else ''
+        diff = max((abs(float(x[column]) - float(y[column])) for x, y in zip(rows_a[1:], rows_b[1:]) if x[column] and y[column]), default=0.0)
+        if diff > worst.get(unit, {}).get('maxAbs', -1.0):
+            worst[unit] = {'maxAbs': diff, 'column': name}
+    return worst
 
 
 def main():
@@ -79,9 +96,11 @@ def main():
                                                      and stable(outputs['baseline'] / name) == stable(outputs['patched'] / name))]
         record['comparedFiles'] = names
         record['differingFiles'] = differing
-        csv = outputs['patched'] / 'eplusout.csv'
-        record['csvSha256'] = sha(csv) if csv.exists() else None
-        ok = not differing and record['baseline']['exit'] == 0 and csv.exists()
+        patched_csv = outputs['patched'] / 'eplusout.csv'
+        if 'eplusout.csv' in differing and (outputs['baseline'] / 'eplusout.csv').exists() and patched_csv.exists():
+            record['csvMaxAbsDiff'] = csv_max_diff(outputs['baseline'] / 'eplusout.csv', patched_csv)
+        record['csvSha256'] = sha(patched_csv) if patched_csv.exists() else None
+        ok = not differing and record['baseline']['exit'] == 0 and patched_csv.exists()
         record['identical'] = ok
         mismatches += not ok
         report['cases'].append(record)

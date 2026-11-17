@@ -284,7 +284,7 @@ pub(super) fn part_floor<'e>(
 fn ground_floor(ctx: &mut Ctx, g: &El, part: &PartFloor, ground_total: f64) -> Option<Value> {
     // Ours: a dwelling whose base storey is above the ground has no floor on the ground.
     if let Some(storey) = super::base_storey(ctx.model).filter(|s| *s > 0) {
-        ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' is on the ground, but the storey of dwelling is {} (Global Settings > Dwelling Details; 1 is the ground storey). Draw the party floor, exposed floor or floor over an unheated space under the dwelling instead, or correct the storey of dwelling.", g.name, storey + 1)));
+        ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' is on the ground, but the storey of dwelling is {} (Global Settings > Dwelling details; 1 is the ground storey). Draw the party floor, exposed floor or floor over an unheated space under the dwelling instead, or correct the storey of dwelling.", g.name, storey + 1)));
         return None;
     }
     let mut floor = floor(ctx, g, ground_total)?;

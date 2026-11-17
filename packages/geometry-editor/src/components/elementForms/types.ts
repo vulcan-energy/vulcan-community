@@ -283,6 +283,10 @@ export interface ElementFormRenderCtx {
   openingFields: ReactNode;
   /** A window's "Thermal values" block (method, then its inputs), shown after its size and position. */
   thermalValues: ReactNode;
+  /** A window's "On Wall (S) · faces S" line, first on its panel. */
+  windowHost: ReactNode;
+  /** "Edit all N windows": selects every window of this kind for the bulk edit; null for the only one. */
+  windowEditAll: ReactNode;
   /** Host fields for one row of the selected window's opening parts; null when the host has none. */
   renderOpeningPartFields: ((partIndex: number) => ReactNode) | null;
   /** Window keys the host's part fields move onto part 1 when a second part is added. */
@@ -338,7 +342,7 @@ export interface ElementFormRenderCtx {
    * precedent as renderMvhrDuctAndTerminalManager above. */
   renderLinearDimensionsFields: (
     fieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void,
-    options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
+    options: { widthStep: string; heightStep: string; includeWallShape?: boolean; sill?: { label: ReactNode; field: ReactNode } },
   ) => ReactNode;
   /** Sloped-polygon rectangle dimensions derived from the selected element's
    * coordinates + pitch (null when not a sloped-polygon or dimensions can't

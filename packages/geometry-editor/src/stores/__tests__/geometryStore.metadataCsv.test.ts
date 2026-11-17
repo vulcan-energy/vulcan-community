@@ -3,6 +3,8 @@
 
 import { expect, it } from 'vitest';
 import { createGeometryStore } from '../geometryStore';
+import { canonicalGeometrySchemaPort } from '../../lib/geometrySchemaPort';
+import { unsetMetadataInputIssues } from '../../lib/globalSettingsValidation';
 import { A7_AREAL_HEAT_CAPACITY_INPUT, type ArealHeatCapacityInput } from '../../../../geometry-editor-host/src/schemaPort';
 
 it('never writes a model-input metadata row with a blank value', () => {
@@ -195,4 +197,32 @@ Wall,Living,BuildingElementOpaque,10,90,4,2.5,180,0,FALSE,FALSE,,"0,0,0|4,0,0","
   expect(before.own).toMatchObject({ insulation_type: 'retrofitted', insulation_thermal_conductivity: 0.022, surface_material: 'Fibre-cement', finish: 'Wall finishes', ceiling_thickness: 12.5 });
   store.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
   expect(state()).toEqual(before);
+});
+
+it('leaves storeys in dwelling to an existing building\'s conversion, which counts them itself', () => {
+  // As an EPC target rules: an existing building takes construction bands. An FHS target never does.
+  const epc = { ...canonicalGeometrySchemaPort, targetRules: (settings: Record<string, unknown>) => ({ constructionBands: settings.IsExistingBuilding === true }) };
+  const storeysRow = (port: typeof canonicalGeometrySchemaPort, csv?: string, existing = false) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: port });
+    if (csv) store.getState().loadFromCSV(csv);
+    if (existing) store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    store.getState().addZone({ name: 'Zone 1', floorArea: 20, height: 2.5, volume: 50 });
+    store.getState().addElements([{
+      type: 'BuildingElementGround', name: 'Floor', zoneId: store.getState().zones[0]!.id, floor_type: 'Slab_no_edge_insulation',
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 4, z: 0 }, { x: 0, y: 4, z: 0 }],
+    }] as never);
+    return /^General_storeys_in_dwelling,.*$/m.exec(store.getState().generateCSV({ allowUnresolvedMigration: true }))?.[0];
+  };
+  expect(storeysRow(epc)).toMatch(/^General_storeys_in_dwelling,1,/);
+  expect(storeysRow(epc, undefined, true)).toBeUndefined();
+  // A blank row the file had is not written back either: the converter would block on it.
+  expect(storeysRow(epc, 'Metadata,,\nIsExistingBuilding,TRUE\nGeneral_storeys_in_dwelling,\n')).toBeUndefined();
+  // Nor is it an issue the user would have to fix in a field that is now a readout.
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: epc });
+  store.getState().loadFromCSV('Metadata,,\nIsExistingBuilding,TRUE\nGeneral_storeys_in_dwelling,\n');
+  const issues = unsetMetadataInputIssues({ ...store.getState(), elements: [] }, undefined, undefined,
+    { requiredMetadataRows: [], storeyBuildTypes: [], constructionBands: true });
+  expect(issues.join('|')).not.toMatch(/Storeys in dwelling/);
+  // A flag left from an EPC target does not change an FHS save.
+  expect(storeysRow(canonicalGeometrySchemaPort, undefined, true)).toMatch(/^General_storeys_in_dwelling,1,/);
 });

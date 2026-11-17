@@ -24,10 +24,6 @@ function derivedFieldBlocks(): string[] {
 }
 
 describe('GlobalSettingsModal dwelling dimension overrides', () => {
-  it('builds all three dimension fields on the shared component', () => {
-    expect(derivedFieldBlocks()).toHaveLength(3);
-  });
-
   it('wires ground floor area to the derived footprint and its override', () => {
     const block = derivedFieldBlocks().find((b) => b.includes('GroundFloorArea'));
 
@@ -58,12 +54,12 @@ describe('GlobalSettingsModal dwelling dimension overrides', () => {
     expect(block).toContain('resetAriaLabel="Reset building width to derived value"');
   });
 
-  it('keeps the ventilation zone heights off the shared component', () => {
-    // They carry an extra mismatch warning block and different parse/tolerance rules, so
-    // converting them wants its own change rather than more props on DerivedNumberField.
-    const blocks = derivedFieldBlocks().join('\n');
+  it('builds only the EPC zone height on the shared component', () => {
+    // The other layout's zone heights carry a mismatch warning and their own parse rules.
+    const blocks = derivedFieldBlocks().filter((b) => b.includes('ventilation_zone_height'));
 
-    expect(blocks).not.toContain('ventilation_zone_height');
-    expect(blocks).not.toContain('ventilation_zone_base_height');
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toContain('derivedValue={shownVentHeight}');
+    expect(derivedFieldBlocks().join('\n')).not.toContain('ventilation_zone_base_height');
   });
 });

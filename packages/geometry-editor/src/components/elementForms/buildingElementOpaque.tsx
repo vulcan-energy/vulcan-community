@@ -49,7 +49,7 @@ import {
   getRoofCover,
   isUnheatedPitchedRoofPlanAreaElement,
 } from '../../lib/elementArea';
-import { readProfiledLineFace } from '../../lib/profileLineFace';
+import { areaRepeatsSize, readProfiledLineFace } from '../../lib/profileLineFace';
 import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeometry';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
@@ -378,6 +378,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             includeWallShape: true,
           })
         )}
+        {!(selectedElement?.type === 'BuildingElementOpaque' && selectedElement.is_external_door === true && areaRepeatsSize(selectedElement, selectedShape)) && <>
         {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
         <div className="element-input" style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'stretch' }} ref={registerBaseFieldRef('area')}>
           {/* Net area is set by the drawing: HEM takes no other value, so it reads as text. */}
@@ -398,6 +399,7 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
             </div>
           )}
         </div>
+        </>}
         {renderWallPitchField(
           {
             pitch: state.pitch,

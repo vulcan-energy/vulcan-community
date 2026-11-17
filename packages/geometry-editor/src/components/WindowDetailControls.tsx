@@ -123,23 +123,30 @@ export function CompactSegmentedControl<T extends string>({
   options,
   onChange,
   ariaLabel,
+  fullWidth = false,
 }: {
   value: T;
   options: Array<{ value: T; label: string; disabled?: boolean; title?: string }>;
   onChange: (value: T) => void;
   ariaLabel: string;
+  /** A form row: the control fills its column, each option an equal share, at input height. */
+  fullWidth?: boolean;
 }) {
   return (
     <div
       role="group"
       aria-label={ariaLabel}
       style={{
-        display: 'inline-flex',
+        display: fullWidth ? 'flex' : 'inline-flex',
+        width: fullWidth ? '100%' : undefined,
+        boxSizing: 'border-box',
+        gap: fullWidth ? 2 : undefined,
+        padding: fullWidth ? 2 : undefined,
         alignItems: 'center',
         border: 'var(--border-width-thin) solid var(--border-subtle)',
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
-        minHeight: '26px',
+        minHeight: fullWidth ? '36px' : '26px',
       }}
     >
       {options.map((option) => {
@@ -152,7 +159,21 @@ export function CompactSegmentedControl<T extends string>({
             aria-pressed={active}
             disabled={option.disabled}
             title={option.title}
-            style={{
+            style={fullWidth ? {
+              flex: '1 1 0',
+              minWidth: 0,
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              background: active ? 'var(--row-highlight-bg)' : 'transparent',
+              boxShadow: active ? 'inset 0 0 0 1px var(--row-highlight-border)' : 'none',
+              color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
+              padding: '8px 6px',
+              fontSize: '12px',
+              fontWeight: 500,
+              lineHeight: 1.2,
+              cursor: option.disabled ? 'not-allowed' : 'pointer',
+              opacity: option.disabled ? 0.5 : 1,
+            } : {
               border: 'none',
               borderLeft: option === options[0] ? 'none' : 'var(--border-width-thin) solid var(--border-subtle)',
               background: active ? 'var(--hover-bg)' : 'transparent',

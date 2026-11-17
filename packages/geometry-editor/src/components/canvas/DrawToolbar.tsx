@@ -89,6 +89,7 @@ export interface DrawToolbarProps {
   elementsById: Record<string, Element>;
   ensureFloorForZ: (z: number) => string;
   removeFloor: (id: string) => void;
+  copyStorey: (fromZ: number, toZ: number) => void;
   updateFloor: (id: string, updates: Partial<Floor>) => void;
   getElementValidation?: (element: Element) => ValidationResult;
   setDrawPoints: (points: Array<{ x: number; y: number }>) => void;
@@ -101,6 +102,8 @@ export interface DrawToolbarProps {
   drawPresetError?: string;
   setDrawPreset: (preset: string) => void;
   presetOptions: Array<{ value: string; label: string; source?: 'system' | 'user' }>;
+  /** What the next window takes from the last one drawn ("Next window: …"), with Clear; null when nothing carries. */
+  carry?: { label: string; summary: string; onClear: () => void } | null;
   drawMvhrDuctRole: MvhrDuctRole;
   setDrawMvhrDuctRole: (role: MvhrDuctRole) => void;
   drawMvhrTerminalRole: MvhrTerminalRole;
@@ -133,6 +136,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   elementsById,
   ensureFloorForZ,
   removeFloor,
+  copyStorey,
   updateFloor,
   getElementValidation,
   setDrawPoints,
@@ -144,6 +148,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   drawPresetError,
   setDrawPreset,
   presetOptions,
+  carry,
   drawMvhrDuctRole,
   setDrawMvhrDuctRole,
   drawMvhrTerminalRole,
@@ -340,6 +345,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
             ensureFloorForZ(z);
             setCurrentFloorZ(z);
           }}
+          onCopyFloor={copyStorey}
           onDeleteFloor={removeFloor}
           onUpdateFloor={(id, updates) => updateFloor(id, updates)}
           onEnsureFloorForZ={ensureFloorForZ}
@@ -407,6 +413,12 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
         </button>
         {dragHandle}
       </div>
+      {carry && (
+        <div className="glass-panel overlay-drawtoolbar draw-carry-chip" data-draw-carry>
+          <span className="draw-carry-chip__text">{carry.label}: {carry.summary}</span>
+          <button type="button" className="draw-button" onClick={carry.onClear} title="The next one starts blank">Clear</button>
+        </div>
+      )}
     </div>
   );
 });

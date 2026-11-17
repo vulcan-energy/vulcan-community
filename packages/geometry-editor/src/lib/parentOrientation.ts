@@ -43,7 +43,8 @@ export function projectLinearChildOntoParentSegment(
 ): Array<{ x: number; y: number; z: number }> | null {
   if (!Array.isArray(parent.coordinates) || parent.coordinates.length !== 2) return null;
   if (!Array.isArray(child.coordinates) || child.coordinates.length !== 2) return null;
-  return projectSegmentOntoParent(child.coordinates, parent.coordinates).map((coord) => ({
+  // Moved to another host, it keeps its place along the line, slid inside the new wall when it fits.
+  return clampSegmentInsideParent(projectSegmentOntoParent(child.coordinates, parent.coordinates), parent.coordinates).map((coord) => ({
     x: roundToFourDecimals(coord.x),
     y: roundToFourDecimals(coord.y),
     z: coord.z,
@@ -116,3 +117,65 @@ export function buildMechanicalVentilationParentPatch(
   updates.extra_json = Object.keys(extraJson).length > 0 ? extraJson : undefined;
   return updates;
 }
+
+/** Slides a segment already on the parent's line along it so it lies inside the parent, when it fits. */
+function clampSegmentInsideParent(
+  coords: Array<{ x: number; y: number; z: number }>,
+  parent: Array<{ x: number; y: number; z: number }>,
+): Array<{ x: number; y: number; z: number }> {
+  const [PA, PB] = parent;
+  const vx = PB!.x - PA!.x;
+  const vy = PB!.y - PA!.y;
+  const wallLength = Math.hypot(vx, vy);
+  if (wallLength === 0) return coords;
+  const along = (point: { x: number; y: number }) => ((point.x - PA!.x) * vx + (point.y - PA!.y) * vy) / wallLength;
+  const t0 = along(coords[0]!);
+  const t1 = along(coords[1]!);
+  const low = Math.min(t0, t1);
+  const high = Math.max(t0, t1);
+  if (high - low > wallLength) return coords;
+  const shift = low < 0 ? -low : high > wallLength ? wallLength - high : 0;
+  if (shift === 0) return coords;
+  return coords.map((coord) => ({
+    x: roundToFourDecimals(coord.x + (shift * vx) / wallLength),
+    y: roundToFourDecimals(coord.y + (shift * vy) / wallLength),
+    z: coord.z,
+  }));
+}
+
+/** A window wider than the line wall it is on: "2.00 m window on a 1.50 m wall". */
+export function openingTooWide(opening: Element | undefined, parent: Element | undefined): string | undefined {
+  if (opening?.type !== 'BuildingElementTransparent' || parent?.coordinates?.length !== 2) return undefined;
+  const width = (opening as BuildingElementTransparent).width;
+  const [a, b] = parent.coordinates;
+  const wall = Math.hypot(b!.x - a!.x, b!.y - a!.y);
+  return typeof width === 'number' && width > wall + 0.005 ? `${width.toFixed(2)} m window on a ${wall.toFixed(2)} m wall` : undefined;
+}
+
+/** The line wall a window lies on, on its storey: where "Reattach" puts a window whose wall was deleted. */
+export function wallUnderOpening(opening: Element | undefined, elements: readonly Element[]): Element | undefined {
+  const line = opening?.type === 'BuildingElementTransparent' ? opening.coordinates : undefined;
+  if (line?.length !== 2) return undefined;
+  // Its middle on the wall, both ends on the wall's line, on the same storey.
+  const distance = (point: { x: number; y: number }, [a, b]: Array<{ x: number; y: number }>, clamp: boolean) => {
+    const vx = b!.x - a!.x;
+    const vy = b!.y - a!.y;
+    const lengthSq = vx * vx + vy * vy;
+    if (lengthSq === 0) return Infinity;
+    const raw = ((point.x - a!.x) * vx + (point.y - a!.y) * vy) / lengthSq;
+    const t = clamp ? Math.min(1, Math.max(0, raw)) : raw;
+    return Math.hypot(point.x - (a!.x + t * vx), point.y - (a!.y + t * vy));
+  };
+  const middle = { x: (line[0]!.x + line[1]!.x) / 2, y: (line[0]!.y + line[1]!.y) / 2 };
+  return elements.find((wall) => wall.type === 'BuildingElementOpaque'
+    && !(wall as BuildingElementOpaque).is_external_door
+    && wall.zoneId === opening!.zoneId
+    && wall.coordinates?.length === 2
+    && Math.abs((wall.coordinates[0]!.z ?? 0) - (line[0]!.z ?? 0)) < 0.01
+    && distance(middle, wall.coordinates, true) < 0.05
+    && line.every((point) => distance(point, wall.coordinates, false) < 0.05));
+}
+
+const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
+/** The nearest of eight compass points for an orientation in degrees (0 = north): "faces S". */
+export const compassPoint = (degrees: number): string => COMPASS[Math.round((((degrees % 360) + 360) % 360) / 45) % 8]!;

@@ -137,6 +137,7 @@ import {
   type NumericDraftInputBinding,
 } from './formPrimitives';
 import type { ElementFormModule, ElementFormSelection, ElementFormStateCtx } from './types';
+import { useTargetRules } from '../../hooks/useTargetRules';
 
 const GROUND_LINE_HEIGHT_EXTRA_KEY = '_ground_line_height_m';
 
@@ -174,6 +175,8 @@ export interface BuildingElementGroundFormState {
   setFloorType: (value: GroundFloorType) => void;
   totalAreaInput: NumericDraftInputBinding;
   perimeterInput: NumericDraftInputBinding;
+  /** Fields the target does not read (an existing-building EPC derives them): not shown. */
+  hiddenFields: readonly string[];
   depthBasementFloorInput: NumericDraftInputBinding;
   thicknessWallsInput: NumericDraftInputBinding;
   groundLineHeightInput: NumericDraftInputBinding;
@@ -526,11 +529,14 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
       : undefined;
   };
 
+  const hiddenFields = useTargetRules().hiddenFields.BuildingElementGround ?? [];
+
   return {
     floorType,
     setFloorType,
     totalAreaInput,
     perimeterInput,
+    hiddenFields,
     depthBasementFloorInput,
     thicknessWallsInput,
     groundLineHeightInput,
@@ -600,6 +606,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
     const {
       derivedGroundEffectiveArea,
       totalAreaInput,
+      hiddenFields,
       autoDerivedTotalArea,
       groundTotalAreaManual,
       groundTotalAreaWarning,
@@ -644,6 +651,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
         <div className="element-input" ref={registerBaseFieldRef('area')}>
           <Readout value={formatToTwoDecimals(derivedGroundEffectiveArea)} unit={fieldUnit('area')} label="Area" />
         </div>
+        {!hiddenFields.includes('total_area') && <>
         {renderFieldLabel(
           'Total Area (m²):',
           elementType,
@@ -682,6 +690,8 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
             Differs from the {formatConditionalDecimals(autoDerivedTotalArea)} m² of floors drawn.
           </div>
         ) : null}
+        </>}
+        {!hiddenFields.includes('perimeter') && <>
         {renderFieldLabel(
           'Perimeter (m):',
           elementType,
@@ -715,6 +725,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
             {groundPerimeterBreakdownText}
           </div>
         ) : null}
+        </>}
         {selectedGroundShape === 'line' && (
           <>
             {renderFieldLabel('Ground Wall Height (m):', elementType)}

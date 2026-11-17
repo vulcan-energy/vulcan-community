@@ -234,6 +234,8 @@ import { useTargetRules } from '../hooks/useTargetRules';
 import { FABRIC_PRESET_TYPES } from '../lib/hemieFabric';
 import { useHiddenElementIds } from '../hooks/useHiddenElementIds';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { openingCarry, openingCarrySummary, type OpeningKind } from '../lib/windowCarry';
+import { isExistingBuilding } from '../lib/windowOpenings';
 import { elementIsHiddenFromView } from '../lib/elementCategoryVisibility';
 import type { BuildErrorItem } from '../types/buildErrors';
 import { getElementCanvasFloorZValue, isElementOnActiveCanvasFloor, mergeServiceLineExtraJsonFloorId, networkPoint3 } from '../lib/elementCanvasFloor';
@@ -305,6 +307,13 @@ import {
 import type { Vec3 } from '../geometry/thermalBridge/linearTbSegmentOverlap';
 import { getOverlapBadgeMenuLayerStyle, type OverlapBadgeMenuAnchor } from '../lib/overlapBadgeMenu';
 
+/** A host's pitch, for a window moved onto it; nothing when the host states none. */
+const hostPitchPatch = (host: Element | undefined): { pitch?: number } => {
+  const pitch = (host as { pitch?: unknown } | undefined)?.pitch;
+  return typeof pitch === 'number' && Number.isFinite(pitch) ? { pitch } : {};
+};
+/** No window drawn yet this session, for the carry. */
+const NO_CARRY_SOURCES: Partial<Record<OpeningKind, string>> = {};
 const SPACE_LABEL_CANVAS_FILL = 'rgba(14, 165, 233, 0.22)';
 const SPACE_LABEL_CANVAS_STROKE = 'rgba(125, 211, 252, 0.9)';
 const SPACE_LABEL_CANVAS_LIVING_FILL = 'rgba(20, 184, 166, 0.26)';
@@ -459,6 +468,9 @@ export type GeometryCanvasSelection = {
   id: string;
   isPlaceholder?: boolean;
   focusFieldKey?: string;
+  /** Kept while "Edit all N windows" has every window of this one's kind selected: leaving that
+   * multi-select (a click on empty canvas) comes back to this window. */
+  editAll?: boolean;
 } | null;
 
 function isRoofHostableShape(element: Element, coords: Array<{ x: number; y: number; z: number }>): boolean {
@@ -1878,8 +1890,32 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     return () => { cancelled = true; };
   }, [drawPreset, setDrawPresetData, workspaceResourcePort]);
 
+  // The next window starts from the last one drawn this session (lib/windowCarry.ts): a window
+  // from the last window, a rooflight from the last rooflight. A target or pathway change starts
+  // blank; "Clear" in the toolbar starts the next one blank.
+  const drawOpeningKind: OpeningKind | null = drawElementType !== 'BuildingElementTransparent'
+    ? null
+    : drawMode === 'line' ? 'window' : drawMode === 'polygon' || drawMode === 'sloped-polygon' ? 'rooflight' : null;
+  const carryKey = useGeometryStore((s) => `${s.targetBundleId ?? ''}|${isExistingBuilding(s)}`);
+  const [carrySources, setCarrySources] = useKeyedState<Partial<Record<OpeningKind, string>>>(carryKey, NO_CARRY_SOURCES);
+  const carrySourceId = drawOpeningKind ? carrySources[drawOpeningKind] : undefined;
+  const carrySourceElement = useGeometryStore((s) => (carrySourceId ? s.elementsById[carrySourceId] : undefined));
+  const drawCarry = useMemo(() => (drawPreset ? null : openingCarry(carrySourceElement)), [carrySourceElement, drawPreset]);
+  const rememberDrawnOpening = useCallback((elementId: string) => {
+    if (drawOpeningKind) setCarrySources((sources) => ({ ...sources, [drawOpeningKind]: elementId }));
+  }, [drawOpeningKind, setCarrySources]);
+  const clearDrawCarry = useCallback(() => {
+    if (drawOpeningKind) setCarrySources((sources) => ({ ...sources, [drawOpeningKind]: undefined }));
+  }, [drawOpeningKind, setCarrySources]);
+  const drawCarryChip = useMemo(() => (drawOpeningKind && drawCarry ? {
+    label: drawOpeningKind === 'window' ? 'Next window' : 'Next rooflight',
+    summary: openingCarrySummary(drawCarry),
+    onClear: clearDrawCarry,
+  } : null), [clearDrawCarry, drawCarry, drawOpeningKind]);
+
   // Derive preset properties (strip metadata fields) for merging into new elements.
   // Persist the preset key in extra_json so the ElementCreator dropdown can restore it.
+  // With no preset picked, a new window takes the carried values instead.
   const drawPresetProps = useMemo(() => {
     if (
       drawElementType === 'MechanicalVentilationDuctwork' ||
@@ -1887,7 +1923,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     ) {
       return {};
     }
-    if (!drawPresetData || !drawPreset) return {};
+    if (!drawPresetData || !drawPreset) return (drawCarry ?? {}) as Record<string, unknown>;
     const topProps = { ...(drawPresetData as Record<string, unknown>) };
     const presetExtraJson = topProps.extra_json;
     delete topProps.type;
@@ -1901,7 +1937,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         _element_preset: drawPreset,
       },
     };
-  }, [drawElementType, drawPresetData, drawPreset]);
+  }, [drawElementType, drawPresetData, drawPreset, drawCarry]);
 
   const drawMvhrRoleProps = useMemo((): Record<string, unknown> => {
     if (drawElementType === 'MechanicalVentilationDuctwork') {
@@ -2299,6 +2335,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const commitVertexPositionUpdates = useGeometryStore((s) => s.commitVertexPositionUpdates);
   const commitConnectedPointDrag = useGeometryStore((s) => s.commitConnectedPointDrag);
   const removeFloor = useGeometryStore((s) => s.removeFloor);
+  const copyStorey = useGeometryStore((s) => s.copyStorey);
   const updateFloor = useGeometryStore((s) => s.updateFloor);
   const undo = useGeometryStore((s) => s.undo);
   const redo = useGeometryStore((s) => s.redo);
@@ -3476,6 +3513,20 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setActivePanel('details');
   }, [canInteractWithCanvasDecorations, canvasDecorationContributions, clearElementSelection, currentFloorZ, setActivePanel, setSelectedElementIds, setSelection]);
 
+  // A request from outside the canvas (Global values' "Edit on the plan") selects that decoration.
+  // The latest selection function (it refuses while the canvas cannot take a selection).
+  const selectCanvasDecorationRef = useRef(selectCanvasDecoration);
+  useLayoutEffect(() => {
+    selectCanvasDecorationRef.current = selectCanvasDecoration;
+  }, [selectCanvasDecoration]);
+  useEffect(() => geometryStore.subscribe((state) => {
+    const request = state.canvasDecorationRequest;
+    if (!request) return;
+    // Served now or dropped: a request kept for later would select out of the blue.
+    geometryStore.getState().requestCanvasDecoration(null);
+    selectCanvasDecorationRef.current(request.contributionId, request.id);
+  }), [geometryStore]);
+
   const replaceCanvasDecorationSelection = useCallback((contributionId: string, id: string) => {
     const contribution = canvasDecorationContributions.find(item => item.id === contributionId);
     setSelectedCanvasDecoration({ contributionId, id, floorZ: currentFloorZ,
@@ -3669,6 +3720,15 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     overlayCalibrateMode,
   ]);
 
+  // Leaving "Edit all N windows" by a click on empty canvas comes back to the window it was
+  // opened from. Any other way out (another element, a decoration, a draw) just leaves it.
+  const leaveToOrigin = useCallback((): boolean => {
+    if (!selection?.editAll || selectedElementIds.length <= 1 || !elementsById[selection.id]) return false;
+    setSelectedElementIds([selection.id]);
+    setSelection({ type: 'element', id: selection.id });
+    return true;
+  }, [selection, selectedElementIds, elementsById, setSelectedElementIds, setSelection]);
+
   const {
     marqueeSelection,
     setMarqueeSelection,
@@ -3678,6 +3738,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     handleMarqueeMove,
     handleMarqueeEnd,
   } = useMarqueeSelection({
+    leaveToOrigin,
     scale,
     panOffset,
     canvasCenter,
@@ -5972,6 +6033,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               ...(drawElementType === 'WetEmitter' ? { subcategory: 'radiator' as any } : {})
             };
             updateElement(elementId, linePatch, true);
+            if (drawElementType === 'BuildingElementTransparent') rememberDrawnOpening(elementId);
             earlierLegs.forEach((leg, i) => {
               updateElement(leg.elementId, {
                 ...linePatch,
@@ -6083,6 +6145,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     : {}),
                   ...(drawElementType === 'WetEmitter' ? { subcategory: 'ufh' as any } : {}),
                 });
+                if (drawElementType === 'BuildingElementTransparent') rememberDrawnOpening(elementId);
                 setCurrentFloorZ(elementZ);
                 setSelection(selectionForDrawnElement(geometryStore, elementId));
                 setDrawPoints([]);
@@ -6240,6 +6303,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 orientation360: Math.round((orientation360 ?? 0) * 100) / 100, // Round to 2 decimal places for data quality
                 pitch: 30 // Default pitch for sloped polygon (user can adjust)
               });
+              if (drawElementType === 'BuildingElementTransparent') rememberDrawnOpening(elementId);
 
               // Auto-switch to the floor where the element was created
               setCurrentFloorZ(elementZ);
@@ -6372,9 +6436,11 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       setSelectedCanvasDecoration(null);
       // De-focus floating panels when clicking empty canvas
       setActivePanel(null);
-      // Clear both single and multi-select
-      setSelection(null);
-      clearElementSelection();
+      if (!leaveToOrigin()) {
+        // Clear both single and multi-select
+        setSelection(null);
+        clearElementSelection();
+      }
       if (spaceLabellerOpen) setSpaceLabellerSelectedLabelId(null);
     }
   };
@@ -7879,6 +7945,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       dragEl.id,
                       {
                         parent_element: parentPatch.parentName,
+                        // Dropped onto a wall, a window takes its pitch as well as its line.
+                        ...hostPitchPatch(findElementByName(parentPatch.parentName)),
                         coordinates: parentPatch.coordinates as any,
                         extra_json: translateDormerExtraJson(
                           (dragEl as any).extra_json as Record<string, any> | undefined,
@@ -7930,6 +7998,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       dragEl.id,
                       {
                         parent_element: best.parentName,
+                        // Dropped onto a wall, a window takes its pitch as well as its line.
+                        ...hostPitchPatch(findElementByName(best.parentName)),
                         coordinates: snappedCoords as any,
                         extra_json: translateDormerExtraJson(
                           (dragEl as any).extra_json as Record<string, any> | undefined,
@@ -8875,6 +8945,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             elementsById={elementsById}
             ensureFloorForZ={ensureFloorForZ}
             removeFloor={removeFloor}
+            copyStorey={copyStorey}
             updateFloor={updateFloor}
             getElementValidation={getValidation}
             setDrawPoints={setDrawPoints}
@@ -8886,6 +8957,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             drawPresetError={drawPresetError}
             setDrawPreset={setDrawPreset}
             presetOptions={elementPresetOptions}
+            carry={drawCarryChip}
             drawMvhrDuctRole={drawMvhrDuctRole}
             setDrawMvhrDuctRole={setDrawMvhrDuctRole}
             drawMvhrTerminalRole={drawMvhrTerminalRole}

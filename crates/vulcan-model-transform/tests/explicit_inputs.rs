@@ -515,3 +515,76 @@ fn version_metadata_rejects_the_retired_fhs_wrapper_version_key() {
     let json = r#"{"hem_core_version":"1","fhs_wrapper_version":"1"}"#;
     assert!(serde_json::from_str::<VersionMetadata>(json).is_err());
 }
+
+/// A value the user entered on an element that the target's schema has no place for is named,
+/// with the element and the reason, beside the editor's other target warnings.
+#[test]
+fn authored_element_field_the_target_drops_is_a_target_warning() {
+    let csv = "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\n\
+        Exposed Elements\nName,Zone,Type,area,pitch,orientation360,u_value,height,width,base_height,extra_json\n\
+        W1,Living,BuildingElementOpaque,10,90,0,0.3,2.5,4,0,\"{\"\"solar_absorption_coeff\"\":0.7}\"\n\
+        W2,Living,BuildingElementOpaque,10,90,180,0.3,2.5,4,0,\"{\"\"solar_absorption_coeff\"\":0.7,\"\"colour\"\":\"\"Dark\"\"}\"\n\n\
+        Ground Elements\nName,Zone,Type,area,perimeter,floor_type,extra_json\n\
+        F1,Living,BuildingElementGround,40,26,Slab_no_edge_insulation,\"{\"\"thermal_resist_insul\"\":1.5}\"\n\
+        F2,Living,BuildingElementGround,40,26,,\"{\"\"thermal_resist_insul\"\":1.5}\"\n\
+        F3,Living,BuildingElementGround,40,26,Slab_no_edge_insulation,\"{\"\"hemie_bundle\"\":{\"\"kind\"\":\"\"bay\"\",\"\"bundle_id\"\":\"\"b\"\",\"\"role\"\":\"\"floor\"\"},\"\"geometry_face\"\":\"\"x\"\",\"\"floor_id\"\":\"\"f0\"\",\"\"thermal_bridge_source\"\":\"\"auto\"\",\"\"dormer_bundle\"\":\"\"d\"\",\"\"foo_typo\"\":1}\"\n";
+    let output = transform_geometry_csv(TransformRequest {
+        conversion_profile: Default::default(),
+        product_data: Default::default(),
+        csv: csv.into(),
+        schema_json: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/schemas/input_fhs.schema.json"
+        ))
+        .into(),
+        defaults_json: include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/defaults/defaults_template.json"
+        ))
+        .into(),
+        profile: ModelProfile::Fhs,
+        version_metadata: VersionMetadata {
+            hem_core_version: "core".into(),
+            wrapper_version: Some("fhs".into()),
+        },
+    })
+    .expect("transform");
+    let notice = |path: &str| {
+        output
+            .schema_omissions
+            .iter()
+            .find(|n| n.path == path)
+            .unwrap_or_else(|| panic!("no notice at {path}: {:?}", output.schema_omissions))
+    };
+    let coeff = notice("/Zone/Living/BuildingElement/W1/solar_absorption_coeff");
+    assert_eq!(coeff.code, "W_TARGET_INPUT");
+    assert_eq!(
+        coeff.message,
+        "Element 'W1': this HEM version takes the colour, not the solar absorption coefficient, so the run leaves the coefficient out. Set the colour."
+    );
+    assert_eq!(
+        notice("/Zone/Living/BuildingElement/W2/solar_absorption_coeff").message,
+        "Element 'W2': this HEM version takes the colour, not the solar absorption coefficient, so the run leaves the coefficient out and uses the colour, Dark."
+    );
+    let insulation = notice("/Zone/Living/BuildingElement/F1/thermal_resist_insul");
+    assert_eq!(insulation.code, "W_TARGET_INPUT");
+    assert_eq!(
+        insulation.message,
+        "Element 'F1': Void base insulation thermal resistance is not used by the floor type Ground floor, no edge insulation, so the run leaves it out. Remove it, or change the floor type."
+    );
+    // No floor type: the schema's required-field error says so, and nothing is dropped.
+    assert!(!output
+        .schema_omissions
+        .iter()
+        .any(|n| n.path.contains("/F2/")));
+    assert!(output.validation.errors.iter().any(|e| {
+        e.path == "/Zone/Living/BuildingElement/F2" && e.message.contains("floor_type")
+    }));
+    // Editor-only keys and keys no floor type takes stay plain omissions.
+    let named: Vec<_> = output
+        .schema_omissions
+        .iter()
+        .filter(|n| n.code == "W_TARGET_INPUT" && n.path.contains("/F3/"))
+        .collect();
+    assert!(named.is_empty(), "{named:?}");
+}

@@ -235,3 +235,25 @@ describe('suspended floors', () => {
     expect(store.getState().history).toHaveLength(1);
   });
 });
+
+describe('ground fields a target does not read', () => {
+  const renderFloor = (port: GeometrySchemaPort) => {
+    const store = openedModel();
+    return render(
+      <GeometryEditorServicePortsProvider schemaPort={port} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+        <GeometryStoreProvider store={store}>
+          <ElementCreator selection={{ type: 'element', id: idOf(store, 'Floor') } as never} setSelection={vi.fn()}
+            useCard={false} inspectorContributions={emptyGeometryInspectorContributions} />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+  };
+
+  it('shows no total area or perimeter where the target hides them', () => {
+    expect(renderFloor(canonicalGeometrySchemaPort).container.textContent).toMatch(/Total Area.*Perimeter/);
+    const hiding = { ...canonicalGeometrySchemaPort, targetRules: () => ({ hiddenFields: { BuildingElementGround: ['total_area', 'perimeter'] } }) };
+    const text = renderFloor(hiding).container.textContent ?? '';
+    expect(text).not.toContain('Total Area');
+    expect(text).not.toContain('Perimeter (m)');
+  });
+});

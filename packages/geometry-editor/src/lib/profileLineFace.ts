@@ -297,3 +297,23 @@ export function lineFaceOutline(el: LineFaceHost): ProfilePoint[] | null {
     return p.t !== prev.t || p.h !== prev.h;
   });
 }
+
+/**
+ * A rectangle drawn as a line with no shaped face: its area is width × height, already on the
+ * panel, so the read-only Area line would only repeat it.
+ */
+export function areaRepeatsSize(element: { extra_json?: unknown } | null | undefined, shape: string | null | undefined): boolean {
+  return !!element && shape === 'line' && !readProfiledLineFace(element.extra_json);
+}
+
+/** The collapsed outline's words: "Rectangle" for flat edges, else e.g. "Top under roof" or "Custom top". */
+export function outlineSummary(face: ProfileLineFace | null): string {
+  const words = { top: ['top under roof', 'custom top'], bottom: ['bottom on roof', 'custom bottom'] } as const;
+  const parts = (['top', 'bottom'] as const).flatMap((edge) => {
+    if (!face) return [];
+    if (face[`${edge}_mode`] === 'roof') return [words[edge][0]];
+    return isFlatProfile(face[`${edge}_profile`], edge === 'bottom' ? 0 : undefined) ? [] : [words[edge][1]];
+  });
+  const text = parts.join(' and ') || 'rectangle';
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}

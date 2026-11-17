@@ -115,7 +115,9 @@ export function createCommunityGeometryDocumentHost(
     updateFileName: (fileName: string) => session.updateDocument({ fileName }),
     isDirty: () => session.getSnapshot().isDirty,
     prepareSave: () => prepared(() => complete(controller.save())),
-    prepareNew: (request: GeometryDocumentHostNewRequest) => prepared(() =>
+    prepareNew: (request: GeometryDocumentHostNewRequest) => {
+      if (request.start !== undefined) throw new Error(`New Model start ${request.start} is not offered here`);
+      return prepared(() =>
       complete(request.contents === undefined
         ? controller.newDocument(
             request.dirtyDecision === undefined
@@ -127,7 +129,8 @@ export function createCommunityGeometryDocumentHost(
             ...(request.dirtyDecision === undefined
               ? {}
               : { dirtyDecision: request.dirtyDecision }),
-          }))),
+          })));
+    },
     prepareOpen: (request: GeometryDocumentHostOpenRequest) => prepared(() =>
       complete(controller.openDocument({
         document: {

@@ -79,11 +79,11 @@ describe('FloorPickerDropdown', () => {
     );
 
     fireEvent.click(screen.getByTitle('Current floor'));
-    expect(screen.getByText('Adds F3')).toBeInTheDocument();
     const addInput = screen.getByLabelText('FHS floor number to add');
+    expect(addInput).toHaveAttribute('placeholder', '3');
     fireEvent.change(addInput, { target: { value: '1' } });
     expect(screen.getByText('F1: Ground exists')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Empty' }));
 
     expect(onAddFloor).not.toHaveBeenCalled();
     expect(screen.getByText('F1: Ground already exists')).toBeInTheDocument();
@@ -106,13 +106,12 @@ describe('FloorPickerDropdown', () => {
     fireEvent.click(screen.getByTitle('Current floor'));
     const addInput = screen.getByLabelText('FHS floor number to add');
     fireEvent.change(addInput, { target: { value: '0' } });
-    expect(screen.getByText('Adds F0: Basement 1')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Empty' }));
 
     expect(onAddFloor).toHaveBeenCalledWith(-1);
   });
 
-  it('displays each floor\'s base height as an editable field', () => {
+  it('shows each floor\'s derived base and height as placeholders, ground\'s base as 0', () => {
     render(
       <FloorPickerDropdown
         currentFloorZ={0}
@@ -131,7 +130,63 @@ describe('FloorPickerDropdown', () => {
     expect(groundInput).toHaveAttribute('type', 'text');
     expect(upperInput).toHaveAttribute('type', 'text');
     expect(groundInput).toHaveValue('0');
-    expect(upperInput).toHaveValue('2.4');
+    expect(upperInput).toHaveValue('');
+    expect(upperInput).toHaveAttribute('placeholder', '2.4');
+    const groundHeight = screen.getByLabelText('Storey height for F1: Ground in metres');
+    expect(groundHeight).toHaveValue('');
+    expect(groundHeight).toHaveAttribute('placeholder', '2.4');
+  });
+
+  it('types a storey height, and an emptied height goes back to the walls', () => {
+    const onUpdateFloor = vi.fn();
+    const typedFloors = [{ ...floors[0]!, height: 2.5, heightUserOverride: true }, floors[1]!];
+    render(
+      <FloorPickerDropdown
+        currentFloorZ={0}
+        floors={typedFloors}
+        elementsById={elementsById}
+        onSelectFloor={vi.fn()}
+        onAddFloor={vi.fn()}
+        onDeleteFloor={vi.fn()}
+        onUpdateFloor={onUpdateFloor}
+      />,
+    );
+    fireEvent.click(screen.getByTitle('Current floor'));
+    const ground = screen.getByLabelText('Storey height for F1: Ground in metres');
+    expect(ground).toHaveValue('2.5');
+    fireEvent.change(ground, { target: { value: '' } });
+    fireEvent.blur(ground);
+    expect(onUpdateFloor).toHaveBeenLastCalledWith('floor-0', { heightUserOverride: false });
+    const upper = screen.getByLabelText('Storey height for F2 in metres');
+    fireEvent.change(upper, { target: { value: '2.65' } });
+    fireEvent.blur(upper);
+    expect(onUpdateFloor).toHaveBeenLastCalledWith('floor-1', { height: 2.65, heightUserOverride: true });
+  });
+
+  it('offers "Copy of F2" for the storey above, and only Empty under a roof', () => {
+    const onCopyFloor = vi.fn();
+    const props = {
+      currentFloorZ: 0,
+      floors,
+      onSelectFloor: vi.fn(),
+      onAddFloor: vi.fn(),
+      onDeleteFloor: vi.fn(),
+      onCopyFloor,
+    };
+    const { unmount } = render(<FloorPickerDropdown {...props} elementsById={elementsById} />);
+    fireEvent.click(screen.getByTitle('Current floor'));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy of F2' }));
+    expect(onCopyFloor).toHaveBeenCalledWith(1, 2);
+    unmount();
+
+    const roof = {
+      id: 'roof', name: 'Roof', type: 'BuildingElementOpaque', width: 4, height: 4, area: 16, pitch: 35, base_height: 4.8,
+      coordinates: [{ x: 0, y: -1, z: 1 }, { x: 4, y: -1, z: 1 }, { x: 4, y: 4, z: 1 }], parent_element: null,
+    };
+    render(<FloorPickerDropdown {...props} elementsById={{ ...elementsById, roof } as any} />);
+    fireEvent.click(screen.getByTitle('Current floor'));
+    expect(screen.getByRole('button', { name: 'Empty' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Copy of/ })).toBeNull();
   });
 
   it('edits F1 base height directly', () => {
@@ -253,7 +308,7 @@ describe('FloorPickerDropdown', () => {
     fireEvent.click(screen.getByTitle('Current floor'));
     const input = screen.getByLabelText('Base height for F0: Basement 1 in metres');
     expect(input).toHaveAttribute('type', 'text');
-    expect(input).toHaveValue('-2.4');
+    expect(input).toHaveAttribute('placeholder', '-2.4');
     expect(input).not.toBeDisabled();
 
     fireEvent.change(input, { target: { value: '-2.7' } });

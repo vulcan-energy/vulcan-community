@@ -167,7 +167,7 @@ pub(crate) fn map_appliances(
             errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
                 format!("/Appliances/{field}"),
-                format!("HEM:EPC needs to know whether the dwelling has space for this appliance. Choose Yes or No in Global Settings > Dwelling Details ({}).", appliance_label(row)),
+                format!("HEM:EPC needs to know whether the dwelling has space for this appliance. Choose Yes or No in Global Settings > Dwelling details ({}).", appliance_label(row)),
             ));
             continue;
         }
@@ -176,7 +176,7 @@ pub(crate) fn map_appliances(
             Some(false) if drawn => errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
                 "/Metadata".into(),
-                format!("{} is No in Global Settings > Dwelling Details, but the plan has a {} appliance. Correct one of them.", appliance_label(row), keys.join(" or ").replace('_', " ").to_lowercase()),
+                format!("{} is No in Global Settings > Dwelling details, but the plan has a {} appliance. Correct one of them.", appliance_label(row), keys.join(" or ").replace('_', " ").to_lowercase()),
             )),
             Some(present) => {
                 appliances.insert(field.into(), json!(present));
@@ -537,14 +537,8 @@ pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationE
 
 /// Every opaque element states `solar_absorption_coeff` (EPC requires it): its own, or the
 /// DESNZ-defined coefficient for its colour (Light, Intermediate or Dark), on a new build and an
-/// existing building alike. `from_colour` lists the element paths whose coefficient came from a
-/// colour; each is reported.
-pub(crate) fn check_solar_absorption(
-    model: &Value,
-    from_colour: &[String],
-    errors: &mut Vec<ValidationError>,
-    notices: &mut Vec<SchemaOmission>,
-) {
+/// existing building alike. The editor shows a colour's coefficient on the field.
+pub(crate) fn check_solar_absorption(model: &Value, errors: &mut Vec<ValidationError>) {
     for (zone, zone_value) in model["Zone"].as_object().into_iter().flatten() {
         for (name, element) in zone_value["BuildingElement"]
             .as_object()
@@ -552,9 +546,6 @@ pub(crate) fn check_solar_absorption(
             .flatten()
         {
             let path = json_pointer(&["Zone", zone, "BuildingElement", name]);
-            if from_colour.contains(&path) {
-                notices.push(notice(&format!("{path}/solar_absorption_coeff"), format!("Element '{name}' takes solar_absorption_coeff {} from its colour (the default colour map).", element["solar_absorption_coeff"])));
-            }
             if element["type"] == "BuildingElementOpaque"
                 && element.get("solar_absorption_coeff").is_none()
             {
@@ -706,13 +697,9 @@ fn combi_daily_hot_water(bedrooms: u64, floor_area: f64) -> u64 {
 ///   60 °C.
 /// - Ventilation zone base height: 0 m for a house, bungalow or park home, or a dwelling whose
 ///   base storey is the ground floor (DESNZ-defined); any other built form must state it.
-/// - Envelope area: from the air test report when stated, else derived from the drawn elements,
-///   reported.
-/// - Window shading: a window with no drawn shading has none, derived from the drawing and
-///   reported.
+/// - Window shading: a window with no drawn shading has none, derived from the drawing.
 pub(crate) fn apply_desnz_defaults(
     model: &mut Value,
-    env_area_stated: bool,
     errors: &mut Vec<ValidationError>,
     notices: &mut Vec<SchemaOmission>,
     derived: &mut Vec<crate::DerivedDefault>,
@@ -796,20 +783,15 @@ pub(crate) fn apply_desnz_defaults(
         // Assumption pending DESNZ E40 (Vulcan's assumption registry lists it): with emitters of
         // different types, the first emitter's type sets the design flow temperature, as HEMIE's
         // `_serialize_design_flow_temp` does. If DESNZ gives a rule for a mix, apply it here.
-        let types: Vec<Option<&str>> = system["emitters"]
+        let types: Vec<Option<&str>> = system
+            .get("emitters")
+            .unwrap_or(&Value::Null)
             .as_array()
             .into_iter()
             .flatten()
             .map(|e| e["wet_emitter_type"].as_str())
             .collect();
-        let emitter = types.first().copied().flatten().map(|first| {
-            if types.iter().all(|t| *t == Some(first)) {
-                first.to_string()
-            } else {
-                format!("first emitter, {first}")
-            }
-        });
-        let sources: Vec<Option<&str>> = match &system["HeatSource"] {
+        let sources: Vec<Option<&str>> = match system.get("HeatSource").unwrap_or(&Value::Null) {
             Value::Array(items) => items.iter().collect(),
             other => vec![other],
         }
@@ -828,14 +810,13 @@ pub(crate) fn apply_desnz_defaults(
                 Some("fancoil" | "ufh") => Some(45),
                 _ => None,
             };
-            if let (Some(temp), Some(emitter)) = (temp, &emitter) {
+            if let Some(temp) = temp {
                 system.insert("design_flow_temp".into(), json!(temp));
                 derive(
                     json_pointer(&["SpaceHeatSystem", name]),
                     "design_flow_temp",
                     json!(temp),
                 );
-                used.push(format!("design_flow_temp {temp} ({emitter})"));
             }
         }
         if !system.contains_key("temp_diff_emit_dsgn") {
@@ -845,14 +826,13 @@ pub(crate) fn apply_desnz_defaults(
                 Some("HIU" | "DirectFeed") => Some(20),
                 _ => None,
             };
-            if let (Some(diff), Some(source)) = (diff, &source) {
+            if let Some(diff) = diff {
                 system.insert("temp_diff_emit_dsgn".into(), json!(diff));
                 derive(
                     json_pointer(&["SpaceHeatSystem", name]),
                     "temp_diff_emit_dsgn",
                     json!(diff),
                 );
-                used.push(format!("temp_diff_emit_dsgn {diff} ({source})"));
             }
         }
         // No DESNZ default for the rest (plan questions E40, E59): each one missing is an error
@@ -872,11 +852,16 @@ pub(crate) fn apply_desnz_defaults(
                 "temp_diff_emit_dsgn",
                 match &source {
                     Some(source) => format!("for a {source} heat source"),
+                    None if system.get("HeatSource").is_none_or(Value::is_null) => {
+                        "while it names no heat source".into()
+                    }
                     None => "when its heat sources differ in type".into(),
                 },
             );
         }
-        let radiators = system["emitters"]
+        let radiators = system
+            .get("emitters")
+            .unwrap_or(&Value::Null)
             .as_array()
             .into_iter()
             .flatten()
@@ -918,9 +903,9 @@ pub(crate) fn apply_desnz_defaults(
                 .unwrap_or_default();
             let words = field.replace('_', " ");
             match (existing, default) {
+                // The field shows the default (`systemFieldDefaults` in the editor).
                 (true, Some(value)) => {
                     system.insert(field.into(), json!(value));
-                    notices.push(notice(&path, format!("'{name}' does not state its {words}, so it uses the default, {value}. State it on the system to change it.")));
                 }
                 (true, None) => {}
                 (false, _) => {
@@ -961,9 +946,8 @@ pub(crate) fn apply_desnz_defaults(
                 let flow = rate.max(0.3 * area) * 3.6;
                 system["design_outdoor_air_flow_rate"] = json!(flow);
                 derive(path.clone(), "design_outdoor_air_flow_rate", json!(flow));
-                notices.push(notice(&path, format!("'{name}' does not state its design outdoor air flow rate, so it uses the default estimate from the bedrooms and the {area:.1} m² floor area: {flow:.1} m³/h. State it from the commissioning certificate to change it.")));
             }
-            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling Details."))),
+            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling details."))),
         }
     }
     if let Some(bedrooms) = model["NumberOfBedrooms"].as_u64().filter(|b| *b > 0) {
@@ -1020,33 +1004,20 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
     }
-    let mut unshaded = Vec::new();
-    // An existing building takes close-shading categories on the window instead, and names the
-    // windows that state none (`hemie_shading::close`).
-    let existing = model.get("IsExistingBuilding") == Some(&Value::Bool(true));
+    // A window with no drawn shading has none; the window shows "None" for its attached shading.
     for (_, zone_value) in model["Zone"].as_object_mut().into_iter().flatten() {
-        for (name, element) in zone_value["BuildingElement"]
+        for element in zone_value["BuildingElement"]
             .as_object_mut()
             .into_iter()
-            .flatten()
+            .flat_map(|elements| elements.values_mut())
         {
             if let Some(element) = element.as_object_mut().filter(|e| {
                 e.get("type") == Some(&json!("BuildingElementTransparent"))
                     && !e.contains_key("shading")
             }) {
                 element.insert("shading".into(), json!([]));
-                unshaded.push(name.clone());
             }
         }
-    }
-    if !unshaded.is_empty() && !existing {
-        notices.push(notice(
-            "/Zone",
-            format!(
-                "No shading is drawn for {}, so they have none. Draw Window Shading to add it.",
-                unshaded.join(", ")
-            ),
-        ));
     }
     let build_type = model["General"]["build_type"]
         .as_str()
@@ -1078,30 +1049,22 @@ pub(crate) fn apply_desnz_defaults(
             .contains(&build_type.as_str())
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No ventilation zone base height is given, so this {build_type} uses 0 m, the default for a dwelling at ground level. Give it in Global Settings > Ventilation Environment to state it.")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so this {build_type} uses 0 m, the default for a dwelling at ground level. Give it in Global Settings > Ventilation environment to state it.")));
             } else if storey == Some(0) {
                 // DESNZ-defined: a ground-floor flat or maisonette also defaults to 0 m.
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No ventilation zone base height is given, so this ground-floor {build_type} uses 0 m, the default. Give it in Global Settings > Ventilation Environment to state it.")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so this ground-floor {build_type} uses 0 m, the default. Give it in Global Settings > Ventilation environment to state it.")));
             } else if let Some(storey) = base_storey {
                 notices.push(notice(path, format!("No ventilation zone base height is given, so the existing-building EPC estimates it from the storey of dwelling, {}.", storey + 1)));
             } else {
-                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: give it in Global Settings > Ventilation Environment. An existing building may give its storey of dwelling instead, in Dwelling Details.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
+                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: give it in Global Settings > Ventilation environment. An existing building may give its storey of dwelling instead, in Dwelling details.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
             }
         }
         // Absent: the builder removed the template's value (`desnz_default_rows`). HEMIE
         // applies its own default on an existing building.
+        // The field shows "No (default)".
         if new_build && ventilation.get("noise_nuisance").is_none_or(Value::is_null) {
             ventilation.insert("noise_nuisance".into(), json!(false));
-            notices.push(notice("/InfiltrationVentilation/noise_nuisance", "No noise nuisance is given, so the model uses No, the default. Give it in Global Settings > Ventilation Environment to state it.".to_string()));
-        }
-        if let Some(area) = ventilation
-            .get("Leaks")
-            .and_then(|l| l.get("env_area"))
-            .and_then(Value::as_f64)
-            .filter(|_| !env_area_stated)
-        {
-            notices.push(notice("/InfiltrationVentilation/Leaks/env_area", format!("Envelope area is {area:.1} m², from the drawn walls, floors and roofs. To use the air test value, enter Envelope area in Global Settings > Air tightness.")));
         }
     }
 }
@@ -1611,7 +1574,7 @@ pub(crate) fn build_type_from_party_walls(
     allowed: &[String],
 ) -> Result<(&'static str, usize), String> {
     let state =
-        |why: String| format!("{why} Choose the build type in Global Settings > Dwelling Details.");
+        |why: String| format!("{why} Choose the build type in Global Settings > Dwelling details.");
     let mut walls = Vec::new();
     let mut midpoints = Vec::new();
     for row in csv.values().flatten() {
@@ -2066,13 +2029,7 @@ mod tests {
         let battery = |extra: Value| {
             let mut model = json!({"EnergySupply": {"mains elec": {"fuel": "electricity", "ElectricBattery": extra}}});
             let mut notices = Vec::new();
-            apply_desnz_defaults(
-                &mut model,
-                false,
-                &mut Vec::new(),
-                &mut notices,
-                &mut Vec::new(),
-            );
+            apply_desnz_defaults(&mut model, &mut Vec::new(), &mut notices, &mut Vec::new());
             (model["EnergySupply"]["mains elec"].clone(), notices)
         };
         let (supply, _) = battery(json!({"type": "stationary", "power_limit_battery_import": 7.2}));
@@ -2110,13 +2067,7 @@ mod tests {
             "HotWaterSource": {"combi": {"type": "CombiBoiler"}, "stated": {"type": "CombiBoiler", "daily_HW_usage": 120}}
         });
         let mut derived = Vec::new();
-        apply_desnz_defaults(
-            &mut model,
-            false,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut derived,
-        );
+        apply_desnz_defaults(&mut model, &mut Vec::new(), &mut Vec::new(), &mut derived);
         assert_eq!(model["HotWaterSource"]["combi"]["daily_HW_usage"], 100);
         assert_eq!(model["HotWaterSource"]["stated"]["daily_HW_usage"], 120);
         assert!(
@@ -2135,15 +2086,9 @@ mod tests {
                 "HotWaterSource": {"combi": {"type": "CombiBoiler"}},
                 "InfiltrationVentilation": {"MechanicalVentilation": {"mv": {"vent_type": "MVHR"}}}
             });
-            let mut notices = Vec::new();
-            apply_desnz_defaults(
-                &mut model,
-                false,
-                &mut Vec::new(),
-                &mut notices,
-                &mut Vec::new(),
-            );
-            (model, notices)
+            let mut derived = Vec::new();
+            apply_desnz_defaults(&mut model, &mut Vec::new(), &mut Vec::new(), &mut derived);
+            (model, derived)
         };
         let flow = |model: &Value| {
             model["InfiltrationVentilation"]["MechanicalVentilation"]["mv"]
@@ -2152,12 +2097,13 @@ mod tests {
                 .unwrap()
         };
         // One bedroom at 20 m²: the wrapper's 53.43 litres; 13 + 6 l/s beats 0.3 × 20 l/s.
-        let (model, notices) = run(1, 8.0, 12.0);
+        let (model, derived) = run(1, 8.0, 12.0);
         assert_eq!(model["HotWaterSource"]["combi"]["daily_HW_usage"], 53);
         assert!((flow(&model) - 19.0 * 3.6).abs() < 1e-9);
-        assert!(notices
+        // The field shows the estimate as its placeholder.
+        assert!(derived
             .iter()
-            .any(|n| n.message.contains("the 20.0 m² floor area")));
+            .any(|d| d.field == "design_outdoor_air_flow_rate" && d.value == json!(19.0 * 3.6)));
         // Three bedrooms at 200 m²: the floor term, 0.3 × 200 = 60 l/s, beats 13 + 18 l/s.
         let (model, _) = run(3, 50.0, 150.0);
         assert!((flow(&model) - 60.0 * 3.6).abs() < 1e-9);
@@ -2174,13 +2120,7 @@ mod tests {
             }}}
         });
         let mut derived = Vec::new();
-        apply_desnz_defaults(
-            &mut model,
-            false,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut derived,
-        );
+        apply_desnz_defaults(&mut model, &mut Vec::new(), &mut Vec::new(), &mut derived);
         let heaters = &model["HotWaterSource"]["cyl"]["HeatSource"];
         assert_eq!(heaters["coil"]["temp_flow_limit_upper"], 60);
         assert_eq!(heaters["stated"]["temp_flow_limit_upper"], 55);
@@ -2202,36 +2142,18 @@ mod tests {
                 "SpaceHeatSystem": {"c": {"type": "WetDistribution", "HeatSource": {"name": "hp"},
                     "emitters": [{"wet_emitter_type": first}, {"wet_emitter_type": second}]}}
             });
-            let (mut errors, mut notices) = (Vec::new(), Vec::new());
-            apply_desnz_defaults(
-                &mut model,
-                false,
-                &mut errors,
-                &mut notices,
-                &mut Vec::new(),
-            );
+            let mut errors = Vec::new();
+            apply_desnz_defaults(&mut model, &mut errors, &mut Vec::new(), &mut Vec::new());
             assert!(
                 !errors
                     .iter()
                     .any(|e| e.path.starts_with("/SpaceHeatSystem")),
                 "{errors:?}"
             );
-            let notice = notices
-                .iter()
-                .find(|n| n.path == "/SpaceHeatSystem/c")
-                .unwrap();
-            (
-                model["SpaceHeatSystem"]["c"]["design_flow_temp"].clone(),
-                notice.message.clone(),
-            )
+            model["SpaceHeatSystem"]["c"]["design_flow_temp"].clone()
         };
-        let (temp, notice) = run("radiator", "ufh");
-        assert_eq!(temp, 55);
-        assert!(
-            notice.contains("design flow temp 55 (first emitter, radiator)"),
-            "{notice}"
-        );
-        assert_eq!(run("ufh", "radiator").0, 45);
+        assert_eq!(run("radiator", "ufh"), 55);
+        assert_eq!(run("ufh", "radiator"), 45);
     }
 
     #[test]
@@ -2242,13 +2164,7 @@ mod tests {
             "SpaceHeatSystem": {"c": {"type": "WetDistribution", "HeatSource": {"name": "stove"}, "emitters": [{"wet_emitter_type": "radiator"}]}}
         });
         let mut errors = Vec::new();
-        apply_desnz_defaults(
-            &mut model,
-            false,
-            &mut errors,
-            &mut Vec::new(),
-            &mut Vec::new(),
-        );
+        apply_desnz_defaults(&mut model, &mut errors, &mut Vec::new(), &mut Vec::new());
         let found: Vec<&str> = errors
             .iter()
             .map(|e| e.path.as_str())
@@ -2337,13 +2253,7 @@ mod tests {
                 }
             });
             let mut errors = Vec::new();
-            apply_desnz_defaults(
-                &mut model,
-                false,
-                &mut errors,
-                &mut Vec::new(),
-                &mut Vec::new(),
-            );
+            apply_desnz_defaults(&mut model, &mut errors, &mut Vec::new(), &mut Vec::new());
             let found: Vec<&str> = errors
                 .iter()
                 .map(|e| e.path.as_str())

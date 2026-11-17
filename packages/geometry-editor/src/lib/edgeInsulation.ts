@@ -3,9 +3,9 @@
 
 /**
  * Helpers for `edge_insulation` on BuildingElementGround (Slab_edge_insulation):
- * a JSON array with at most one horizontal and one vertical segment object. An existing
- * building may state a segment's thickness, material and thermal conductivity in place of its
- * resistance.
+ * a JSON array with at most one horizontal and one vertical segment object. A new build states a
+ * segment's resistance, width or depth and thickness; an existing building may state its
+ * thickness, material and thermal conductivity in place of its resistance.
  */
 
 export type EdgeInsulationOrientation = 'horizontal' | 'vertical';
@@ -60,8 +60,10 @@ export type EdgeInsulationSerialized =
  */
 export function formValuesToExtraJsonEdgeInsulation(form: EdgeInsulationFormValues, partial = false): EdgeInsulationSerialized {
   const value: Record<string, unknown>[] = [];
-  // Only an existing building states thickness, material and conductivity.
-  const v = partial ? form : switchEdgeInsulationMethod(form, 'resistance');
+  // A new build states resistance, width or depth, and the thickness the floor calculation needs;
+  // only an existing building states material and conductivity.
+  const newBuild = (seg: EdgeInsulationSegmentValues): EdgeInsulationSegmentValues => ({ ...seg, material: '', thermalConductivity: '' });
+  const v = partial ? form : { horizontal: newBuild(form.horizontal), vertical: newBuild(form.vertical) };
   for (const type of ['horizontal', 'vertical'] as const) {
     const rStr = v[type].edgeThermalResistance.trim();
     const dimStr = v[type].widthOrDepth.trim();

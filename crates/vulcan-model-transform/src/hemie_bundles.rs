@@ -591,12 +591,12 @@ pub(super) fn conservatories(
 }
 
 /// Opening type, security risk and glazed area of the glazing in a conservatory wall or roof.
-/// Derived from the model; with no opening type stated, DESNZ's default, closed.
+/// Derived from the model; with no opening type stated, DESNZ's default, closed (the editor's
+/// opening type shows "Closed (default)").
 fn glazing(
     ctx: &mut Ctx,
     glazing: &[&El],
     allowed: Option<&[&str]>,
-    defaulted: &mut Vec<String>,
     owner: &El,
 ) -> Option<(String, Option<bool>, f64)> {
     let types: BTreeSet<&str> = glazing
@@ -611,10 +611,7 @@ fn glazing(
         .collect();
     let names = quoted(&glazing.iter().map(|w| w.name).collect::<Vec<_>>());
     let window_type = match types.iter().collect::<Vec<_>>()[..] {
-        [] => {
-            defaulted.push(owner.name.to_string());
-            "closed".to_string()
-        }
+        [] => "closed".to_string(),
         [t] if allowed.is_none_or(|a| a.contains(t)) => t.to_string(),
         _ => {
             ctx.errors.push(error("CONSERVATORY", owner.path(), format!("The glazing {names} of conservatory element '{}' opens as {}. A conservatory wall or roof takes one opening type{}: give all its glazing the same one.", owner.name, quoted(&types.into_iter().collect::<Vec<_>>()), allowed.map(|a| format!(": {}", quoted(a))).unwrap_or_default())));
@@ -648,12 +645,6 @@ fn glazed_area(ctx: &mut Ctx, glazing: &[&El]) -> Option<f64> {
     Some(areas?.iter().sum())
 }
 
-fn defaulted_notice(ctx: &mut Ctx, part: &str, defaulted: Vec<String>) {
-    if !defaulted.is_empty() {
-        ctx.notices.push(notice("/Zone", format!("{part}: the glazing of {} states no opening type, so it opens as closed, the default.", quoted(&defaulted.iter().map(String::as_str).collect::<Vec<_>>()))));
-    }
-}
-
 /// The walls of each conservatory part as HEMIE conservatory walls.
 pub(super) fn conservatory_walls(
     ctx: &mut Ctx,
@@ -663,7 +654,6 @@ pub(super) fn conservatory_walls(
     doors: &[&El],
     placed: &mut BTreeSet<String>,
 ) {
-    let mut defaulted = Vec::new();
     let mut solid_doors = Vec::new();
     for wi in 0..walls.len() {
         if !conservatory[walls[wi].part] {
@@ -698,13 +688,9 @@ pub(super) fn conservatory_walls(
         for w in &glazed {
             placed.insert(w.name.to_string());
         }
-        let Some((window_type, risk, _)) = glazing(
-            ctx,
-            &glazed,
-            Some(&CONSERVATORY_WALL_WINDOW_TYPES),
-            &mut defaulted,
-            source,
-        ) else {
+        let Some((window_type, risk, _)) =
+            glazing(ctx, &glazed, Some(&CONSERVATORY_WALL_WINDOW_TYPES), source)
+        else {
             continue;
         };
         let Some(height) = ctx.eaves(source) else {
@@ -777,7 +763,6 @@ pub(super) fn conservatory_walls(
                 .insert("opaque_construction".into(), json!(key));
         }
     }
-    defaulted_notice(ctx, "Conservatory walls", defaulted);
     if !solid_doors.is_empty() {
         ctx.notices.push(notice("/Zone", format!("The doors {} are in conservatory walls and carry no glazing, so they are not entered. Draw a glazed door as a window.", quoted(&solid_doors.iter().map(String::as_str).collect::<Vec<_>>()))));
     }
@@ -826,9 +811,7 @@ pub(super) fn conservatory_roof(
             ctx.errors.push(error("CONSERVATORY", w.path(), format!("Rooflight '{}' of conservatory '{part}' states close shading. An existing building's conservatory roof takes none: remove it.", w.name)));
         }
     }
-    let mut defaulted = Vec::new();
-    let (window_type, _, glazed) = glazing(ctx, &lights, None, &mut defaulted, first)?;
-    defaulted_notice(ctx, part, defaulted);
+    let (window_type, _, glazed) = glazing(ctx, &lights, None, first)?;
     let mut measured = sloped_measurements(ctx, planes)?;
     // Derived from the model: a plane's area is exported net of its rooflights, so the drawn
     // plane is that area plus theirs.
@@ -1372,9 +1355,10 @@ mod tests {
         assert_eq!(roof["is_external_left_gable_wall"], true);
         assert_eq!(roof["is_external_right_gable_wall"], false);
         assert!(notices.iter().any(|n| n.message.contains("fully glazed")));
-        assert!(notices
+        // The opening type shows "Closed (default)": no notice repeats it.
+        assert!(!notices
             .iter()
-            .any(|n| n.message.contains("opens as closed, the default")));
+            .any(|n| n.message.contains("opens as closed")));
         let main = &parts["Main"];
         assert!(main.get("is_non_separated_conservatory").is_none());
         // The host wall is internal where the conservatory adjoins it: the main part's ground

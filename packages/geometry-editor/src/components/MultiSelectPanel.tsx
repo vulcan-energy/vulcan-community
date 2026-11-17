@@ -70,6 +70,7 @@ import type { GeometryInspectorContributions } from '../../../geometry-editor-ho
 import { GroupAccordion } from './jsonformsRenderers';
 import { hemieConstructionKeys, hemieConstructionSetting, hemieConstructionType, hemieHeatCapacityBands, hemieMoreLabels, parseHemieConstruction, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
 import { inferThermalMethod } from '../lib/thermalMethod';
+import { WINDOW_OPENING_TYPES, isConservatoryGlazing, windowSections, withWindowSections } from '../lib/hemieBundles';
 import { useTargetRules } from '../hooks/useTargetRules';
 import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
@@ -81,12 +82,16 @@ import {
   windowOpeningBulkEditBlocked,
   allowedWindowShadingTypes,
   isExistingBuilding,
+  CLOSE_SHADING_KINDS,
+  commonCloseShadingOptions,
+  windowTargetInputs,
   WINDOW_SHADING_TYPE_LABELS,
   windowPartsArePhysical,
   windowPartsCopyBlocked,
   windowPartsCopyColumns,
   type WindowOpeningField,
   type WindowOpeningSource,
+  SECURITY_RISK_OPTIONS,
 } from '../lib/windowOpenings';
 
 const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
@@ -873,6 +878,11 @@ const computeScalarDistribution = <T extends Element>(
   return { entries, totalEligible: eligible.length };
 };
 
+/** A shared value's option. A boolean's summary reads True/False; its options' values are true/false. */
+const summaryMatchesOption = (inputValue: string, option: { value: string; label: string }) =>
+  option.value === inputValue || option.label === inputValue
+  || ((inputValue === 'True' || inputValue === 'False') && option.value === inputValue.toLowerCase());
+
 const describeDistribution = (distribution: PropertyDistribution | null) => {
   if (!distribution) {
     return {
@@ -945,13 +955,6 @@ const assemblyImpactValue = (currentValues: unknown[], nextValues: unknown[]): s
   return current === next ? current : `${current} -> ${next}`;
 };
 
-const SummaryCaption: React.FC<{ summary: ReturnType<typeof describeDistribution> }> = ({ summary }) => {
-  return (
-    <div className="multi-select-summary-caption" title={summary.title}>
-      {summary.text}
-    </div>
-  );
-};
 
 const BOOLEAN_SELECT_OPTIONS = [
   { value: 'true', label: 'True' },
@@ -1090,7 +1093,8 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     rotateSelectedElements,
   } = useGeometryStore();
   const windowPartsPhysical = windowPartsArePhysical(schemaPort, schemaMode);
-  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, schemaMode, useGeometryStore(isExistingBuilding));
+  const existingBuilding = useGeometryStore(isExistingBuilding);
+  const allowedShadingTypes = allowedWindowShadingTypes(schemaPort, schemaMode, existingBuilding);
   const windowShadingTypeOptions = allowedShadingTypes
     ? WINDOW_SHADING_TYPE_OPTIONS.filter(({ value }) => allowedShadingTypes.includes(value))
     : WINDOW_SHADING_TYPE_OPTIONS;
@@ -1370,7 +1374,8 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     [activeWindowSurfaceIds, elementsById],
   );
   const activeWindowVariablePitchIds = useMemo(
-    () => activeWindowSurfaceElements.filter(isVariablePitchTransparent).map((el) => el.id),
+    // A hosted window's pitch follows its wall or roof, as on the single window panel.
+    () => activeWindowSurfaceElements.filter((el) => isVariablePitchTransparent(el) && !el.parent_element).map((el) => el.id),
     [activeWindowSurfaceElements],
   );
   const activeWindowVariablePitchElements = useMemo(
@@ -1617,7 +1622,16 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   );
   // Under construction bands, only the heat capacity bands every target's construction takes;
   // none (a door or window among them, or one that takes no heat capacity) leaves it to each element.
-  const { constructionBands, arealHeatCapacity } = useTargetRules();
+  const { constructionBands, arealHeatCapacity, hiddenFields } = useTargetRules();
+  // What the window form hides, bulk edit does not offer either.
+  const windowHidden = new Set(hiddenFields.BuildingElementTransparent ?? []);
+  const windowDetailKeys = WINDOW_DETAIL_VISIBLE_KEYS.filter((key) => !windowHidden.has(key));
+  // Under construction bands, the window form's opening type: one per window. Conservatory glazing
+  // and a window of several sections are set one at a time, as there.
+  const openingTypeWindows = constructionBands
+    ? activeWindowSurfaceElements.filter((el) => windowSections(el).length <= 1 && !isConservatoryGlazing(el, elementsById))
+    : [];
+  const openingTypeSummary = describeDistribution(computeScalarDistribution(openingTypeWindows, isTransparent, (el) => windowSections(el)[0]?.windowType));
   const buildType = useGeometryStore((s) => statedBuildType(s.complianceSettings));
   const hemieSettings = useGeometryStore((s) => s.complianceSettings.hemieSettings);
   const arealBandOptions = useMemo(() => {
@@ -2140,7 +2154,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           )}
           aria-label={label}
         />
-        <SummaryCaption summary={summary} />
       </div>
     </div>
   );
@@ -2177,7 +2190,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           )}
           aria-label={label}
         />
-        <SummaryCaption summary={summary} />
       </div>
     </div>
   );
@@ -2214,7 +2226,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           )}
           aria-label={label}
         />
-        <SummaryCaption summary={summary} />
       </div>
     </div>
   );
@@ -2369,7 +2380,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             bounds,
           )}
         />
-        <SummaryCaption summary={summary} />
       </div>
     </div>
   );
@@ -2386,7 +2396,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     const enabled = targetIds.length > 0;
     const currentOption =
       summary.kind === 'all'
-        ? options.find((option) => option.value === summary.inputValue || option.label === summary.inputValue)
+        ? options.find((option) => summaryMatchesOption(summary.inputValue, option))
         : undefined;
     const placeholder =
       summary.kind === 'mixed'
@@ -2423,7 +2433,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             </option>
           ))}
         </select>
-        <SummaryCaption summary={summary} />
         </div>
       </div>
     );
@@ -2440,14 +2449,15 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   ) => {
     const currentOption =
       summary.kind === 'all'
-        ? options.find((option) => option.value === summary.inputValue || option.label === summary.inputValue)
-        : undefined;
+        ? options.find((option) => summaryMatchesOption(summary.inputValue, option))
+        // A row whose blank means something (close shading: None) shows that option, as the single editor does.
+        : summary.kind === 'empty' ? options.find((option) => option.value === '') : undefined;
     const placeholder =
       summary.kind === 'mixed'
         ? summary.text
         : summary.kind === 'empty'
           ? 'Not stated'
-          : 'Set value...';
+          : currentOption ? 'Set value...' : summary.inputValue || 'Set value...';
     return (
       <div className="batch-row multi-select-row">
         {renderTooltipRowLabel(undefined, label, enabled, hint, targetIds)}
@@ -2469,7 +2479,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               </option>
             ))}
           </select>
-          <SummaryCaption summary={summary} />
         </div>
       </div>
     );
@@ -2487,7 +2496,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   ) => {
     const currentOption =
       summary.kind === 'all'
-        ? options.find((option) => option.value === summary.inputValue || option.label === summary.inputValue)
+        ? options.find((option) => summaryMatchesOption(summary.inputValue, option))
         : undefined;
     return (
       <div className="batch-row multi-select-row">
@@ -2503,14 +2512,13 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               onSelect(e.target.value);
             }}
           >
-            <option value="">Set value...</option>
+            <option value="">{summary.kind === 'mixed' ? summary.text : summary.kind === 'empty' ? 'Not stated' : currentOption ? 'Set value...' : summary.inputValue || 'Set value...'}</option>
             {options.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
-          <SummaryCaption summary={summary} />
         </div>
       </div>
     );
@@ -2531,7 +2539,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         ? summary.text
         : summary.kind === 'empty'
           ? 'Not stated'
-          : 'Set value...';
+          : currentOption ? 'Set value...' : summary.inputValue || 'Set value...';
     return (
       <div className="batch-row multi-select-row">
         {renderTooltipRowLabel('pitch', 'Surface', enabled, undefined, targetIds)}
@@ -2557,7 +2565,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               </option>
             ))}
           </select>
-          <SummaryCaption summary={summary} />
         </div>
       </div>
     );
@@ -2949,7 +2956,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             position="right"
             maxWidth={350}
           >
-            <div className="multi-select-row__label">Floor:</div>
+            <div className="multi-select-row__label">Floor</div>
           </Tooltip>
           <div className="multi-select-row__control">
             <StandardDropdown
@@ -3184,7 +3191,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             activeWindowSurfaceIds,
           )
         )}
-        {renderNumberRow(
+        {!windowHidden.has('free_area_height') && renderNumberRow(
           'freeAreaHeight',
           `${resolveFieldLabelContent('free_area_height')} (m)`,
           freeAreaHeightSummary,
@@ -3195,7 +3202,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
-        {renderNumberRow(
+        {!windowHidden.has('mid_height') && renderNumberRow(
           'midHeight',
           `${resolveFieldLabelContent('mid_height')} (m)`,
           midHeightSummary,
@@ -3206,7 +3213,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
-        {renderNumberRow(
+        {!windowHidden.has('max_window_open_area') && renderNumberRow(
           'maxOpenArea',
           `${resolveFieldLabelContent('max_window_open_area')} (m²)`,
           maxOpenAreaSummary,
@@ -3217,7 +3224,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
-        {skippedOpeningWindowCount > 0 && (
+        {skippedOpeningWindowCount > 0 && !windowHidden.has('free_area_height') && (
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             {countLabel(skippedOpeningWindowCount, 'window')} not changed. Select each one to edit its openings.
           </div>
@@ -3238,7 +3245,8 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           'Security risk',
           windowSecurityRiskSummary,
           activeWindowSurfaceIds.length > 0,
-          BOOLEAN_SELECT_OPTIONS,
+          // Short in the narrow bulk column; the row's tooltip says what yes means.
+          SECURITY_RISK_OPTIONS.map((option) => ({ ...option, label: option.value === 'true' ? 'Yes' : 'No' })),
           (value) =>
             applyExtraJsonChoice((el) =>
               isTransparent(el) ? { security_risk: value === 'true' } : null,
@@ -3247,6 +3255,33 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           undefined,
           activeWindowSurfaceIds,
         )}
+        {windowTargetInputs(constructionBands, existingBuilding).map((input) => activeWindowSurfaceElements.length > 0 && (
+          <React.Fragment key={input}>
+            {input === 'opening_type' ? <>
+              {openingTypeWindows.length > 0 && renderSelectRow(
+                'Opening type',
+                openingTypeSummary,
+                true,
+                WINDOW_OPENING_TYPES.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) })),
+                (value) => applyExtraJsonMergeBulk(Object.fromEntries(openingTypeWindows.map((el) => [el.id, {
+                  window_sections: withWindowSections(el, [{ ...windowSections(el)[0], windowType: value }]).window_sections,
+                }]))),
+              )}
+              {openingTypeWindows.length < activeWindowSurfaceElements.length && (
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  {countLabel(activeWindowSurfaceElements.length - openingTypeWindows.length, 'window')} not changed. Select each one to set its opening type.
+                </div>
+              )}
+            </> : renderSelectRow(
+              `Window ${CLOSE_SHADING_KINDS.find(({ kind }) => kind === input)!.label.toLowerCase()}`,
+              describeDistribution(computeScalarDistribution(activeWindowSurfaceElements, isTransparent, (el) => extraJsonRecord(el)[input])),
+              true,
+              [{ value: '', label: 'None' }, ...commonCloseShadingOptions(Object.values(elementsById) as Element[], activeWindowSurfaceElements.map((el) => el.name), input)],
+              (value) => applyExtraJsonMergeBulk(Object.fromEntries(activeWindowSurfaceElements.flatMap((el) =>
+                (extraJsonRecord(el)[input] === (value || undefined) ? [] : [[el.id, { [input]: value || undefined }]])))),
+            )}
+          </React.Fragment>
+        ))}
 
         {activeWindowSurfaceElements.length > 0 && (
           <div className="multi-select-window-copy">
@@ -3263,7 +3298,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
                     <span className="multi-select-window-copy__meta">{windowPartCountSummary(windowElement)}</span>
                   </div>
                   <div className="multi-select-window-copy__fields">
-                    {WINDOW_DETAIL_VISIBLE_KEYS.map((key) => {
+                    {windowDetailKeys.map((key) => {
                       const label = WINDOW_DETAIL_COPY_LABELS[key];
                       const summary = windowDetailSummary(windowElement, key, attachedShading);
                       const copyBlocked = key === 'window_part_list' && windowPartsCopyBlocked(openingSource(windowElement), windowPartsPhysical);

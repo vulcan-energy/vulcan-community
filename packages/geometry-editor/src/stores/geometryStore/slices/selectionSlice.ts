@@ -9,6 +9,9 @@ export type Selection = {
   id: string;
   isPlaceholder?: boolean;
   focusFieldKey?: string;
+  /** Kept while "Edit all N windows" has every window of this one's kind selected: leaving that
+   * multi-select (a click on empty canvas) comes back to this window. */
+  editAll?: boolean;
 } | null;
 
 export interface SelectionSlice {

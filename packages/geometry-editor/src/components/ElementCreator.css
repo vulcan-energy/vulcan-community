@@ -294,3 +294,24 @@
   padding: 2px 0 2px 8px;
   margin-bottom: 8px;
 }
+
+/* "Outline · Rectangle ▸": opens the wall shape rows in place. */
+.outline-disclosure { padding-left: 0; padding-right: 0; gap: 6px; }
+
+/* "Height 1.3 m · Apply to the 2 other windows like this one [Apply]", above the footer buttons. */
+.window-apply-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+}
+
+/* "Edit all 6 windows": a quiet link at label size, under the size row. */
+.window-edit-all {
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  margin: 2px 0 6px;
+}

@@ -150,7 +150,7 @@
 }
 
 .floor-picker-height-input {
-  width: 44px;
+  width: 36px;
   border: none;
   outline: none;
   background: transparent;
@@ -190,41 +190,28 @@
   gap: 8px;
 }
 
-.floor-picker-input-shell {
-  height: 34px;
-  min-width: 72px;
+.floor-picker-add-label {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 12px;
-  border: 1px solid var(--border-subtle, var(--surface-control-active));
-  border-radius: 999px;
-  background: var(--surface-control);
-  transition: border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-}
-
-.floor-picker-input-shell:focus-within {
-  border-color: var(--accent-primary);
-  background: var(--surface-control);
-  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+  align-items: baseline;
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  cursor: text;
 }
 
 .floor-picker-input-shell-disabled {
   opacity: 0.6;
-  background: var(--surface-control);
 }
 
 .floor-picker-input {
-  width: 100%;
   min-width: 0;
-  height: 100%;
   padding: 0;
   border: none;
+  border-bottom: 1px solid transparent;
   outline: none;
   background: transparent;
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
+  color: inherit;
+  font: inherit;
   text-align: left;
   appearance: textfield;
   -moz-appearance: textfield;
@@ -236,7 +223,11 @@
 }
 
 .floor-picker-input::placeholder {
-  color: var(--text-placeholder);
+  color: inherit;
+}
+
+.floor-picker-input:focus {
+  border-bottom-color: var(--accent-primary);
 }
 
 .floor-picker-add-preview {
@@ -254,13 +245,13 @@
 }
 
 .floor-picker-add-button {
-  min-width: auto;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
+}
+
+.floor-picker-note {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
 }
 
 .floor-picker-toast {

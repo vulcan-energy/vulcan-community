@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { GeometryWorkspaceResourcePort } from "../../../../geometry-editor-host/src/index";
@@ -14,6 +14,8 @@ import {
   createGeometryStore,
   GeometryStoreProvider,
 } from "../../stores/geometryStore";
+
+import epcSchema from "../../../../../data/schemas/hem_epc_orchestrator_input.schema.json";
 
 const FHS_FILE = '{"Zone":{},"name":"Community defaults"}';
 
@@ -104,126 +106,313 @@ describe("GlobalSettingsModal target-required rows", () => {
     expect(screen.getByText(/Noise nuisance/)).toBeInTheDocument();
   });
 
-  it("asks for each required row as an empty Yes/No choice and saves the pick", async () => {
-    const user = userEvent.setup();
-    const store = renderWith(["HasElectricitySmartMeter", "IsExistingBuilding", "Appliances_has_dryer", "Appliances_has_dishwasher",
-      "Appliances_has_separate_fridge_or_freezer", "Ventilation_cross_vent_possible", "Ventilation_noise_nuisance", "PartGcompliance"]);
-    await screen.findByLabelText("Shield Class");
-    await user.click(screen.getByText("Dwelling details"));
-    for (const label of epcOnly) expect(screen.getByLabelText(label)).toHaveValue("");
-    // Required booleans with no default are choices, never an unticked box that reads as "no".
-    expect(screen.getByLabelText("Noise nuisance")).toHaveValue("");
-    expect(screen.getByLabelText("Part G compliance")).toHaveValue("TRUE");
-    await user.selectOptions(screen.getByLabelText("Electricity smart meter"), "No");
-    await user.selectOptions(screen.getByLabelText("Cross ventilation possible"), "Yes");
-    expect(store.getState().complianceSettings).toMatchObject({ HasElectricitySmartMeter: false, Ventilation_cross_vent_possible: true });
-    expect(screen.getAllByText(/Existing building is not set/).length).toBeGreaterThan(0);
+  it.each([
+    ["an FHS target", undefined, "Suburban (default)"],
+    ["an EPC target", ["Ventilation_terrain_class"], "Select terrain class..."],
+  ])("shows an unset terrain class on %s as %s", async (_name, rows, placeholder) => {
+    renderWith(rows);
+    const terrain = await screen.findByLabelText("Terrain Class");
+    expect(terrain).toHaveValue("");
+    expect((terrain as HTMLSelectElement).selectedOptions[0]).toHaveTextContent(placeholder);
+    if (rows) expect(terrain.textContent).not.toContain("(default)");
   });
+
 });
 
-describe("GlobalSettingsModal existing building with no air test", () => {
-  it("says the airtightness is estimated and asks HEMIE's estimate inputs, saved as HEMIE rows", async () => {
+const EPC_ROWS = ["IsExistingBuilding", "PartGcompliance", "HasElectricitySmartMeter", "HeatingControlType", "ColdWaterSource",
+  "Ventilation_cross_vent_possible", "Ventilation_altitude", "Ventilation_terrain_class",
+  "Appliances_has_dryer", "Appliances_has_dishwasher", "Appliances_has_separate_fridge_or_freezer"];
+/** An HEM:EPC model: the existing-building pathway takes construction bands and no air test. */
+let epcIssues: string[] = [];
+/** The issues Global Settings reports for the model (its tab and the Global Settings button show them). */
+const issues = (pattern: RegExp) => epcIssues.filter((issue) => pattern.test(issue));
+function renderEpc(store: ReturnType<typeof createGeometryStore>, focusFieldKey?: string, extra: Record<string, unknown> = {}) {
+  epcIssues = [];
+  return render(
+    <GeometryEditorServicePortsProvider
+      schemaPort={{ ...canonicalGeometrySchemaPort, getRootSchema: () => epcSchema, targetRules: (settings: Readonly<Record<string, unknown>>) => {
+        const existing = settings.IsExistingBuilding === true;
+        return {
+        requiredMetadataRows: existing ? EPC_ROWS : [...EPC_ROWS, "Ventilation_shield_class", "AirPermeability_test_pressure", "AirPermeability_test_result"],
+        constructionBands: existing,
+        derivedMetadataRows: ["General_build_type", ...(existing ? ["Ventilation_shield_class"] : [])],
+        desnzDefaultRows: { Ventilation_noise_nuisance: "No" },
+        ...extra,
+      }; } }}
+      workspaceResourcePort={createResources()}
+    >
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey={focusFieldKey}
+          calculationTargetSection={<div>HEM model version</div>} onIndicatorChange={(indicator) => { epcIssues = indicator?.issues ?? []; }} />
+      </GeometryStoreProvider>
+    </GeometryEditorServicePortsProvider>
+  );
+}
+const pressed = (group: string) => within(screen.getByRole("group", { name: group })).queryAllByRole("button", { pressed: true }).map((b) => b.textContent);
+
+describe("GlobalSettingsModal HEM:EPC Global values", () => {
+  it("asks the pathway first, as a full-width switch under the target, then the survey groups in order", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    renderEpc(store, "IsExistingBuilding");
+    const pathway = await screen.findByRole("group", { name: "The dwelling is" });
+    const order = (a: Node, b: Node) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect(order(screen.getByText("HEM model version"), pathway)).toBeTruthy();
+    const groups = ["Property", "Rooms and services", "Air test", "Site"].map((name) => screen.getByRole("heading", { name }));
+    groups.reduce((before, group) => (expect(order(before, group)).toBeTruthy(), group), pathway as Node);
+    expect(pressed("The dwelling is")).toEqual([]);
+    expect(issues(/Existing building is not set/)).toHaveLength(1);
+    await waitFor(() => expect(within(pathway).getByRole("button", { name: "An existing building" })).toHaveFocus());
+    // No FHS copy on an EPC model, and no accordions.
+    expect(screen.queryByText("Dwelling details")).not.toBeInTheDocument();
+    expect(screen.queryByText(/defaults template/)).not.toBeInTheDocument();
+    await user.click(within(pathway).getByRole("button", { name: "A new build" }));
+    expect(store.getState().complianceSettings.IsExistingBuilding).toBe(false);
+    // A new build's EPC input takes no postcode.
+    expect(screen.queryByLabelText("Postcode")).not.toBeInTheDocument();
+    await user.click(within(pathway).getByRole("button", { name: "An existing building" }));
+    expect(store.getState().complianceSettings.IsExistingBuilding).toBe(true);
+    expect(await screen.findByLabelText("Postcode")).toBeInTheDocument();
+  });
+
+  it("asks each required Yes/No as two segments, none chosen until picked; a default shows chosen with its source", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
     store.getState().setComplianceSettings({ IsExistingBuilding: true });
-    render(
-      <GeometryEditorServicePortsProvider
-        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ requiredMetadataRows: ["IsExistingBuilding"] }) }}
-        workspaceResourcePort={createResources()}
-      >
-        <GeometryStoreProvider store={store}>
-          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="AirPermeability_test_result" />
-        </GeometryStoreProvider>
-      </GeometryEditorServicePortsProvider>
-    );
-    expect(await screen.findByText(/Estimated \(no air test\)/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Open fireplaces"), "2");
-    await user.selectOptions(screen.getByLabelText("Double glazing installed"), "double_glazing_unknown_install_date");
-    expect(store.getState().complianceSettings.hemieSettings).toMatchObject({
-      HEMIE_number_of_open_fireplaces: "2",
-      HEMIE_double_glazing_installation_period: "double_glazing_unknown_install_date",
-    });
-    // A flat also states its heat loss corridor; a measured air test needs none of these.
-    expect(screen.queryByLabelText("Heat loss corridor")).not.toBeInTheDocument();
-    act(() => store.getState().setComplianceSettings({ AirPermeability_test_result: 5 }));
-    expect(screen.queryByText(/Estimated \(no air test\)/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Open fireplaces")).not.toBeInTheDocument();
+    renderEpc(store, "HasElectricitySmartMeter");
+    await screen.findByRole("group", { name: "Smart electricity meter" });
+    for (const group of ["Smart electricity meter", "Clothes dryer", "Dishwasher", "Separate fridge or freezer", "Cross ventilation"]) {
+      expect(pressed(group)).toEqual([]);
+    }
+    expect(pressed("Noise nuisance")).toEqual(["No"]);
+    expect(within(screen.getByRole("group", { name: "Noise nuisance" }).parentElement!).getByText("default")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("group", { name: "Cross ventilation" })).getByRole("button", { name: "Yes" }));
+    await user.click(within(screen.getByRole("group", { name: "Noise nuisance" })).getByRole("button", { name: "Yes" }));
+    expect(store.getState().complianceSettings).toMatchObject({ Ventilation_cross_vent_possible: true, Ventilation_noise_nuisance: true });
+    // The default stays one click away.
+    await user.click(screen.getByRole("button", { name: /Noise nuisance: use the default, No/ }));
+    expect(store.getState().complianceSettings.Ventilation_noise_nuisance).toBeUndefined();
   });
-});
 
-describe("GlobalSettingsModal smart meter GUID", () => {
   it("asks for the GUID once the dwelling has a smart meter, and checks its format", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
-    render(
-      <GeometryEditorServicePortsProvider
-        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ requiredMetadataRows: ["HasElectricitySmartMeter"] }) }}
-        workspaceResourcePort={createResources()}
-      >
-        <GeometryStoreProvider store={store}>
-          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="HasElectricitySmartMeter" />
-        </GeometryStoreProvider>
-      </GeometryEditorServicePortsProvider>
-    );
-    const meter = await screen.findByLabelText("Electricity smart meter");
+    renderEpc(store, "HasElectricitySmartMeter");
+    await screen.findByRole("group", { name: "Smart electricity meter" });
     expect(screen.queryByLabelText("Smart meter GUID")).not.toBeInTheDocument();
-    await user.selectOptions(meter, "Yes");
-    expect(screen.getAllByText(/Smart meter GUID is not set/).length).toBeGreaterThan(0);
+    await user.click(within(screen.getByRole("group", { name: "Smart electricity meter" })).getByRole("button", { name: "Yes" }));
+    expect(issues(/Smart meter GUID is not set/)).toHaveLength(1);
     await user.type(screen.getByLabelText("Smart meter GUID"), "01-23-45");
     expect(screen.getAllByText(/must be 16 hexadecimal characters/).length).toBeGreaterThan(0);
     await user.type(screen.getByLabelText("Smart meter GUID"), "-67-89-ab-cd-ef");
     expect(screen.queryByText(/must be 16 hexadecimal characters/)).not.toBeInTheDocument();
     expect(store.getState().complianceSettings.ElectricitySmartMeterGUID).toBe("01-23-45-67-89-ab-cd-ef");
   });
+
+  it("offers Not tested on an existing building only; picking it clears the test in one step", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    // A double-glazed window: the converter then asks when the double glazing went in.
+    store.getState().setComplianceSettings({ IsExistingBuilding: true, hemieSettings: { HEMIE_construction_window: '{"glazing_type":"double"}' } });
+    store.getState().addElement({ name: "W", type: "BuildingElementTransparent", zoneId: "z", coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }] } as never);
+    renderEpc(store, "AirPermeability_test_result");
+    expect(await screen.findByText(/estimates the air leakage/)).toBeInTheDocument();
+    expect(pressed("Air test")).toEqual(["Not tested"]);
+    await user.type(screen.getByLabelText("Open fireplaces"), "2");
+    await user.selectOptions(screen.getByLabelText("Double glazing installed"), "double_glazing_unknown_install_date");
+    expect(store.getState().complianceSettings.hemieSettings).toMatchObject({
+      HEMIE_number_of_open_fireplaces: "2",
+      HEMIE_double_glazing_installation_period: "double_glazing_unknown_install_date",
+    });
+    // With no double-glazed window the date is not asked.
+    act(() => store.getState().setComplianceSettings({ hemieSettings: { HEMIE_construction_window: '{"glazing_type":"single"}' } }));
+    expect(screen.queryByLabelText("Double glazing installed")).not.toBeInTheDocument();
+    // A flat also states its heat loss corridor; a house does not.
+    expect(screen.queryByLabelText("Heat loss corridor")).not.toBeInTheDocument();
+    await user.click(within(screen.getByRole("group", { name: "Air test" })).getByRole("button", { name: "Blower door (50 Pa)" }));
+    await user.type(screen.getByLabelText("Test result"), "5");
+    // A measured result needs no estimate.
+    expect(screen.queryByLabelText("Open fireplaces")).not.toBeInTheDocument();
+    expect(store.getState().complianceSettings).toMatchObject({ AirPermeability_test_pressure: "Standard", AirPermeability_test_result: 5 });
+    await user.click(within(screen.getByRole("group", { name: "Air test" })).getByRole("button", { name: "Not tested" }));
+    expect(store.getState().complianceSettings.AirPermeability_test_pressure).toBeUndefined();
+    expect(store.getState().complianceSettings.AirPermeability_test_result).toBeUndefined();
+    // Picking a test again starts blank.
+    await user.click(within(screen.getByRole("group", { name: "Air test" })).getByRole("button", { name: "Pulse (4 Pa)" }));
+    expect(screen.getByLabelText("Test result")).toHaveValue("");
+    // A new build must state its test.
+    act(() => store.getState().setComplianceSettings({ IsExistingBuilding: false, AirPermeability_test_pressure: undefined }));
+    expect(within(screen.getByRole("group", { name: "Air test" })).queryByRole("button", { name: "Not tested" })).not.toBeInTheDocument();
+    expect(pressed("Air test")).toEqual([]);
+  });
+
+  it("lands at the postcode once, and leaves the user where they click after that", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    renderEpc(store, "Postcode");
+    await waitFor(() => expect(screen.getByLabelText("Postcode")).toHaveFocus());
+    const newBuild = within(screen.getByRole("group", { name: "The dwelling is" })).getByRole("button", { name: "A new build" });
+    await user.click(newBuild);
+    // The postcode is gone on a new build: the request is done, nothing scrolls or takes focus.
+    expect(newBuild).toHaveFocus();
+  });
+
+  it("asks the leakage estimate whenever an existing building states no test result, and shows a stated result", async () => {
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true, AirPermeability_test_pressure: "Standard" });
+    renderEpc(store, "AirPermeability_test_pressure");
+    expect(await screen.findByLabelText("Open fireplaces")).toBeInTheDocument();
+    expect(screen.getByLabelText("Test result")).toHaveValue("");
+    act(() => store.getState().setComplianceSettings({ AirPermeability_test_pressure: undefined, AirPermeability_test_result: 4 }));
+    expect(pressed("Air test")).toEqual([]);
+    expect(screen.getByLabelText("Test result")).toHaveValue("4");
+    expect(screen.queryByLabelText("Open fireplaces")).not.toBeInTheDocument();
+  });
+
+  it("takes each appliance from the drawing while unset, and asks when nothing is drawn", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    store.setState({
+      elementsById: { a: { id: "a", name: "Dishwasher", type: "Appliance", appliancekey: "Dishwasher" },
+        b: { id: "b", name: "Dishwasher 2", type: "Appliance", appliancekey: "Dishwasher" } } as never,
+      elementIds: ["a", "b"],
+    });
+    renderEpc(store, "Appliances_has_dishwasher");
+    const dishwasher = await screen.findByRole("group", { name: "Dishwasher" });
+    expect(pressed("Dishwasher")).toEqual(["Yes"]);
+    expect(within(dishwasher.parentElement!).getByText("from the drawing")).toBeInTheDocument();
+    expect(issues(/dishwasher is not set/i)).toEqual([]);
+    // Nothing drawn: no placeholder, and the row is required.
+    expect(pressed("Clothes dryer")).toEqual([]);
+    expect(issues(/clothes dryer is not set/i)).toHaveLength(1);
+    await user.click(within(dishwasher).getByRole("button", { name: "No" }));
+    expect(store.getState().complianceSettings.Appliances_has_dishwasher).toBe(false);
+    await user.click(screen.getByRole("button", { name: /Dishwasher: use the drawing, Yes/ }));
+    expect(store.getState().complianceSettings.Appliances_has_dishwasher).toBeUndefined();
+  });
+
+  it("shows the conversion's storey count, which the user cannot change", async () => {
+    const store = createGeometryStore();
+    // A stated count from an older file: the existing-building conversion never reads it.
+    store.getState().setComplianceSettings({ IsExistingBuilding: true, storeys_in_dwelling: 3 });
+    store.getState().setTargetValidation({ hemVersion: "x", items: [], storeysInDwelling: 2, builtForm: "semi_detached" });
+    renderEpc(store, "General_storeys_in_dwelling");
+    expect(await screen.findByLabelText("Storeys in dwelling")).toHaveTextContent(/^2$/);
+    expect(screen.queryByRole("textbox", { name: /Storeys in dwelling/ })).not.toBeInTheDocument();
+    // The built form the party walls give is the placeholder, with its source.
+    expect((screen.getByLabelText("Built form") as HTMLSelectElement).selectedOptions[0]).toHaveTextContent("Semi detached");
+    expect(screen.getByText("from the party walls")).toBeInTheDocument();
+  });
+
+  it("shows room counts from the space labels as placeholders, with the source only when there are labels", async () => {
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    renderEpc(store, "NumberOfBedrooms");
+    await screen.findByRole("heading", { name: "Rooms and services" });
+    expect(screen.queryByText(/from the space labels/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show on the plan" })).not.toBeInTheDocument();
+  });
 });
 
-describe("GlobalSettingsModal existing building", () => {
-  it("asks it with the target, before the dwelling details, without opening a section", async () => {
+describe("GlobalSettingsModal existing building storeys", () => {
+  it("keeps the count editable on a target that reads it, whatever the existing-building flag", async () => {
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true, storeys_in_dwelling: 3 });
     render(
-      <GeometryEditorServicePortsProvider
-        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ requiredMetadataRows: ["IsExistingBuilding"] }) }}
-        workspaceResourcePort={createResources()}
-      >
-        <GeometryStoreProvider store={createGeometryStore()}>
-          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="IsExistingBuilding"
-            calculationTargetSection={<div>HEM model version</div>} />
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={createResources()}>
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="General_storeys_in_dwelling" />
         </GeometryStoreProvider>
       </GeometryEditorServicePortsProvider>
     );
-    const existing = await screen.findByLabelText("Existing building");
-    const order = (a: Node, b: Node) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(order(screen.getByText("HEM model version"), existing)).toBeTruthy();
-    expect(order(existing, screen.getByText("Dwelling details"))).toBeTruthy();
-    // A new build states its build type up front; its EPC input takes no postcode.
-    expect(order(screen.getByText("Build type"), screen.getByText("Dwelling details"))).toBeTruthy();
-    expect(screen.queryByLabelText("Property postcode")).not.toBeInTheDocument();
+    expect(await screen.findByDisplayValue("3")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Storeys in dwelling" })).not.toBeInTheDocument();
+  });
+});
+
+describe("GlobalSettingsModal ventilation zone height", () => {
+  const renderWith = (derivedMetadataRows: readonly string[], ventilationZoneHeight?: number) => {
+    const store = createGeometryStore();
+    if (ventilationZoneHeight !== undefined) store.getState().setTargetValidation({ hemVersion: "x", items: [], ventilationZoneHeight });
+    render(
+      <GeometryEditorServicePortsProvider
+        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ derivedMetadataRows }) }}
+        workspaceResourcePort={createResources()}
+      >
+        <GeometryStoreProvider store={store}>
+          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="AirPermeability_ventilation_zone_height" />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>
+    );
+    return store;
+  };
+
+  it("shows the converter's height where the target derives it, and no sum of floor heights", async () => {
+    renderWith(["AirPermeability_ventilation_zone_height"], 5.35);
+    const field = await screen.findByLabelText(/Ventilation Zone Height/);
+    expect(field).toHaveDisplayValue("5.35");
+    expect(screen.getByText("From the drawing")).toBeInTheDocument();
+    expect(screen.queryByText(/sum of floor heights/)).not.toBeInTheDocument();
+  });
+
+  it("says the height comes once the model converts, with no number before then", async () => {
+    renderWith(["AirPermeability_ventilation_zone_height"]);
+    const field = await screen.findByLabelText(/Ventilation Zone Height/);
+    expect(field).toHaveDisplayValue("");
+    expect(screen.getByText("From the drawing, once the model converts")).toBeInTheDocument();
+  });
+
+  it("shows the converter's height in an EPC model's Site group, and saves only a typed height", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    store.getState().setTargetValidation({ hemVersion: "x", items: [], ventilationZoneHeight: 5.35 });
+    renderEpc(store, "AirPermeability_ventilation_zone_height", { derivedMetadataRows: ["General_build_type", "Ventilation_shield_class", "AirPermeability_ventilation_zone_height"] });
+    const field = await screen.findByRole("textbox", { name: /^Zone height/ });
+    expect(field).toHaveDisplayValue("5.35");
+    expect(store.getState().complianceSettings.AirPermeability_ventilation_zone_height).toBeUndefined();
+    await user.clear(field);
+    await user.type(field, "6");
+    expect(store.getState().complianceSettings.AirPermeability_ventilation_zone_height).toBe(6);
+    // The next check reports no converter height for a stated row: the typed value stands alone.
+    act(() => store.getState().setTargetValidation({ hemVersion: "x", items: [] }));
+    expect(field).toHaveDisplayValue("6");
+    expect(screen.queryByText("From the drawing, once the model converts")).not.toBeInTheDocument();
   });
 });
 
 describe("GlobalSettingsModal border postcode", () => {
   it.each([
-    ["CH4 1AA", true, true],
-    ["MK40 1AA", true, false],
-    ["CH4 1AA", false, false],
-  ])("asks the nation for %s under construction bands %s: %s", async (postcode, constructionBands, asked) => {
+    ["CH4 1AA", true],
+    ["MK40 1AA", false],
+  ])("asks the nation for %s on an existing building: %s", async (postcode, asked) => {
     const store = createGeometryStore();
     store.getState().setPropertyPostcode(postcode);
-    render(
-      <GeometryEditorServicePortsProvider
-        schemaPort={{ ...canonicalGeometrySchemaPort, targetRules: () => ({ constructionBands }) }}
-        workspaceResourcePort={createResources()}
-      >
-        <GeometryStoreProvider store={store}>
-          <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="Postcode" />
-        </GeometryStoreProvider>
-      </GeometryEditorServicePortsProvider>
-    );
-    await screen.findByLabelText("Property postcode");
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    renderEpc(store, "Postcode");
+    await screen.findByLabelText("Postcode");
     expect(screen.queryByLabelText("Nation") !== null).toBe(asked);
-    if (!asked) return;
+    if (!asked) {
+      expect(screen.getByText("England")).toBeInTheDocument();
+      return;
+    }
     expect(screen.getByLabelText("Nation")).toHaveValue("");
     await userEvent.selectOptions(screen.getByLabelText("Nation"), "Wales");
     expect(store.getState().complianceSettings.hemieSettings).toEqual({ HEMIE_nation: "Wales" });
+  });
+
+  it("asks no nation on an FHS model, whose postcode is metadata only", async () => {
+    const store = createGeometryStore();
+    store.getState().setPropertyPostcode("CH4 1AA");
+    render(
+      <GeometryStoreProvider store={store}>
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="Postcode" />
+      </GeometryStoreProvider>
+    );
+    await screen.findByLabelText("Property postcode");
+    expect(screen.queryByLabelText("Nation")).not.toBeInTheDocument();
   });
 });
 

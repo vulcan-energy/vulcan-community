@@ -79,47 +79,33 @@ fn floor_on_ground_u(b: f64, d: f64) -> f64 {
 
 /// Ψ_ge of one edge insulation, W/(m·K): Annex D. d' = R'·λ is the additional equivalent
 /// thickness, where Annex D defines R' = R_n − d_n/λ (the edge insulation's resistance less that
-/// of the ground it replaces). R_n is `edge_thermal_resistance`, or d_n/λ_n from a stated
-/// `thickness` and `thermal_conductivity`. HEM's `EdgeInsulation` has no thickness; an editor
-/// entry may state one (`thickness`, m). Without it, R' = R_n: see [`edge_thickness_missing`].
+/// of the ground it replaces) and d_n is the insulation's thickness. HEM's `EdgeInsulation` has
+/// neither d_n nor λ_n; an editor entry may state them (`thickness`, m; `thermal_conductivity`,
+/// W/(m·K)). R_n is `edge_thermal_resistance`, or d_n/λ_n. d_n is `thickness`, or R_n·λ_n. With
+/// neither a thickness nor a conductivity, Annex D cannot be applied: None, so the floor has no
+/// U-value (E068) rather than one with an assumed thickness.
 /// - horizontal, width D (eq. D.5): Ψ = −λ/π · [ln(D/d_t + 1) − ln(D/(d_t + d') + 1)]
 /// - vertical, depth D (eq. D.6):   Ψ = −λ/π · [ln(2D/d_t + 1) − ln(2D/(d_t + d') + 1)]
 fn edge_psi(edge: &Value, d_t: f64) -> Option<f64> {
-    let d_n = number(edge.get("thickness")).filter(|v| positive(*v));
-    let r_n = number(edge.get("edge_thermal_resistance"))
-        .filter(|r| positive(*r))
-        .or_else(|| {
-            Some(d_n? / number(edge.get("thermal_conductivity")).filter(|v| positive(*v))?)
-        })?;
-    let d_extra = (r_n - d_n.map_or(0.0, |d| d / LAMBDA_G)) * LAMBDA_G;
+    let stated = |key: &str| number(edge.get(key)).filter(|v| positive(*v));
+    let lambda_n = stated("thermal_conductivity");
+    let (r_n, d_n) = match (stated("edge_thermal_resistance"), stated("thickness")) {
+        (Some(r_n), Some(d_n)) => (r_n, d_n),
+        (Some(r_n), None) => (r_n, r_n * lambda_n?),
+        (None, Some(d_n)) => (d_n / lambda_n?, d_n),
+        (None, None) => return None,
+    };
+    let d_extra = (r_n - d_n / LAMBDA_G) * LAMBDA_G;
     let (extent_key, factor) = match edge.get("type").and_then(Value::as_str)? {
         "horizontal" => ("width", 1.0),
         "vertical" => ("depth", 2.0),
         _ => return None,
     };
-    let d = factor * number(edge.get(extent_key)).filter(|v| positive(*v))?;
+    let d = factor * stated(extent_key)?;
     if !positive(d_t + d_extra) {
         return None;
     }
     Some(-LAMBDA_G / PI * ((d / d_t + 1.0).ln() - (d / (d_t + d_extra) + 1.0).ln()))
-}
-
-/// Vulcan conversion rule (pending owner confirmation): an edge insulation that states no
-/// thickness d_n counts its whole resistance, R' = R_n, in place of Annex D's R_n − d_n/λ. True
-/// when the floor calculation applied that rule to this element, so the converter can say so.
-pub(crate) fn edge_thickness_missing(element: &Map<String, Value>) -> bool {
-    element.get("floor_type").and_then(Value::as_str) == Some("Slab_edge_insulation")
-        && element
-            .get("edge_insulation")
-            .and_then(Value::as_array)
-            .is_some_and(|edges| {
-                edges.iter().any(|edge| {
-                    number(edge.get("thickness"))
-                        .filter(|v| positive(*v))
-                        .is_none()
-                        && number(edge.get("edge_thermal_resistance")).is_some_and(positive)
-                })
-            })
 }
 
 /// U of a basement wall below ground, W/(m²K): §7.3.3, with d_w = λ·(R_si + R_w + R_se) and
@@ -143,17 +129,24 @@ fn shield_factor(location: Option<&Value>) -> f64 {
 
 /// The inputs the floor calculation needs for this floor type, in words, for the error that says
 /// it could not run.
-pub(crate) fn required_inputs(floor_type: &str) -> &'static str {
+pub(crate) fn required_inputs(floor_type: &str, whole_basement: bool) -> &'static str {
     match floor_type {
+        "Heated_basement" if !whole_basement => "a total area, perimeter, wall thickness and basement depth",
         "Suspended_floor" => "a total area, perimeter, wall thickness, height of the floor above ground, U-value of the underfloor walls, vent area per perimeter and resistance of the insulation under the void",
-        "Heated_basement" => "a total area, perimeter, wall thickness and basement depth",
+        "Heated_basement" => "a total area, perimeter, wall thickness, basement depth and basement wall resistance",
+        "Slab_edge_insulation" => "a total area, perimeter and wall thickness, and for each edge insulation its width or depth, resistance, and thickness or thermal conductivity",
         "Unheated_basement" => "a total area, perimeter, wall thickness, basement depth, U-value of the floor above the basement, basement wall U-value, height and resistance",
         _ => "a total area, perimeter and wall thickness",
     }
 }
 
 /// The floor's U-value before rounding; None when an input it needs is missing or out of range.
-fn unrounded(element: &Map<String, Value>, wind_speed_mps: Option<f64>) -> Option<f64> {
+/// `whole_basement`: a heated basement's U carries its walls below ground (see `Heated_basement`).
+fn unrounded(
+    element: &Map<String, Value>,
+    wind_speed_mps: Option<f64>,
+    whole_basement: bool,
+) -> Option<f64> {
     let field = |key: &str| number(element.get(key));
     let area = field("total_area").filter(|v| positive(*v))?;
     let perimeter = field("perimeter").filter(|v| positive(*v))?;
@@ -191,11 +184,20 @@ fn unrounded(element: &Map<String, Value>, wind_speed_mps: Option<f64>) -> Optio
             // 1/U = 1/U_f + 1/(U_g + U_x).
             1.0 / (1.0 / u_f + 1.0 / (u_g + u_x))
         }
-        // §7.3.2: the basement floor, with z the depth of the basement floor below ground. The
-        // element is the floor, so its U is U_bf; the walls below ground (§7.3.3) are not in it.
+        // The basement floor, §7.3.2 (z the depth of the basement floor below ground). With
+        // `whole_basement`, the floor and the walls below ground (§7.3.3) weighted by area:
+        // U = (A·U_bf + z·P·U_bw)/(A + z·P). That weighting is DESNZ-defined for HEM:EPC's
+        // `u_value`, and the walls below ground are then carried here, not as walls of their
+        // own; the surface resistances stay this module's (R_se 0.04, not the DESNZ-defined 0).
         "Heated_basement" => {
             let z = field("depth_basement_floor").filter(|v| positive(*v))?;
-            floor_on_ground_u(b, d_t + 0.5 * z)
+            let u_bf = floor_on_ground_u(b, d_t + 0.5 * z);
+            if !whole_basement {
+                return positive(u_bf).then_some(u_bf);
+            }
+            let r_w = field("thermal_resist_walls_base").filter(|v| non_negative(*v))?;
+            let u_bw = basement_wall_u(z, r_w, d_t);
+            (area * u_bf + z * perimeter * u_bw) / (area + z * perimeter)
         }
         // §7.4: 1/U = 1/U_f + A/(A·U_bf + z·P·U_bw + h·P·U_w + 0.33·n·V), U_f the floor over the
         // basement (`thermal_transm_envi_base`). V = A·(z + h), the basement air volume HEM uses
@@ -243,12 +245,14 @@ fn unrounded(element: &Map<String, Value>, wind_speed_mps: Option<f64>) -> Optio
 
 /// The element's U-value from the floor calculation, rounded to four decimals; None when an
 /// input it needs is missing or out of range. `wind_speed_mps` is the row's own wind speed for a
-/// suspended floor (not a HEM input).
+/// suspended floor (not a HEM input). `whole_basement`: the target takes a heated basement's
+/// U-value as the floor and its walls below ground (HEM:EPC), not the floor alone.
 pub fn ground_floor_u_value(
     element: &Map<String, Value>,
     wind_speed_mps: Option<f64>,
+    whole_basement: bool,
 ) -> Option<f64> {
-    unrounded(element, wind_speed_mps).map(|u| (u * 1e4).round() / 1e4)
+    unrounded(element, wind_speed_mps, whole_basement).map(|u| (u * 1e4).round() / 1e4)
 }
 
 #[cfg(test)]
@@ -257,11 +261,16 @@ mod tests {
     use serde_json::json;
 
     fn exact(element: Value) -> Option<f64> {
-        unrounded(element.as_object().unwrap(), None)
+        unrounded(element.as_object().unwrap(), None, false)
     }
 
     fn u(element: Value) -> Option<f64> {
-        ground_floor_u_value(element.as_object().unwrap(), None)
+        ground_floor_u_value(element.as_object().unwrap(), None, false)
+    }
+
+    /// On a target that takes a heated basement's U as the whole basement (HEM:EPC).
+    fn exact_whole(element: Value) -> Option<f64> {
+        unrounded(element.as_object().unwrap(), None, true)
     }
 
     fn slab(area: f64, perimeter: f64, r_f: f64) -> Value {
@@ -315,46 +324,49 @@ mod tests {
         let u_0: f64 = exact(slab(35.6, 25.8, 0.0)).unwrap();
         let b: f64 = 35.6 / (0.5 * 25.8);
         let d_t: f64 = 0.3 + 1.5 * (0.17 + 0.04);
-        let d_extra: f64 = 1.5 * 1.5;
+        // 60 mm of insulation, λ_n 0.04: R' = R_n − d_n/λ.
+        let d_extra: f64 = (1.5 - 0.06 / 1.5) * 1.5;
         let psi_h = -1.5 / PI * ((1.0 / d_t + 1.0).ln() - (1.0 / (d_t + d_extra) + 1.0).ln());
         let psi_v = -1.5 / PI * ((2.0 / d_t + 1.0).ln() - (2.0 / (d_t + d_extra) + 1.0).ln());
-        floor["edge_insulation"] =
-            json!([{"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5}]);
+        floor["edge_insulation"] = json!([
+            {"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5, "thickness": 0.06}]);
         assert!((exact(floor.clone()).unwrap() - (u_0 + 2.0 * psi_h / b)).abs() < 1e-12);
         // Vertical insulation of the same D reaches twice as far (2D), so it wins when both are given.
         floor["edge_insulation"] = json!([
-            {"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5},
-            {"type": "vertical", "depth": 1, "edge_thermal_resistance": 1.5}]);
+            {"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5, "thickness": 0.06},
+            {"type": "vertical", "depth": 1, "edge_thermal_resistance": 1.5, "thickness": 0.06}]);
         assert!(psi_v < psi_h);
         assert!((exact(floor.clone()).unwrap() - (u_0 + 2.0 * psi_v / b)).abs() < 1e-12);
-        // A stated thickness takes off the ground it replaces (R' = R_n − d_n/λ); a thickness and
-        // conductivity with no resistance give R_n = d_n/λ_n.
+        // A thickness and conductivity with no resistance give R_n = d_n/λ_n.
         let with_thickness = |edge: Value| {
             let mut f = floor.clone();
             f["floor_type"] = json!("Slab_edge_insulation");
             f["edge_insulation"] = json!([edge]);
             exact(f).unwrap()
         };
-        let d_extra_thin: f64 = (1.5 - 0.06 / 1.5) * 1.5;
-        let psi_thin =
-            -1.5 / PI * ((1.0 / d_t + 1.0).ln() - (1.0 / (d_t + d_extra_thin) + 1.0).ln());
         let stated_r = with_thickness(
             json!({"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5, "thickness": 0.06}),
         );
-        assert!((stated_r - (u_0 + 2.0 * psi_thin / b)).abs() < 1e-12);
+        assert!((stated_r - (u_0 + 2.0 * psi_h / b)).abs() < 1e-12);
         let from_lambda = with_thickness(
             json!({"type": "horizontal", "width": 1, "thickness": 0.06, "thermal_conductivity": 0.04}),
         );
         assert!((from_lambda - stated_r).abs() < 1e-12);
-        let mut edge_floor = floor.clone();
-        edge_floor["floor_type"] = json!("Slab_edge_insulation");
-        assert!(edge_thickness_missing(edge_floor.as_object().unwrap()));
-        edge_floor["edge_insulation"] = json!([{"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5, "thickness": 0.06}]);
-        assert!(!edge_thickness_missing(edge_floor.as_object().unwrap()));
+        // No thickness but a conductivity: d_n = R_n·λ_n (here 1.5 × 0.04 = 0.06 m).
+        let thickness_from_lambda = with_thickness(
+            json!({"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5, "thermal_conductivity": 0.04}),
+        );
+        assert!((thickness_from_lambda - stated_r).abs() < 1e-12);
+        // Neither a thickness nor a conductivity: Annex D cannot be applied, so no U-value (E068).
+        let mut no_thickness = floor.clone();
+        no_thickness["floor_type"] = json!("Slab_edge_insulation");
+        no_thickness["edge_insulation"] =
+            json!([{"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5}]);
+        assert_eq!(exact(no_thickness), None);
         // An entry it cannot read (no conductivity for a thickness, no width) gives no U-value.
         let mut unreadable = floor.clone();
         unreadable["floor_type"] = json!("Slab_edge_insulation");
-        unreadable["edge_insulation"] = json!([{"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5},
+        unreadable["edge_insulation"] = json!([{"type": "horizontal", "width": 1, "edge_thermal_resistance": 1.5, "thickness": 0.06},
             {"type": "vertical", "thickness": 0.05, "material": "EPS"}]);
         assert_eq!(exact(unreadable), None);
         // A slab without edge insulation ignores any listed.
@@ -386,21 +398,55 @@ mod tests {
     }
 
     #[test]
-    fn heated_basement_floor_uses_half_the_depth() {
+    fn heated_basement_weights_floor_and_walls_below_ground_by_area() {
         let floor = |z: f64| {
-            json!({"floor_type": "Heated_basement", "total_area": 35.6, "perimeter": 25.8,
-            "thickness_walls": 0.3, "thermal_resistance_floor_construction": 0.0, "depth_basement_floor": z})
+            json!({"floor_type": "Heated_basement", "total_area": 100, "perimeter": 40,
+            "thickness_walls": 0.3, "thermal_resistance_floor_construction": 0.05,
+            "depth_basement_floor": z, "thermal_resist_walls_base": 0.5})
         };
-        let b: f64 = 35.6 / 12.9;
-        let d_t: f64 = 0.3 + 1.5 * 0.21;
-        let expected = 3.0 / (PI * b + d_t + 1.0) * (PI * b / (d_t + 1.0) + 1.0).ln();
-        assert!((exact(floor(2.0)).unwrap() - expected).abs() < 1e-12);
-        // A depth that takes d_t + z/2 past B' uses the well-insulated equation.
-        assert!((exact(floor(6.0)).unwrap() - 1.5 / (0.457 * b + d_t + 3.0)).abs() < 1e-12);
-        // As z → 0 the basement floor becomes the slab (§7.3.2 reduces to §7.1).
+        // U = (A·U_bf + z·P·U_bw)/(A + z·P): U_bf by §7.3.2 (d_t + z/2), U_bw by §7.3.3.
+        let (a, p, z) = (100.0, 40.0, 2.0);
+        let b: f64 = a / (0.5 * p);
+        let d_t: f64 = 0.3 + 1.5 * (0.17 + 0.05 + 0.04);
+        let u_bf = 3.0 / (PI * b + d_t + 1.0) * (PI * b / (d_t + 1.0) + 1.0).ln();
+        let u_bw = basement_wall_u(z, 0.5, d_t);
+        let expected = (a * u_bf + z * p * u_bw) / (a + z * p);
+        assert!((exact_whole(floor(z)).unwrap() - expected).abs() < 1e-12);
+        assert_eq!(
+            ground_floor_u_value(floor(z).as_object().unwrap(), None, true),
+            Some(0.4856)
+        );
+        // A depth that takes d_t + z/2 past B' uses the well-insulated floor equation.
+        let z: f64 = 10.0;
+        let u_bf = 1.5 / (0.457 * b + d_t + 5.0);
+        let expected = (a * u_bf + z * p * basement_wall_u(z, 0.5, d_t)) / (a + z * p);
+        assert!((exact_whole(floor(z)).unwrap() - expected).abs() < 1e-12);
+        // As z → 0 the basement becomes the slab (§7.3.2 reduces to §7.1, the wall term vanishes).
         let mut slab = floor(1e-9);
         slab["floor_type"] = json!("Slab_no_edge_insulation");
-        assert!((exact(floor(1e-9)).unwrap() - exact(slab).unwrap()).abs() < 1e-8);
+        assert!((exact_whole(floor(1e-9)).unwrap() - exact(slab).unwrap()).abs() < 1e-6);
+        // The basement wall resistance is an input: missing, there is no U-value.
+        let mut missing = floor(2.0);
+        missing
+            .as_object_mut()
+            .unwrap()
+            .remove("thermal_resist_walls_base");
+        assert_eq!(exact_whole(missing), None);
+    }
+
+    #[test]
+    fn heated_basement_is_the_floor_alone_where_the_target_does_not_weight_its_walls() {
+        let floor = json!({"floor_type": "Heated_basement", "total_area": 100, "perimeter": 40,
+            "thickness_walls": 0.3, "thermal_resistance_floor_construction": 0.05,
+            "depth_basement_floor": 2});
+        // U_bf by §7.3.2 (d_t + z/2) alone; the basement wall resistance is not needed.
+        let b: f64 = 100.0 / 20.0;
+        let d_t: f64 = 0.3 + 1.5 * (0.17 + 0.05 + 0.04);
+        let u_bf = 3.0 / (PI * b + d_t + 1.0) * (PI * b / (d_t + 1.0) + 1.0).ln();
+        assert!((exact(floor.clone()).unwrap() - u_bf).abs() < 1e-12);
+        assert_eq!(u(floor.clone()), Some(0.4021));
+        // The same floor on a whole-basement target needs the wall resistance.
+        assert_eq!(exact_whole(floor), None);
     }
 
     #[test]

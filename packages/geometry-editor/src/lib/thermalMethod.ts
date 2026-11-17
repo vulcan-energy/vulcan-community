@@ -38,7 +38,8 @@ export function thermalMethods(
     value: 'calculation' as const,
     label: constructionBands || elementType === 'BuildingElementGround' ? 'Calculation' : 'Layers',
   };
-  if (elementType === 'BuildingElementTransparent') return constructionBands ? [band, entered] : [];
+  // A window's band method is its glazing description; entered, it takes U and g.
+  if (elementType === 'BuildingElementTransparent') return constructionBands ? [{ ...band, label: 'Glazing description' }, { ...entered, label: 'U and g' }] : [];
   if (constructionBands && elementType === 'BuildingElementGround' && !groundCalculated) return [band, entered];
   return constructionBands ? [band, calculation, entered] : [entered, calculation];
 }

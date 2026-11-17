@@ -303,18 +303,18 @@ describe('main-form window opening inputs', () => {
   });
   afterAll(resetGeometrySchemaAssetsForTests);
 
-  function renderForm(element: Element, schemaPort: GeometrySchemaPort = canonicalGeometrySchemaPort, inspectorContributions?: GeometryInspectorContributions) {
+  function renderForm(element: Element, schemaPort: GeometrySchemaPort = canonicalGeometrySchemaPort, inspectorContributions?: GeometryInspectorContributions, others: Element[] = [], setSelection = vi.fn()) {
     const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
     store.setState({
-      elementsById: { [element.id]: element },
-      elementIds: [element.id],
+      elementsById: Object.fromEntries([element, ...others].map((el) => [el.id, el])),
+      elementIds: [element.id, ...others.map((el) => el.id)],
       zones: [{ id: 'zone-1', name: 'Zone', floorArea: 1, height: 2 }],
       zoneIds: ['zone-1'],
     });
     render(
       <GeometryEditorServicePortsProvider schemaPort={schemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
         <GeometryStoreProvider store={store}>
-          <ElementCreator selection={{ type: 'element', id: element.id } as never} setSelection={vi.fn()} useCard={false}
+          <ElementCreator selection={{ type: 'element', id: element.id } as never} setSelection={setSelection} useCard={false}
             inspectorContributions={inspectorContributions} />
         </GeometryStoreProvider>
       </GeometryEditorServicePortsProvider>,
@@ -539,10 +539,116 @@ describe('main-form window opening inputs', () => {
     expect(stored(store).max_window_open_area).toBe(0.6);
   });
 
+  it('reads Outline · Rectangle, opens the shape rows in place, and shows no Area line for a plain rectangle', () => {
+    renderForm(windowElement());
+    const outline = screen.getByRole('button', { name: 'Outline · Rectangle' });
+    expect(outline).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('wall-shape-top')).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Area' })).toBeNull();
+    fireEvent.click(outline);
+    expect(screen.getByRole('button', { name: 'Outline · Rectangle' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('wall-shape-top')).toBeInTheDocument();
+  });
+
+  it('a shaped outline reads as a summary, stays closed until asked, and its height is set in the outline', () => {
+    const face = { kind: 'profiled-line-face', top_profile: [{ t: 0, h: 1 }, { t: 0.5, h: 1.3 }, { t: 1, h: 1 }], bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 0 }] };
+    renderForm(windowElement({ geometry_face: face }, { height: 1.3 }));
+    expect(screen.getByRole('button', { name: 'Outline · Custom top' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('wall-shape-top')).toBeNull();
+    expect(screen.getByLabelText('Height', { selector: 'input' })).toBeDisabled();
+  });
+
+  it('a wall fitted under a roof that changed says so on its closed outline', () => {
+    const wall = {
+      id: 'wall-1', name: 'Gable', type: 'BuildingElementOpaque', zoneId: 'zone-1', floorId: '0', parent_element: null,
+      coordinates: [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }], width: 4, height: 3, area: 10, pitch: 90, base_height: 0,
+      extra_json: { geometry_face: { kind: 'profiled-line-face', top_mode: 'roof', top_profile: [{ t: 0, h: 2 }, { t: 0.5, h: 3 }, { t: 1, h: 2 }], bottom_profile: [{ t: 0, h: 0 }, { t: 1, h: 0 }] } },
+    } as unknown as Element;
+    renderForm(wall);
+    expect(screen.getByRole('button', { name: 'Outline · Top under roof · roof changed' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('Edit all N windows selects every window of its kind, keeping this one to come back to', () => {
+    const rooflight = windowElement(undefined, { id: 'roof-1', name: 'Rooflight', coordinates: [{ x: 0, y: 0, z: 3 }, { x: 1, y: 0, z: 3 }, { x: 1, y: 1, z: 3 }, { x: 0, y: 1, z: 3 }] } as never);
+    const door = { ...windowElement(undefined, { id: 'door-1', name: 'Door' } as never), type: 'BuildingElementOpaque', is_external_door: true } as unknown as Element;
+    const upstairs = windowElement(undefined, { id: 'w-up', name: 'Window up', base_height: 3.5, width: 2 } as never);
+    const setSelection = vi.fn();
+    const store = renderForm(windowElement(), undefined, undefined, [rooflight, door, upstairs], setSelection);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit all 2 windows' }));
+    expect(store.getState().selectedElementIds).toEqual(['window-1', 'w-up']);
+    expect(setSelection).toHaveBeenCalledWith({ type: 'element', id: 'window-1', editAll: true });
+  });
+
+  it('offers no Edit all for the only window of its kind', () => {
+    renderForm(windowElement());
+    expect(screen.queryByRole('button', { name: /^Edit all/ })).toBeNull();
+  });
+
+  describe('apply an edit to the windows like this one', () => {
+    const sibling = (id: string, over: Partial<BuildingElementTransparent> = {}) => windowElement(undefined, { id, name: `Window ${id}`, ...over } as never);
+    const heightOf = (store: ReturnType<typeof createGeometryStore>, id: string) => (store.getState().elementsById[id] as BuildingElementTransparent).height;
+    const typeHeight = (value: string) => {
+      fireEvent.change(screen.getByLabelText('Height', { selector: 'input' }), { target: { value } });
+      fireEvent.blur(screen.getByLabelText('Height', { selector: 'input' }));
+    };
+
+    it('offers nothing until a value changes, and has no Same as line', () => {
+      renderForm(windowElement(), undefined, undefined, [sibling('w2'), sibling('w3')]);
+      expect(screen.queryByText(/Same as/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
+    });
+
+    it('after an edit, Apply copies only that value to the windows that matched, as one undo step', async () => {
+      const store = renderForm(windowElement(), undefined, undefined, [sibling('w2', { base_height: 1 }), sibling('w3'), sibling('wide', { width: 2 })]);
+      act(() => store.getState().seedHistory('start'));
+      typeHeight('1.3');
+      await act(async () => {});
+      expect(heightOf(store, 'window-1')).toBe(1.3);
+      expect(screen.getByText('Height 1.3 m · Apply to the 2 other windows like this one')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+      expect(heightOf(store, 'w2')).toBe(1.3);
+      expect(heightOf(store, 'w3')).toBe(1.3);
+      expect(heightOf(store, 'wide')).toBe(1);
+      expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
+      act(() => store.getState().undo());
+      expect(heightOf(store, 'w2')).toBe(1);
+      expect(heightOf(store, 'w3')).toBe(1);
+      expect(heightOf(store, 'window-1')).toBe(1.3);
+    });
+
+    it('recounts when a matching window is deleted, and clears on undo of the edit', async () => {
+      const store = renderForm(windowElement(), undefined, undefined, [sibling('w2'), sibling('w3')]);
+      act(() => store.getState().seedHistory('start'));
+      typeHeight('1.3');
+      await act(async () => {});
+      act(() => store.getState().removeElement('w3'));
+      expect(screen.getByText('Height 1.3 m · Apply to the other window like this one')).toBeInTheDocument();
+      act(() => { store.getState().saveToHistory('delete'); });
+      act(() => { store.getState().undo(); store.getState().undo(); });
+      expect(heightOf(store, 'window-1')).toBe(1);
+      expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
+    });
+
+    it('names several changes; a window that matched none is offered nothing', async () => {
+      renderForm(windowElement(), undefined, undefined, [sibling('w2'), sibling('w3')]);
+      typeHeight('1.3');
+      fireEvent.change(screen.getByLabelText('Sill', { selector: 'input' }), { target: { value: '0.8' } });
+      fireEvent.blur(screen.getByLabelText('Sill', { selector: 'input' }));
+      await act(async () => {});
+      expect(screen.getByText('Height and sill · Apply to 2 other windows')).toBeInTheDocument();
+      cleanup();
+      renderForm(windowElement(), undefined, undefined, [sibling('w2', { width: 2 })]);
+      typeHeight('1.3');
+      await act(async () => {});
+      expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
+    });
+  });
+
   it('shows the run value and does not sync over a single physical part', async () => {
     renderForm(windowElement({ window_part_list: [{ free_area_height: 0.5, mid_height: 1.5, max_window_open_area: 0.5 }] }, { free_area_height: 0.5, mid_height: 1.5, max_window_open_area: 0.5 }));
     await act(async () => {});
-    fireEvent.change(inputFor(/^Height/), { target: { value: '1.4' } });
+    // Width, height and sill share one row: each input is named.
+    fireEvent.change(screen.getByLabelText('Height', { selector: 'input' }), { target: { value: '1.4' } });
     await act(async () => {});
     expect(inputFor(/^Mid height/).value).toBe('1.5');
   });

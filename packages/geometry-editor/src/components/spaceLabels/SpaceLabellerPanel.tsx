@@ -345,7 +345,7 @@ function SpaceLabelCompactRow({
       {canMarkOpenToLiving ? (
         <label
           className={`space-labeller-panel__living-toggle${isOpenToLiving ? ' space-labeller-panel__living-toggle--on' : ''}`}
-          title="Include this space in the FHS living zone area when it is open to the living room"
+          title="Include this space in the living room area"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >

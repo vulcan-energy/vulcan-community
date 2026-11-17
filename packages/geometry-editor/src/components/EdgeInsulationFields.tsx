@@ -136,7 +136,11 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
         <div style={{ margin: ROW_MARGIN(compact), fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
           {type === 'vertical' ? 'Vertical edge insulation' : 'Horizontal edge insulation'}
         </div>
-        {method === 'resistance' ? <>{resistance}{dimension}</> : <>
+        {method === 'resistance' ? <>
+          {resistance}{dimension}
+          {/* The floor calculation takes off the ground the insulation replaces, so it needs the thickness. */}
+          {!existing && number('thickness', hemieFieldLabel('thickness'), 'm')}
+        </> : <>
           {dimension}
           {number('thickness', hemieFieldLabel('thickness'), 'm', '0.025 m (default)')}
           <div style={{ margin: ROW_MARGIN(compact) }}>

@@ -48,14 +48,16 @@ import {
   getUnheatedPitchedRoofCeilingElevationM,
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
 } from '../../lib/unheatedPitchedRoofCeiling';
-import { readProfiledLineFace, type ProfilePoint } from '../../lib/profileLineFace';
-import { deriveWallEdgeFromRoofs, wallLeavesRoofsAtM } from '../../lib/wallEdgeFromRoofs';
-import { withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
+import { outlineSummary, readProfiledLineFace, type ProfilePoint } from '../../lib/profileLineFace';
+import { deriveWallEdgeFromRoofs, isRoofSnapshotStale, wallLeavesRoofsAtM } from '../../lib/wallEdgeFromRoofs';
+import { getStoreyHeight, isStoreyHeightWall, withEffectiveStoreyHeights } from '../../lib/zoneDerivation';
+import { fhsFloorCodeForCanvasFloor } from '../../lib/storeySemantics';
+import { openFloorPicker } from '../../lib/fieldSource';
 import type { GeometryStoreApi } from '../../stores/geometryStore';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { ResetFieldButton } from '../ResetFieldButton';
-import { SourceNote } from '../FieldSource';
+import { DerivedSource, SourceNote } from '../FieldSource';
 import { WallShapeRows, type WallShapeCommit } from '../WallShapeRows';
 import {
   decimalInputProps,
@@ -329,19 +331,27 @@ export function useWallFamilyFormState({
   );
 
   const wallShapeAvailable = canUseWallShape && isExistingSelection;
-  // A wall with a stored face keeps the section open: collapsing it would hide its shape.
-  const wallShapeExpanded = wallShapeAvailable && (wallShapeOpen || !!selectedWallFace);
+  const wallShapeExpanded = wallShapeAvailable && wallShapeOpen;
+  // "Outline · Rectangle": a disclosure of the shape rows (Top and Bottom), closed until asked.
+  // Closed, it also says when a roof-fitted edge no longer fits its roof (the rows offer Re-fit).
+  const roofChanged = !wallShapeExpanded && !!selectedWallFace && (['top', 'bottom'] as const).some((edge) =>
+    selectedWallFace[`${edge}_mode`] === 'roof' && isRoofSnapshotStale(
+      selectedWallFace[`${edge}_profile`],
+      fitWallEdgeToRoofs(edge, edge === 'top' ? selectedWallFace.bottom_profile : selectedWallFace.top_profile)?.profile ?? null,
+    ));
   const wallShapeToggle =
-    wallShapeAvailable && !selectedWallFace ? (
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm element-editor-input-action"
-        onClick={() => setWallShapeOpen((open) => !open)}
-        aria-expanded={wallShapeExpanded}
-        style={{ whiteSpace: 'nowrap', alignSelf: 'center' }}
-      >
-        Shape
-      </button>
+    wallShapeAvailable ? (
+      <div className="field-source-note">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm outline-disclosure"
+          onClick={() => setWallShapeOpen((open) => !open)}
+          aria-expanded={wallShapeExpanded}
+        >
+          {`Outline · ${outlineSummary(selectedWallFace)}${roofChanged ? ' · roof changed' : ''}`}
+          <span aria-hidden="true" className="outline-disclosure-chevron">{wallShapeExpanded ? '▾' : '▸'}</span>
+        </button>
+      </div>
     ) : null;
 
   // A sloped surface's width and height come from its drawn shape until typed over (authored markers).
@@ -361,12 +371,71 @@ export function useWallFamilyFormState({
     );
   };
 
+  // A straight wall's height comes from its storey (the floor picker's Height) until typed over.
+  const storeyZ = selectedElement && !selectedSlopedDimensions && isStoreyHeightWall(selectedElement)
+    ? Math.floor(selectedElement.coordinates[0]?.z ?? 0)
+    : null;
+  const storeyHeight = useMemo(
+    () => (storeyZ === null || !selectedElement
+      ? 0
+      : getStoreyHeight(storeyZ, floors, allElements)),
+    [storeyZ, selectedElement, floors, allElements],
+  );
+  const followsStorey = storeyHeight > 0 && Math.abs(liveHeightValue - storeyHeight) <= 0.005;
+  const useStoreyHeight = useCallback((height: number) => {
+    wallShared.heightInput.setValue(height);
+    commitExistingElementDraftRef.current({ height } as Partial<Element>);
+  }, [commitExistingElementDraftRef, wallShared.heightInput]);
+  const heightSource = slopedSource('height') ?? (storeyZ !== null && storeyHeight > 0 ? (
+    <DerivedSource
+      derived={storeyHeight}
+      current={liveHeightValue}
+      info={<SourceNote link={fhsFloorCodeForCanvasFloor(storeyZ)} onGo={openFloorPicker} title="Open the floor picker">from the storey ·</SourceNote>}
+      useLabel="Use storey"
+      unit="m"
+      fieldLabel="Height"
+      onUse={useStoreyHeight}
+    />
+  ) : undefined);
+
   const renderLinearDimensionsFields = (
     fieldRef: (fieldKey: string) => (el: HTMLDivElement | null) => void,
-    options: { widthStep: string; heightStep: string; includeWallShape?: boolean },
+    options: {
+      widthStep: string;
+      heightStep: string;
+      includeWallShape?: boolean;
+      /** A window's sill: width, height and sill share one row. */
+      sill?: { label: ReactNode; field: ReactNode };
+    },
   ) => {
     const widthValidation = getFieldValidationState('width', liveWidthValue);
     const heightValidation = getFieldValidationState('height', liveHeightValue);
+    if (options.sill && !(options.includeWallShape && wallShapeExpanded)) {
+      const cell = (key: string, label: ReactNode, field: ReactNode) => (
+        <div key={key} style={{ display: 'grid', gap: 4, minWidth: 0 }} ref={fieldRef(key)}>
+          {label}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>{field}</div>
+        </div>
+      );
+      return (
+        <>
+          <div data-window-size-row style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+            {cell('width', renderFieldLabel('Width (m):', elementType, 'width', slopedSource('width')), <>
+              <StandardInput {...decimalInputProps(wallShared.widthInput)} unit={fieldUnit('width')} step={options.widthStep} min="0"
+                variant="ghost" size="md" className="flex-1" aria-label="Width" />
+              <FieldValidationIndicator hasIssue={!!widthValidation} issue={widthValidation?.message} variant={widthValidation?.variant} />
+            </>)}
+            {cell('height', renderFieldLabel('Height (m):', elementType, 'height', heightSource), <>
+              <StandardInput {...decimalInputProps(wallShared.heightInput)} unit={fieldUnit('height')} step={options.heightStep} min="0"
+                variant="ghost" size="md" className="flex-1" aria-label="Height" disabled={!!selectedWallFace} title={selectedWallFace ? 'Set by the outline' : undefined} />
+              <FieldValidationIndicator hasIssue={!!heightValidation} issue={heightValidation?.message} variant={heightValidation?.variant} />
+            </>)}
+            {cell('base_height', options.sill.label, options.sill.field)}
+          </div>
+          {options.includeWallShape ? wallShapeToggle : null}
+        </>
+      );
+    }
     const heightField = (
       <>
         <StandardInput
@@ -376,9 +445,9 @@ export function useWallFamilyFormState({
           min="0"
           variant="ghost"
           size="md"
-          className={selectedSlopedDimensions && !showSlopedHeightReset ? 'flex-1 field-value--source' : 'flex-1'}
+          className={(selectedSlopedDimensions && !showSlopedHeightReset) || followsStorey ? 'flex-1 field-value--source' : 'flex-1'}
+          disabled={!!selectedWallFace} title={selectedWallFace ? 'Set by the outline' : undefined}
         />
-        {options.includeWallShape ? wallShapeToggle : null}
         <FieldValidationIndicator
           hasIssue={!!heightValidation}
           issue={heightValidation?.message}
@@ -414,6 +483,7 @@ export function useWallFamilyFormState({
             {selectedSlopedDimensionNotes.width}
           </div>
         ) : null}
+        {options.includeWallShape ? wallShapeToggle : null}
         {options.includeWallShape && wallShapeExpanded && selectedElement ? (
           <WallShapeRows
             key={selectedElement.id}
@@ -433,7 +503,7 @@ export function useWallFamilyFormState({
           </WallShapeRows>
         ) : (
           <>
-            {renderFieldLabel('Height (m):', elementType, 'height', slopedSource('height'))}
+            {renderFieldLabel('Height (m):', elementType, 'height', heightSource)}
             <div
               className="element-input"
               style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
@@ -448,6 +518,10 @@ export function useWallFamilyFormState({
             {selectedSlopedDimensionNotes.height}
           </div>
         ) : null}
+        {options.sill ? <>
+          {options.sill.label}
+          <div className="element-input" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} ref={fieldRef('base_height')}>{options.sill.field}</div>
+        </> : null}
       </>
     );
   };

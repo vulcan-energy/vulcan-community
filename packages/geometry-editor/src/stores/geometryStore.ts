@@ -64,11 +64,14 @@ import {
   cascadeWallChangeIfAny,
   storeyForMetreZ,
   deriveZoneProperties,
+  getStoreyHeight,
   isInternalFloorElement,
+  isStoreyHeightWall,
   isWalkableFloorHorizontalPolygon,
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
 } from '../lib/zoneDerivation';
+import { isStoreyCopyElement, storeyCopyName } from '../lib/storeyCopy';
 import { deriveAutomaticGroundTotalAreas } from '../lib/groundFloorArea';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../lib/overrideProvenance';
 import {
@@ -379,6 +382,15 @@ function measureGeometryStoreAction<T>(actionName: string, fn: () => T): T {
  * Apply the wall-change cascade once after an element mutation or completed batch.
  * No-op when the change doesn't shift any floor's effective storey height.
  */
+/** A straight wall with no height takes its storey's height (the floor picker's Height), when one is known. */
+function storeyHeightForHeightlessWall(element: Element, floors: Floor[], elementsById: Record<string, Element>): number | null {
+  const height = (element as { height?: unknown }).height;
+  if (!isStoreyHeightWall(element) || (typeof height === 'number' && height > 0)) return null;
+  const others = Object.values(elementsById).filter((other) => other.id !== element.id);
+  const storeyHeight = getStoreyHeight(Math.floor(element.coordinates[0]?.z ?? 0), floors, others);
+  return storeyHeight > 0 ? storeyHeight : null;
+}
+
 function applyWallStackCascade(
   prevFloors: Floor[],
   prevElementsById: Record<string, Element>,
@@ -623,7 +635,11 @@ function applyHostedFloorMovePatches(
       patch = buildMechanicalVentilationTerminalHostPlacementPatch(nextChild, host, floors, ensureFloorForZ);
     } else {
       const previousFloor = floorZ(previousChild);
-      const nextFloor = floorZ(nextChild);
+      // A hosted vent or fan keeps a stale floorId while the host cascade moves its point to the
+      // host's storey; that point's storey is where it now is.
+      const nextFloor = (nextChild.type === 'Vents' || nextChild.type === 'MechanicalVentilation') && nextChild.coordinates?.length
+        ? Math.floor(nextChild.coordinates[0]!.z)
+        : floorZ(nextChild);
       if (rootIds.has(nextChild.id) || previousFloor === undefined || nextFloor === undefined ||
           previousFloor === nextFloor) continue;
       const heightPatch = calculateBaseHeightPatchForFloorMove(previousChild, nextFloor, effectiveFloors);
@@ -1544,6 +1560,9 @@ export interface GeometryState extends
   spaceLabellerFocusField: { fieldKey: string } | null;
   setSpaceLabellerSelectedLabelId: (id: string | null, focusFieldKey?: string) => void;
   openSpaceLabeller: (zoneId: string) => void;
+  /** A canvas decoration (a host's contribution and item) the canvas selects once it can; it then clears this. */
+  canvasDecorationRequest: { contributionId: string; id: string } | null;
+  requestCanvasDecoration: (request: { contributionId: string; id: string } | null) => void;
   closeSpaceLabeller: () => void;
   /** Quantized wall-segment fingerprint per zone — avoids re-infer when fabric unchanged. */
   spaceInferenceWallPrintByZone: Record<string, string>;
@@ -1640,7 +1659,14 @@ export interface GeometryState extends
   ) => void;
   removeElement: (id: string) => void;
   duplicateElement: (id: string) => void;
-  duplicateElements: (ids: string[]) => void;
+  /** `inPlace` copies without the 0.5 m offset; `name` names each copy (made unique). */
+  duplicateElements: (ids: string[], options?: { inPlace?: boolean; name?: (source: Element) => string }) => void;
+  /**
+   * "Add F3: Copy of F2": copies storey `fromZ`'s walls, doors, windows, internal walls, emitters,
+   * lights and vents in place onto storey `toZ` (with its typed height), named for that storey, and
+   * shows it. One undo step.
+   */
+  copyStorey: (fromZ: number, toZ: number) => void;
   /** See `GroundFabricFollower`: installed per store by `createGeometryStore`. */
   withCopySources: GroundFabricFollower['withCopySources'];
 
@@ -3127,6 +3153,7 @@ const createGeometryState = (
       canUndo: false,
       canRedo: false,
       lastSavedCsv: null,
+      detachedOpenings: {},
       targetValidation: null,
       globalOrientationOffset: 0,
       ...extras,
@@ -3193,12 +3220,21 @@ const createGeometryState = (
       };
 
       for (const draft of elements) {
-        const newElement = normalizeElementDraftForStore(
+        let newElement = normalizeElementDraftForStore(
           draft,
           workingState,
           ensureFloorForZ,
           coerceElementForStore,
         );
+        const storeyHeight = storeyHeightForHeightlessWall(newElement, workingState.floors, workingState.elementsById);
+        if (storeyHeight !== null) {
+          const width = (newElement as { width?: unknown }).width;
+          newElement = {
+            ...newElement,
+            height: storeyHeight,
+            ...(typeof width === 'number' && width > 0 ? { area: roundToTwoDecimals(width * storeyHeight) } : {}),
+          } as Element;
+        }
         workingState.elementsById[newElement.id] = newElement;
         workingState.elementIds.push(newElement.id);
         addedIds.push(newElement.id);
@@ -3249,6 +3285,8 @@ const createGeometryState = (
   spaceLabellerZoneId: null,
   spaceLabellerSelectedLabelId: null,
   spaceLabellerFocusField: null,
+  canvasDecorationRequest: null,
+  requestCanvasDecoration: (canvasDecorationRequest) => set({ canvasDecorationRequest }),
   spaceInferenceWallPrintByZone: {},
 
   canvasViewResetKey: 0,
@@ -6142,6 +6180,13 @@ const createGeometryState = (
         });
       }
 
+      // A wall being drawn (its line set for the first time) takes its storey's height. Later
+      // updates never fill a height, so a height the user blanked stays blank.
+      if ((prevElement.coordinates?.length ?? 0) < 2 && !Object.prototype.hasOwnProperty.call(updates, 'height')) {
+        const storeyHeight = storeyHeightForHeightlessWall({ ...prevElement, ...normalizedUpdates } as Element, state.floors, state.elementsById);
+        if (storeyHeight !== null) (normalizedUpdates as { height?: number }).height = storeyHeight;
+      }
+
       // IMMUTABLE UPDATE: Create new element with incremented version
       const nextElement = {
         ...prevElement,
@@ -7111,11 +7156,13 @@ const createGeometryState = (
       const resolveElementName = createElementNameLookup(Object.values(state.elementsById));
       const resolveParentElement = createParentElementLookup(Object.values(state.elementsById));
       const removedName = removedElement.name;
+      const detachedOpenings = { ...state.detachedOpenings };
       if (removedName) {
         for (const elId of newElementIds) {
           const el = remainingElementsById[elId];
           if (el && resolveParentElement(el)?.id === id) {
             remainingElementsById[elId] = { ...el, parent_element: null } as typeof el;
+            if (el.type === 'BuildingElementTransparent') detachedOpenings[elId] = removedName;
           } else if (el?.type === 'MechanicalVentilationTerminal' && resolveElementName(el.host_element, undefined, isMvhrTerminalHost)?.id === id) {
             remainingElementsById[elId] = {
               ...el,
@@ -7131,6 +7178,7 @@ const createGeometryState = (
       const updates: Record<string, any> = {
         elementsById: remainingElementsById,
         elementIds: newElementIds,
+        detachedOpenings,
       };
       if (state.selection?.id === id) {
         updates.selection = null;
@@ -7247,7 +7295,7 @@ const createGeometryState = (
   },
 
   // Duplicate a group of elements preserving internal parent references
-  duplicateElements: (ids: string[]) => {
+  duplicateElements: (ids: string[], options = {}) => {
     const copySources = new Map<string, string>();
     get().withCopySources(copySources, () => set((state) => {
     if (!ids || ids.length === 0) return state;
@@ -7280,14 +7328,16 @@ const createGeometryState = (
     const oldIdToNewName = new Map<string, string>();
     const oldIdToNewAutoSync = new Map<string, boolean>();
     for (const el of sourceEls) {
-      const { name: unique, nameAutoSync } = computeDuplicateName(
-        el,
-        workingById,
-        state.floors,
-        Object.values(workingById).map(e => e.name),
-        state.namingPreferences,
-        state.globalOrientationOffset,
-      );
+      const { name: unique, nameAutoSync } = options.name
+        ? { name: generateUniqueElementName(options.name(el), Object.values(workingById).map(e => e.name)), nameAutoSync: false }
+        : computeDuplicateName(
+          el,
+          workingById,
+          state.floors,
+          Object.values(workingById).map(e => e.name),
+          state.namingPreferences,
+          state.globalOrientationOffset,
+        );
       const nid = generateId();
       oldToNewId.set(el.id, nid);
       oldIdToNewName.set(el.id, unique);
@@ -7298,6 +7348,7 @@ const createGeometryState = (
     // World-space offset. The group moves together; a hosted opening whose host stays behind moves
     // along that host, and its shading follows it.
     const offsetOf = (src: Element): { dx: number; dy: number } => {
+      if (options.inPlace) return { dx: 0, dy: 0 };
       const parentEl = src.parent_element ? resolveParent(src) : undefined;
       const parentInGroup = !!parentEl && sourceIdSet.has(parentEl.id);
       if (src.parent_element && !parentInGroup && shouldSnapToParent(src)) return duplicateOpeningOffset(src.coordinates, parentEl);
@@ -7339,6 +7390,21 @@ const createGeometryState = (
 
     return { elementsById: newById, elementIds: newIds } as any;
   }));
+  },
+
+  copyStorey: (fromZ, toZ) => {
+    const state = get();
+    const sourceIds = state.elementIds.filter((id) => {
+      const el = state.elementsById[id];
+      return !!el && isStoreyCopyElement(el) && getElementCanvasFloorZValue(el, state.floors) === fromZ;
+    });
+    const floorId = get().ensureFloorForZ(toZ);
+    const source = state.floors.find((floor) => floor.zIndex === fromZ);
+    if (source?.heightUserOverride) get().updateFloor(floorId, { height: source.height, heightUserOverride: true });
+    const before = new Set(get().elementIds);
+    get().duplicateElements(sourceIds, { inPlace: true, name: (el) => storeyCopyName(el.name, fromZ, toZ) });
+    get().updateElementsFloor(get().elementIds.filter((id) => !before.has(id)), toZ);
+    get().setCurrentFloorZ(toZ);
   },
 
   // Recompute orientation-dependent elements when global offset changes.
@@ -7838,6 +7904,7 @@ const createGeometryState = (
         complianceValidationEnabled,
         complianceSettings: state.complianceSettings,
         globalOrientationOffset: state.globalOrientationOffset,
+        storeysFromConversion: targetRules(schemaPort, state.complianceSettings).constructionBands,
       }),
     );
 

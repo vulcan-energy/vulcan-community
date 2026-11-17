@@ -54,6 +54,8 @@ export interface UseMarqueeSelectionDeps {
   setCurrentFloorZ: (z: number) => void;
   zones: Array<{ id: string }>;
   commitVertexPositionUpdates?: (updates: Array<{ elementId: string; vertexIndex: number; newPosition: { x: number; y: number; z: number } }>, skipAutoSave?: boolean) => void;
+  /** An empty marquee (a click on empty canvas) asks this first; true when it set the selection itself. */
+  leaveToOrigin?: () => boolean;
 }
 
 export function roomFloorElementTypeForCanvasFloor(
@@ -88,6 +90,7 @@ export function useMarqueeSelection(deps: UseMarqueeSelectionDeps) {
     setCurrentFloorZ,
     zones,
     commitVertexPositionUpdates,
+    leaveToOrigin,
   } = deps;
 
   const [marqueeSelection, setMarqueeSelectionState] = useState<MarqueeState | null>(null);
@@ -322,14 +325,17 @@ export function useMarqueeSelection(deps: UseMarqueeSelectionDeps) {
       });
 
       const elementIds = elementsInMarquee.map((el) => el.id);
-      setSelectedElementIds(elementIds);
       marqueeJustCompletedRef.current = true;
-
-      if (elementIds.length === 1) {
-        const selectedElement = elementsInMarquee[0];
-        setSelection(selectionForElement(selectedElement));
+      if (elementIds.length === 0 && leaveToOrigin?.()) {
+        // Left "Edit all N windows" for the window it was opened from.
       } else {
-        setSelection(null);
+        setSelectedElementIds(elementIds);
+        if (elementIds.length === 1) {
+          const selectedElement = elementsInMarquee[0];
+          setSelection(selectionForElement(selectedElement));
+        } else {
+          setSelection(null);
+        }
       }
 
       setMarqueeSelection(null);
@@ -360,6 +366,7 @@ export function useMarqueeSelection(deps: UseMarqueeSelectionDeps) {
       commitVertexPositionUpdates,
       completeMarqueeInteraction,
       setMarqueeSelection,
+      leaveToOrigin,
     ]
   );
 

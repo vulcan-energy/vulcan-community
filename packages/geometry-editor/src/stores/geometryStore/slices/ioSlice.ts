@@ -180,6 +180,11 @@ export interface IoSlice {
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
   setLastSavedCsv: (csv: string | null) => void;
+  /**
+   * Windows whose wall was deleted since the last save or load, by id, with that wall's name:
+   * the window panel reads "Was on Wall (S)" with a reattach. Not part of the model.
+   */
+  detachedOpenings: Readonly<Record<string, string>>;
   /** Internal cancellation hook used by document-boundary reset actions. */
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
   /**
@@ -929,7 +934,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
   resolveCsvUValueInterpretation: (ids, meaning) => set(state => ({ elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, element]) => [id, ids.includes(id) ? resolveCsvUValueMeaning(element, meaning) : element])) })),
   lastSavedCsv: null,
-  setLastSavedCsv: (csv) => set({ lastSavedCsv: csv }),
+  setLastSavedCsv: (csv) => set({ lastSavedCsv: csv, detachedOpenings: {} }),
+  detachedOpenings: {},
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => {
     invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
   },
@@ -1127,7 +1133,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // Where that base is in the drawing, which every drawn height is written less.
     const zoneBaseDrawingZ = ventilationZoneBaseDrawingZ(exportElements, effectiveVentBaseHeight);
     const unreadRows = compliance.unreadMetadataRows ?? {};
-    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), targetRules(options.schemaPort, state.complianceSettings).storeyBuildTypes)) {
+    const exportRules = targetRules(options.schemaPort, state.complianceSettings);
+    for (const [key, value] of metadataRowValues({ ...state, elements: exportElements }, metadataFillRoot(options.schemaPort), exportRules)) {
+      // An existing building's conversion counts the storeys itself (a room in the roof is not
+      // one) and reads no row: none is written, not even a blank one the file had.
+      if (key === 'General_storeys_in_dwelling' && exportRules.constructionBands) continue;
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
     }

@@ -11,11 +11,11 @@ import { EdgeInsulationFields } from '../EdgeInsulationFields';
 
 const root = { $defs: { WallInsulationMaterial: { enum: ['mineral wool', 'EPS', 'XPS'] } } };
 
-function renderExisting(value: unknown, elementKey = 'floor') {
+function renderExisting(value: unknown, elementKey = 'floor', existing = true) {
   const onChange = vi.fn();
   const port = { ...canonicalGeometrySchemaPort, getRootSchema: () => root as never };
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: port });
-  store.setState({ complianceSettings: { IsExistingBuilding: true } } as never);
+  store.setState({ complianceSettings: { IsExistingBuilding: existing } } as never);
   const ui = (next: unknown, key: string) => (
     <GeometryEditorServicePortsProvider schemaPort={port} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
       <GeometryStoreProvider store={store}>
@@ -74,4 +74,15 @@ it('stays on Resistance while the resistance is cleared to retype it, and holds 
   // Another floor stating neither method starts on its own default.
   onChange.show(null, 'other floor');
   expect(pressed('Thickness and material')).toBe('true');
+});
+
+it('takes resistance, width or depth and thickness on a new build', () => {
+  const onChange = renderExisting([{ type: 'vertical', depth: 0.3, edge_thermal_resistance: 1.2 }], 'floor', false);
+  expect(screen.queryByRole('group', { name: 'Edge insulation from' })).not.toBeInTheDocument();
+  // The floor calculation needs the thickness to take off the ground it replaces.
+  const thickness = screen.getAllByLabelText(/Thickness/);
+  expect(thickness).toHaveLength(2);
+  fireEvent.change(thickness[1]!, { target: { value: '0.05' } });
+  expect(onChange).toHaveBeenLastCalledWith([{ type: 'vertical', edge_thermal_resistance: 1.2, depth: 0.3, thickness: 0.05 }]);
+  expect(screen.queryByLabelText(/Material/)).not.toBeInTheDocument();
 });
