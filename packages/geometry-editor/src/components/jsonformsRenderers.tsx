@@ -67,6 +67,8 @@ type RendererConfig = {
   groundUComputedWPerM2K?: number | null;
   /** The converter works a blank ground U-value out with the floor calculation (no construction bands). */
   groundUFromCalculation?: boolean;
+  /** The converter derives this floor's blank U-value, but this host has no calculator to show the number. */
+  groundUDerivedWithoutNumber?: boolean;
   opaqueFabricVariant?: OpaqueFabricVariant;
   openGroundUCalculator?: () => void;
   openRuCalculator?: () => void;
@@ -534,6 +536,7 @@ function resolveAdvancedFieldSource(args: {
   isGroundUField: boolean;
   groundUComputedWPerM2K: number | null | undefined;
   groundUFromCalculation: boolean;
+  groundUDerivedWithoutNumber: boolean;
   openGroundUCalculator: (() => void) | undefined;
   fabricRowField: string | undefined;
   derivedNote?: string;
@@ -567,6 +570,11 @@ function resolveAdvancedFieldSource(args: {
         source: sourceButton('Use calculation', args.groundUFromCalculation ? undefined : uRounded, withUnit(uRounded)),
         followsSource: false,
       };
+    }
+    if (args.groundUDerivedWithoutNumber) {
+      return hasExplicit
+        ? { source: sourceButton('Use calculation', undefined), followsSource: false }
+        : { source: <SourceNote>from the floor calculation</SourceNote>, followsSource: false };
     }
   }
 
@@ -764,6 +772,7 @@ function useAdvancedControlPreamble(
     isGroundUField,
     groundUComputedWPerM2K,
     groundUFromCalculation: cfg.groundUFromCalculation === true,
+    groundUDerivedWithoutNumber: cfg.groundUDerivedWithoutNumber === true,
     openGroundUCalculator: cfg.openGroundUCalculator,
     fabricRowField: cfg.fabricRowField,
     derivedNote: propKey ? cfg.derivedSourceNotes?.[propKey] : undefined,
@@ -2158,14 +2167,24 @@ export const GroupAccordion: React.FC<{
   openInitially?: boolean;
   /** What the group holds, in a few words, shown beside the label. */
   hint?: string;
+  /** Each new non-empty value opens the group: a field inside it was asked for or needs a value. */
+  reveal?: string;
   children: React.ReactNode;
-}> = ({ label, count, openInitially, hint, children }) => {
-  const [open, setOpen] = useState<boolean>(!!openInitially);
+}> = ({ label, count, openInitially, hint, reveal = '', children }) => {
+  const [toggledOpen, setToggledOpen] = useState<boolean>(!!openInitially);
+  // A reveal opens the group until the user closes it; the next reveal opens it again.
+  const [dismissedReveal, setDismissedReveal] = useState('');
+  const open = toggledOpen || (!!reveal && reveal !== dismissedReveal);
   return (
     <details
       style={{ margin: '0.75rem 0', border: '1px solid var(--border-subtle)', borderRadius: '6px' }}
       open={open}
-      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+      onToggle={(e) => {
+        const nextOpen = (e.target as HTMLDetailsElement).open;
+        if (nextOpen === open) return;
+        setToggledOpen(nextOpen);
+        if (!nextOpen) setDismissedReveal(reveal);
+      }}
     >
       <summary
         style={{

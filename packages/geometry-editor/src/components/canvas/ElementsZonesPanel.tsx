@@ -34,8 +34,10 @@ import {
 import type { GeometrySourceComparisonPort } from '../../../../geometry-editor-host/src/sourceComparisonPort';
 import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/editorServicePorts';
 import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
+import { ElementTypePicker } from '../ElementTypePicker';
+import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
 import { useTargetValidationFlags } from '../../hooks/useTargetRules';
-import { simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
+import { elementTypeAvailability, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import type { ElementCategoryGhostKey, ElementCategoryGhostState } from '../../lib/elementCategoryVisibility';
 import { HideElementsDropdown } from './HideElementsDropdown';
 import { HidePanelsDropdown, type HidePanelKey, type HidePanelOption } from './HidePanelsDropdown';
@@ -679,6 +681,11 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = targetSchemaMode(schemaPort);
   const bridgingOffered = simplifiedThermalBridgingOffered(schemaPort, schemaMode);
+  const modelSettings = useGeometryStore((s) => s.complianceSettings);
+  const addElementTypeOptions = useMemo(
+    () => ELEMENT_TYPE_ORDER.filter((type) => elementTypeAvailability(schemaPort, type, modelSettings).available),
+    [modelSettings, schemaPort],
+  );
   const { complianceValidationEnabled } = useTargetValidationFlags();
   const zoneValidationById = useMemo(() => {
     const validations = new Map<string, ValidationResult>();
@@ -1210,10 +1217,11 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                       true
                                     );
                                   } catch { /* swallow: best-effort */ }
+                                  geometryStore.getState().finalizeRoom([elementId]);
                                   const createdElement = geometryStore.getState().elementsById[elementId];
                                   if (!createdElement) throw new Error('Created element is missing from the geometry store');
                                   setSelectedElementIds([elementId]);
-                                  setSelection({ ...selectionForElement(createdElement), isPlaceholder: true });
+                                  setSelection(selectionForElement(createdElement));
                                   await handleAssignSource(missing.id, elementId);
                                 } catch (error) {
                                   alert(error instanceof Error ? error.message : 'Failed to create element');
@@ -1370,10 +1378,11 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                   true
                                 );
                               } catch { /* swallow: best-effort */ }
+                              geometryStore.getState().finalizeRoom([elementId]);
                               const createdElement = geometryStore.getState().elementsById[elementId];
                               if (!createdElement) throw new Error('Created element is missing from the geometry store');
                               setSelectedElementIds([elementId]);
-                              setSelection({ ...selectionForElement(createdElement), isPlaceholder: true });
+                              setSelection(selectionForElement(createdElement));
                             } catch (error) {
                               alert(error instanceof Error ? error.message : 'Failed to create element');
                             }
@@ -1409,24 +1418,29 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                 );
               })()}
 
-              <button
-                className="add-button"
-                onClick={() => {
+              <ElementTypePicker
+                value={null}
+                options={addElementTypeOptions}
+                valueLabel="+ Element"
+                ariaLabel="+ Element"
+                triggerClassName="add-button"
+                onChange={(type) => {
                   try {
                     const targetZoneId = zones.length > 0 ? zones[0].id : createPlaceholderZone();
-                    const elementId = createPlaceholderElement(targetZoneId, 'BuildingElementOpaque');
+                    const elementId = createPlaceholderElement(targetZoneId, type);
+                    const centerWorld = canvasToWorld(canvasCenter, scale, panOffset, canvasCenter);
+                    updateElement(elementId, { coordinates: [{ x: centerWorld.x, y: centerWorld.y, z: currentFloorZ }] });
+                    // Created by a pick, it is an ordinary element at once: no Add Element step.
+                    geometryStore.getState().finalizeRoom([elementId]);
                     const createdElement = geometryStore.getState().elementsById[elementId];
                     if (!createdElement) throw new Error('Created element is missing from the geometry store');
                     setSelectedElementIds([elementId]);
-                    setSelection({ ...selectionForElement(createdElement), isPlaceholder: true });
+                    setSelection(selectionForElement(createdElement));
                   } catch (error) {
                     alert(error instanceof Error ? error.message : 'Failed to create element');
                   }
                 }}
-                title="Add Element"
-              >
-                + Element
-              </button>
+              />
             </div>
           </div>
         </div>

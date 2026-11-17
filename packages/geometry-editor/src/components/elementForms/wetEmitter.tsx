@@ -25,8 +25,8 @@
 // MechanicalVentilation/WindowShading/ContextShading: it stays an
 // orchestrator-owned useState, bridged to this module through
 // ElementFormSharedCtx (see that interface's doc comment), captured into this
-// module's own returned state during useFormState so hydrate/buildElementData
-// (which the module contract doesn't hand ctx.shared directly) can still reach
+// module's own returned state during useFormState so hydrate (which the
+// module contract doesn't hand ctx.shared directly) can still write
 // it — NOT moved into a module-local useState despite being listed as
 // "exclusive state" in the slice-5 brief's per-family breakdown. Matching the
 // wall-family precedent (see ElementFormSharedCtx's doc comment on
@@ -50,11 +50,7 @@
 // conversion prompts in hydrate() move verbatim, including the try/swallow —
 // legacy behaviour, not new. hydrate() needs updateElement for that side
 // effect, so it is captured into this module's own state during useFormState
-// (same precedent as MechanicalVentilation/MechanicalVentilationTerminal
-// capturing elementIds/elementsById/getGlobalOrientationOffset for
-// buildElementData) — the first WetEmitter/System-family module whose
-// hydrate(), not just buildElementData()/renderPanel(), needs a captured ctx
-// value, since the module contract's hydrate(state, element) receives no ctx.
+// — the module contract's hydrate(state, element) receives no ctx.
 
 import { useState } from 'react';
 import { getElementShape, convertShapeCoordinates } from '../../lib/shapeUtils';
@@ -84,7 +80,6 @@ export interface WetEmitterFormState {
   unitNumberInput: ReturnType<typeof useIntegerInput>;
   /** Shared with the orchestrator-owned System<->WetEmitter bridge — see the
    * module header's "SEAM RESOLUTION" note. */
-  spaceHeatSystem: string;
   setSpaceHeatSystem: (value: string) => void;
   /** Shared with the not-yet-extracted wall family — see module header comment. */
   areaInput: NumericDraftInputBinding;
@@ -101,7 +96,6 @@ function useFormState(ctx: ElementFormStateCtx): WetEmitterFormState {
     subcategory,
     setSubcategory,
     unitNumberInput,
-    spaceHeatSystem: ctx.shared.spaceHeatSystem,
     setSpaceHeatSystem: ctx.shared.setSpaceHeatSystem,
     areaInput: ctx.shared.areaInput,
     updateElement: ctx.updateElement,
@@ -146,16 +140,6 @@ export const wetEmitterFormModule: ElementFormModule<WetEmitterFormState> = {
     // orchestrator's resetFormFields, like parentElement/distanceInput above —
     // see module header's "SEAM RESOLUTION" note. areaInput is shared with the
     // wall family and is likewise reset directly by resetFormFields.
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      subcategory: state.subcategory || undefined,
-      area: state.areaInput.value || undefined,
-      unit_number: state.unitNumberInput.value || undefined,
-      space_heat_system: state.spaceHeatSystem || undefined,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

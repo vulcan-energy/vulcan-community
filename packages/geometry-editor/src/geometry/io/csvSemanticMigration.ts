@@ -3,7 +3,6 @@
 
 import type { Element, Floor } from '../types';
 import { calculateDerivedBaseHeight, getElementCanvasFloorZValue } from '../../lib/elementCanvasFloor';
-import { computeGroundUValueFromElementModel } from '../../lib/groundUValueCalculator';
 import { GROUND_U_VALUE_MANUAL_KEY } from '../../lib/groundSuspendedFabricSync';
 
 export type UValueInterpretation = 'whole_wall' | 'half_construction';
@@ -99,32 +98,21 @@ export function upgradePcdbProductReferences(elements: readonly Element[]): Elem
   return changed ? result : (elements as Element[]);
 }
 
-/** Saves from before the editor stopped writing the calculated ground U-value on its own. A
- * U-value without the manual mark that equals the calculator's result for the saved inputs is
- * removed: the converter works it out again from the same inputs (`ground_u_value.rs`), and it
- * follows later edits. With construction bands (an existing building) the age band applies
- * instead, and a U-value from an applied assembly is stated: it gets the manual mark. Returns the
- * same array when nothing changed, and the names of the floors whose value was removed under
- * construction bands (the only case that changes the result). */
-export function dropCalculatedGroundUValues(elements: readonly Element[], constructionBands: boolean): { elements: Element[]; names: string[] } {
-  const names: string[] = [];
+/** Saves from before an applied assembly's ground U-value carried the manual mark. With
+ * construction bands (an existing building) that U-value is stated, over the age band, so it gets
+ * the mark. Every other stored U-value stays as the file states it: the editor computes nothing
+ * here, and the converter derives a U-value only for a floor that states none. Returns the same
+ * array when nothing changed. */
+export function markAssemblyGroundUValuesStated(elements: readonly Element[], constructionBands: boolean): Element[] {
+  if (!constructionBands) return elements as Element[];
   let changed = false;
   const result = elements.map((element) => {
     const extra = element.extra_json;
-    if (element.type !== 'BuildingElementGround' || typeof extra?.u_value !== 'number' || extra[GROUND_U_VALUE_MANUAL_KEY] === true) return element;
-    if (constructionBands && extra.vulcan_assembly_v1 !== undefined) {
-      changed = true;
-      return { ...element, extra_json: { ...extra, [GROUND_U_VALUE_MANUAL_KEY]: true } };
-    }
-    const computed = computeGroundUValueFromElementModel(element, extra, element.floor_type);
-    if (computed == null || Math.abs(Number(computed.toFixed(4)) - extra.u_value) > 1e-5) return element;
-    if (constructionBands) names.push(element.name);
+    if (element.type !== 'BuildingElementGround' || typeof extra?.u_value !== 'number' || extra[GROUND_U_VALUE_MANUAL_KEY] === true || extra.vulcan_assembly_v1 === undefined) return element;
     changed = true;
-    const rest = { ...extra };
-    delete rest.u_value;
-    return { ...element, extra_json: rest };
+    return { ...element, extra_json: { ...extra, [GROUND_U_VALUE_MANUAL_KEY]: true } };
   });
-  return { elements: changed ? result : (elements as Element[]), names };
+  return changed ? result : (elements as Element[]);
 }
 
 /** Saves from before ducts started at the unit's height in metres: a duct drawn from a unit on

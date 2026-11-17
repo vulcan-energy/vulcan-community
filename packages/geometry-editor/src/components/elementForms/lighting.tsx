@@ -247,42 +247,6 @@ export const lightingFormModule: ElementFormModule<LightingFormState> = {
     state.countInput.setValue('');
   },
 
-  buildElementData(state, ctx) {
-    const { countInput, powerInput, efficacyInput, lightingEntryMode, lightingGrade, lightingLampType } = state;
-    const countVal = countInput.value;
-    const powerVal = powerInput.value;
-    const enteredEfficacy = efficacyInput.value;
-    const enteredEfficacyIsPositive = typeof enteredEfficacy === 'number' && Number.isFinite(enteredEfficacy) && enteredEfficacy > 0;
-    const powerIsPositive = typeof powerVal === 'number' && Number.isFinite(powerVal) && powerVal > 0;
-    const countIsPositive = typeof countVal === 'number' && Number.isFinite(countVal) && countVal > 0;
-    const effVal = lightingEntryMode === 'guided'
-      ? (LIGHTING_GRADE_TO_EFFICACY[lightingGrade] ?? undefined)
-      : (enteredEfficacyIsPositive ? enteredEfficacy : undefined);
-    const resolvedPower = lightingEntryMode === 'guided'
-      ? (powerIsPositive ? powerVal : LIGHTING_LAMP_TYPE_DEFAULT_POWER[lightingLampType])
-      : (powerIsPositive ? powerVal : undefined);
-    const resolvedCount = countIsPositive ? countVal : undefined;
-    const extraJsonLighting: Record<string, unknown> = {
-      [LIGHTING_ENTRY_MODE_KEY]: lightingEntryMode,
-      [LIGHTING_GRADE_KEY]: lightingGrade,
-      [LIGHTING_LAMP_TYPE_KEY]: lightingLampType,
-    };
-    const ledBulb = {
-      count: resolvedCount,
-      power: resolvedPower,
-      efficacy: effVal,
-    };
-    return {
-      ...ctx.baseData,
-      simplified_lighting: false,
-      efficacy: effVal,
-      count: resolvedCount,
-      power: resolvedPower,
-      bulbs: { led: ledBulb },
-      extra_json: extraJsonLighting,
-    } as Partial<Element>;
-  },
-
   renderPanel(state, ctx) {
     const {
       lightingEntryMode, setLightingEntryMode,
@@ -303,7 +267,7 @@ export const lightingFormModule: ElementFormModule<LightingFormState> = {
       efficacyInput.setValue(nextEfficacy ?? '');
       powerInput.setValue(nextPower);
 
-      if (!selection || (selection.type !== 'element' && selection.type !== 'global') || selection.isPlaceholder) {
+      if (!selection || (selection.type !== 'element' && selection.type !== 'global')) {
         return;
       }
       const current = getElementById(selection.id);
@@ -320,7 +284,7 @@ export const lightingFormModule: ElementFormModule<LightingFormState> = {
     const commitLightingModeChange = (targetMode: LightingEntryMode) => {
       setLightingEntryMode(targetMode);
 
-      if (!selection || (selection.type !== 'element' && selection.type !== 'global') || selection.isPlaceholder) {
+      if (!selection || (selection.type !== 'element' && selection.type !== 'global')) {
         return;
       }
       const current = getElementById(selection.id);

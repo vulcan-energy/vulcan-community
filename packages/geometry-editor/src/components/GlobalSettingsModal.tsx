@@ -64,7 +64,7 @@ import {
 } from "../stores/geometryStore";
 import { DerivedNumberField } from "./DerivedNumberField";
 import { FabricTable } from "./FabricTable";
-import { FabricTabCloseContext } from "../lib/fabricPreset";
+import { FabricTabCloseContext } from "./fabricTabCloseContext";
 import { ModalHeader } from "./ModalHeader";
 import { ResetFieldButton } from "./ResetFieldButton";
 import { StandardDropdown } from "./StandardDropdown";
@@ -1698,18 +1698,6 @@ export function GlobalSettingsModal({
           {/* Global Settings Tab */}
           {activeTab === "settings" && (
             <>
-              <div
-                style={{
-                  fontSize: 13,
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.5,
-                  padding: "8px 0",
-                }}
-              >
-                Configure global settings that apply to your model, including
-                compliance settings and thermal bridging defaults.
-              </div>
-
               {calculationTargetSection}
 
               {/* With the target: it decides which inputs and defaults the model takes. */}

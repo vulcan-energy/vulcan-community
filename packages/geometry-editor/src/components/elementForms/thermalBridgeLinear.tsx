@@ -10,7 +10,7 @@
 // MechanicalVentilationDuctwork and WaterPipework (elementForms/serviceLine.tsx) —
 // a single instance created by the orchestrator via useServiceLineFormState and
 // captured here from ctx.serviceLine at useFormState time (same precedent as
-// OnSiteGeneration's getCurrentOrientation), so hydrate/reset/buildElementData/
+// OnSiteGeneration's getCurrentOrientation), so hydrate/reset/
 // renderPanel (which the module contract doesn't hand ctx.serviceLine directly) can
 // still reach it. linearThermalTransmittanceInput, by contrast, is TBL-only and is
 // fully owned by this module, including its own share of the legacy combined
@@ -28,7 +28,6 @@ import { useEffect, useRef } from 'react';
 import type { Element } from '../../geometry/types';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { isServiceLineElementType } from '../../lib/serviceLineDrawModes';
-import { writeTbLineMode } from '../../lib/thermalBridgeLineMode';
 import { baseLinearPsiForJunction, getPApportionedLinearPsiForEditor } from '../../geometry/thermalBridge/linearTbPsi';
 import { StandardInput } from '../StandardInput';
 import { decimalInputProps, useDecimalInput, type NumericDraftInputBinding } from './formPrimitives';
@@ -115,16 +114,6 @@ export const thermalBridgeLinearFormModule: ElementFormModule<ThermalBridgeLinea
   reset(state) {
     state.linearThermalTransmittanceInput.setValue('');
     resetServiceLine(state.serviceLine);
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      length: state.serviceLine.lengthInput.value,
-      linear_thermal_transmittance:
-        state.linearThermalTransmittanceInput.value === '' ? undefined : state.linearThermalTransmittanceInput.value,
-      extra_json: writeTbLineMode(undefined, 'plan'),
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

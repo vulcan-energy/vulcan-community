@@ -78,12 +78,6 @@
 //   zone-coordinate 'element' selections, never 'global' objects).
 // - The reset lines (freeAreaFraction/freeAreaHeight/midHeight/
 //   maxWindowOpenArea — all four, matching legacy's four calls exactly).
-// - The buildNewElementData case (width/height/area/pitch/orientation360/
-//   base_height/parent_element/frame_area_fraction/free_area_height/
-//   mid_height/max_window_open_area). No is_unheated_pitched_roof/
-//   is_external_door — grep-verified those only ever appear in Opaque's own
-//   case (decision/item 7's isExternalDoor carve-out); Transparent's case
-//   never emitted them.
 // - The renderAttributePanel case: Linked Wall (ParentElementDropdown),
 //   width/height (via ctx.renderLinearDimensionsFields), the sloped-opening
 //   rebuild button, Area, Free Area Height, Mid Height, Open
@@ -143,7 +137,7 @@
 //   precedent as that module's own getCurrentElementExtraJson
 //   reimplementation.
 // - The dormer bundle machinery. Grep-verified Transparent's hydrate/
-//   buildElementData/renderPanel have ZERO dormer-conditional branches: a
+//   renderPanel have ZERO dormer-conditional branches: a
 //   dormer's window sibling is a completely ordinary BuildingElementTransparent
 //   element (no special dormer flag on it), and selecting it directly hits
 //   this module's normal case with no pre-check — unlike Opaque's dispatch
@@ -285,7 +279,7 @@ function displayedOpeningValues(
 function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormState {
   const windowPartsPhysical = windowPartsArePhysical(ctx.schemaPort, ctx.schemaMode) === true;
   const isExistingElementSelection = (): boolean =>
-    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
+    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
 
   const commitTransparentFrameAreaFraction = (value: number | '') => {
     if (!isExistingElementSelection()) return;
@@ -554,25 +548,6 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     state.freeAreaHeightInput.setValue('');
     state.midHeightInput.setValue('');
     state.maxWindowOpenAreaInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    const width = state.widthInput.value;
-    const height = state.heightInput.value;
-    return {
-      ...ctx.baseData,
-      width,
-      height,
-      area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-      pitch: state.pitch,
-      orientation360: Math.round(state.orientation360 ?? 0),
-      base_height: state.baseHeightInput.value === '' ? undefined : state.baseHeightInput.value,
-      parent_element: state.parentElement,
-      frame_area_fraction: state.freeAreaFractionInput.value === '' ? undefined : state.freeAreaFractionInput.value,
-      free_area_height: state.freeAreaHeightInput.value,
-      mid_height: state.midHeightInput.value,
-      max_window_open_area: state.maxWindowOpenAreaInput.value,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

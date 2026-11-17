@@ -10,7 +10,7 @@
 // (disabled input mirroring the live parent-relative calculation), not a plain
 // draft field. Passed through from ctx.shared into this module's own returned
 // state (same precedent as OnSiteGeneration's getCurrentOrientation) so
-// buildElementData and renderPanel — which the module contract does not hand
+// renderPanel — which the module contract does not hand
 // ctx.shared directly — can still reach them.
 //
 // calculateContextShadingAngles / calculateShadingAngularRange /
@@ -108,19 +108,6 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
     state.endAngleInput.setValue('');
     // height/distance/parentElement are shared (wall family + WindowShading) and
     // are reset directly by the orchestrator's resetFormFields.
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      shading_type: state.contextShadingType || undefined,
-      start_angle: state.startAngleInput.value === '' ? undefined : state.startAngleInput.value,
-      end_angle: state.endAngleInput.value === '' ? undefined : state.endAngleInput.value,
-      distance: state.distanceInput.value,
-      height: state.heightInput.value,
-      parent_element: state.parentElement || null,
-      zoneId: undefined, // Global object
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

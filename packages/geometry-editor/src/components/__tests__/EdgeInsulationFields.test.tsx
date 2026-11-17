@@ -48,9 +48,12 @@ it('takes thickness and material on an existing building by default, with the de
   expect(screen.getAllByText('More')).toHaveLength(2);
 });
 
-it('keeps a conductivity XPS needs in view', () => {
+it('shows the conductivity XPS takes by default', () => {
   renderExisting([{ type: 'vertical', material: 'XPS' }]);
-  expect(screen.getByPlaceholderText('Required for XPS')).toBeInTheDocument();
+  const more = screen.getAllByText('More')[1]!.closest('details')!;
+  more.open = true;
+  fireEvent(more, new Event('toggle'));
+  expect(screen.getByPlaceholderText('0.036 (default)')).toBeInTheDocument();
 });
 
 it('shows the stated method, and switching clears the other method in one change', () => {

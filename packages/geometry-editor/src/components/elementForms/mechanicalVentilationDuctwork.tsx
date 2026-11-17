@@ -11,7 +11,7 @@
 // single instance created by the orchestrator via useServiceLineFormState and
 // captured here from ctx.serviceLine at useFormState time (same precedent as
 // ThermalBridgeLinear's own capture, elementForms/thermalBridgeLinear.tsx), so
-// hydrate/reset/buildElementData/renderPanel (which the module contract
+// hydrate/reset/renderPanel (which the module contract
 // doesn't hand ctx.serviceLine directly) can still reach it.
 //
 // parentElement/setParentElement is shared with the wall family (and Vents/
@@ -76,15 +76,6 @@ export const mechanicalVentilationDuctworkFormModule: ElementFormModule<Mechanic
   reset(state) {
     state.setDuctType('');
     resetServiceLine(state.serviceLine);
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      duct_type: state.ductType || undefined,
-      length: state.serviceLine.lengthInput.value,
-      parent_element: state.parentElement,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

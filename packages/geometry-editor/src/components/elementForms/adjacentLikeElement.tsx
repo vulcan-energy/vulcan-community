@@ -17,7 +17,7 @@
 // there is no per-call side effect to duplicate). This is approved by the
 // slice-6 brief (decision 4) precisely because the trio already shared one
 // merged `case` in every one of ElementCreator's parallel dispatch
-// structures — hydrate (`isAdjacentLikeElement` branch), buildNewElementData,
+// structures — hydrate (`isAdjacentLikeElement` branch) and
 // renderAttributePanel — so three separate modules would have meant three
 // copies of identical code. `ElementFormModule.type` (set to
 // 'BuildingElementPartyWall' below) is SELF-DOCUMENTATION ONLY — nothing
@@ -35,11 +35,6 @@
 //   all; adjacent-like elements are always zone-coordinate ('element')
 //   selections, never 'global' objects, so there was nothing to find there.
 //   Checked per the brief's item 3).
-// - The merged buildNewElementData case (KEEPS the legitimate `pitch`
-//   emission — unlike BuildingElementGround's dropped phantom pitch, slice-6
-//   brief decision 3/buildingElementGround.tsx, Adjacent-like elements DO
-//   have a schema `pitch` field that hydrate reads and renderPanel edits;
-//   left untouched per the brief's explicit carve-out).
 // - The merged renderAttributePanel case (party-wall lining/cavity UI,
 //   the lining cavity types (now PARTY_WALL_LINING_CAVITY_TYPES in lib/assemblyMaterialFabric.ts), the Pitch/Surface-facing field
 //   — now via wallPitchField.tsx's shared renderWallPitchField, this stage's
@@ -98,7 +93,7 @@
 // — it uses its own exclusive `_base_height`-backed
 // adjacentViewerBaseHeightInput instead (see below). `parentElement` itself
 // is written by hydrate (preserved verbatim, even though nothing in this
-// module's own renderPanel/buildElementData reads it back — legacy
+// module's own renderPanel reads it back — legacy
 // behaviour, preserved as found).
 //
 // getCurrentElementExtraJson: ElementCreator's version reads a shared
@@ -138,16 +133,8 @@
 //    partyWallCavityResistanceInput from the newly-selected element's OWN
 //    extra_json.thermal_resistance_cavity every time, so the '' left by
 //    reset() is never the value the user sees for an existing selection.
-// 2. buildElementData() below never reads partyWallCavityResistanceInput
-//    (only width/height/area/pitch) — a brand-new party wall's extra_json
-//    is built with no thermal_resistance_cavity key at all, so a stale
-//    draft value can't leak into it regardless of what the input showed.
-// 3. While a placeholder (drawn-but-not-yet-"Add Element"ed) element is
-//    selected, commitPartyWallCavityResistance's own
-//    isExistingElementSelection() guard (`!isExistingElementSelection()
-//    return`) blocks every commit from this field — so a genuine user edit
-//    typed into a stale-looking field during placeholder placement is
-//    already a no-op today, independent of this reset gap.
+// 2. No element is built from form state, so a stale draft value cannot
+//    reach a new party wall.
 // Preserved verbatim in reset() below; not fixed speculatively.
 
 import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
@@ -219,7 +206,7 @@ function useFormState(ctx: ElementFormStateCtx): AdjacentLikeElementFormState {
   const useFhs = ctx.schemaMode === 'fhs';
   const partyWallFabricFields = getPartyWallFabricFields(schemaPort, useFhs ? 'fhs' : 'core');
   const isExistingElementSelection = (): boolean =>
-    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
+    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
 
   const commitAdjacentViewerBaseHeight = (value: number | '') => {
     if (value === '') {
@@ -368,27 +355,6 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
     state.partyWallWholeUInput.setValue('');
     state.partyWallHalfUInput.setValue('');
     state.partyWallConstructionRInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    const width = state.widthInput.value;
-    const height = state.heightInput.value;
-    return {
-      ...ctx.baseData,
-      ...(ctx.baseData.type === 'BuildingElementPartyWall' ? { extra_json: {
-        ...readExtraJsonRecord(ctx.baseData.extra_json),
-        ...(typeof state.partyWallHalfUInput.value === 'number' ? partyWallFabricPatch('u_value', state.partyWallHalfUInput.value) : {}),
-        ...(typeof state.partyWallWholeUInput.value === 'number' ? { u_value_whole_wall: state.partyWallWholeUInput.value } : {}),
-        ...(typeof state.partyWallConstructionRInput.value === 'number' ? { thermal_resistance_construction: state.partyWallConstructionRInput.value, construction_basis: 'half' } : {}),
-      } } : {}),
-      width,
-      height,
-      area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-      // Legitimate emission — unlike BuildingElementGround's dropped phantom
-      // pitch (slice-6 brief decision 3), Adjacent-like elements DO have a
-      // schema `pitch` field; do not touch (brief's explicit carve-out).
-      pitch: state.pitch,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {
@@ -622,7 +588,7 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
             )}
           </>
         )}
-        {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && selectedElement && selection?.type === 'element' && !selection.isPlaceholder && (
+        {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && selectedElement && selection?.type === 'element' && (
           <UnheatedSpaceFrom
             element={selectedElement}
             commit={(extraJson) => updateElement(selectedElement.id, { extra_json: extraJson } as Partial<Element>)}

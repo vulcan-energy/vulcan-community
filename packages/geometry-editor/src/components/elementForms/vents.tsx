@@ -10,14 +10,11 @@
 // ElementFormSharedCtx doc comment) and are read/written only through
 // ctx.shared, captured into this module's own returned state during
 // useFormState (same precedent as OnSiteGeneration's getCurrentOrientation) so
-// hydrate/reset/buildElementData/renderPanel — which the module contract doesn't
+// hydrate/reset/renderPanel — which the module contract doesn't
 // hand ctx.shared directly — can still reach them. Choosing a parent wall/window
 // makes an *optimistic display write* of that parent's pitch/orientation360 into
 // the shared inputs (ctx.shared.applyParentPitchOrientationForDisplay) so the
-// panel shows the inherited values immediately; buildElementData separately
-// *recomputes* inherited pitch/orientation from the live parent at save time
-// (legacy behaviour) via findWallOrWindowParentByName, never by reading the
-// shared pitch/orientation360 state.
+// panel shows the inherited values immediately.
 //
 // Note: Vents is special-cased out of the generic zoneId sync in the
 // orchestrator's hydrate effect (`element.type !== 'Vents'`) — that stays in the
@@ -77,23 +74,11 @@ export interface VentsFormState {
   /** Passed through from ElementFormStateCtx so the render's orientation display
    * matches the wall family's shared getCurrentOrientation exactly. */
   getCurrentOrientation: (element: Element) => number;
-  /** Legacy buildNewElementData's inline parent-by-name-and-type lookup, kept as
-   * a module-owned helper (not the shared pitch/orientation360 state) so save
-   * time recomputes inherited pitch/orientation from the live parent. */
-  findWallOrWindowParentByName: (name: string) => { orientation360?: number; pitch?: number } | undefined;
 }
 
 function useFormState(ctx: ElementFormStateCtx): VentsFormState {
   const midHeightAirFlowPathInput = useDecimalInput('', ctx.commitElementNumericField('mid_height_air_flow_path'), { commitOnChange: true });
   const areaCm2Input = useDecimalInput('', ctx.commitElementNumericField('area_cm2'), { commitOnChange: true });
-
-  const findWallOrWindowParentByName = (name: string): { orientation360?: number; pitch?: number } | undefined =>
-    ctx.elementIds
-      .map((id) => ctx.elementsById[id])
-      .find(
-        (e): e is Element =>
-          !!e && e.name === name && (e.type === 'BuildingElementOpaque' || e.type === 'BuildingElementTransparent'),
-      ) as { orientation360?: number; pitch?: number } | undefined;
 
   // See ElementCreator.tsx's identical pitchDraftInput for the full rationale (decimal-entry
   // precision + 2dp commit to match the CSV writer/importer).
@@ -105,21 +90,6 @@ function useFormState(ctx: ElementFormStateCtx): VentsFormState {
       const currentElement = ctx.getElementById(ctx.selection.id);
       if (currentElement) {
         const currentShape = getElementShape(currentElement);
-
-        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-          const ok = window.confirm(
-            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-          );
-          if (ok) {
-            ctx.updateElement(currentElement.id, { pitch: newPitch });
-            ctx.shared.setPitch(newPitch);
-            return;
-          } else {
-            ctx.shared.setPitch(0);
-            ctx.updateElement(ctx.selection.id, { pitch: 0 });
-            return;
-          }
-        }
 
         if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
           const ok = window.confirm(
@@ -157,7 +127,6 @@ function useFormState(ctx: ElementFormStateCtx): VentsFormState {
     applyOrientationToGeometry: ctx.shared.applyOrientationToGeometry,
     applyParentPitchOrientationForDisplay: ctx.shared.applyParentPitchOrientationForDisplay,
     getCurrentOrientation: ctx.getCurrentOrientation,
-    findWallOrWindowParentByName,
   };
 }
 
@@ -177,22 +146,6 @@ export const ventsFormModule: ElementFormModule<VentsFormState> = {
     state.areaCm2Input.setValue('');
     // parentElement is shared (wall family/ContextShading) and is reset directly
     // by the orchestrator's resetFormFields.
-  },
-
-  buildElementData(state, ctx) {
-    // Find the selected wall/window parent to inherit orientation360 and pitch
-    const ventParentElement = state.findWallOrWindowParentByName(state.parentElement);
-    const inheritedOrientation = typeof ventParentElement?.orientation360 === 'number' ? ventParentElement.orientation360 : undefined;
-    const inheritedPitch = typeof ventParentElement?.pitch === 'number' ? ventParentElement.pitch : undefined;
-    return {
-      ...ctx.baseData,
-      mid_height_air_flow_path: state.midHeightAirFlowPathInput.value,
-      area_cm2: state.areaCm2Input.value,
-      parent_element: state.parentElement,
-      orientation360: inheritedOrientation,
-      pitch: inheritedPitch,
-      zoneId: undefined, // Global object
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

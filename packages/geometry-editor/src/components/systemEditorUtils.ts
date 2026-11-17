@@ -92,7 +92,6 @@ export function isSystemElementSelection(selection: SystemSelectionLike): select
   isPlaceholder?: boolean;
 } {
   if (!selection) return false;
-  if (selection.isPlaceholder) return false;
   return selection.type === 'element' || selection.type === 'global';
 }
 

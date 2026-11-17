@@ -66,16 +66,6 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
     state.setEnergySupply('');
   },
 
-  buildElementData(state, ctx) {
-    const extra = readExtraJsonRecord(ctx.baseData.extra_json);
-    return {
-      ...ctx.baseData,
-      ...(state.energySupply ? { extra_json: { ...extra, EnergySupply: state.energySupply } } : {}),
-      appliancekey: state.applianceKey || undefined,
-      zoneId: undefined // Global object
-    } as Partial<Element>;
-  },
-
   renderPanel(state, ctx) {
     const { applianceKey, setApplianceKey, applianceKeyOptions, energySupply, setEnergySupply, energySupplyNames } = state;
     const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft, selection, getElementById } = ctx;

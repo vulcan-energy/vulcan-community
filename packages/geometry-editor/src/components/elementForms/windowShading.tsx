@@ -16,7 +16,6 @@
 
 import { useState } from 'react';
 import { CloseShadingFields } from './CloseShadingFields';
-import type { Element } from '../../geometry/types';
 import { SHADING_TYPES } from '../../stores/geometryStore';
 import {
   allowedWindowShadingTypes,
@@ -121,18 +120,6 @@ export const windowShadingFormModule: ElementFormModule<WindowShadingFormState> 
     state.transparencyInput.setValue('');
     // heightInput/distanceInput are shared (wall family + ContextShading) and are
     // reset directly by the orchestrator's resetFormFields.
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      parent_element: state.linkedWindow,
-      shading_type: state.shadingType || undefined,
-      depth: state.depthInput.value || undefined,
-      height: state.heightInput.value || undefined,
-      distance: state.distanceInput.value === '' ? undefined : state.distanceInput.value,
-      transparency: state.transparencyInput.value || undefined,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

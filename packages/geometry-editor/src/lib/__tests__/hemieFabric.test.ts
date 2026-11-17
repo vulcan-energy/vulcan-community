@@ -113,12 +113,10 @@ it('knows every UK postcode area and the Crown dependency areas', () => {
 });
 
 it('derives the region from the postcode area, and asks it in a border area', () => {
-  expect(['MK40 1AA', 'cf10 1aa', 'EH1 1AA', 'BT1 1AA'].map((postcode) => postcodeRegion(postcode)))
-    .toEqual(['England', 'Wales', 'Scotland', 'Northern Ireland']);
-  for (const outside of ['IM1 1AA', 'GY1 1AA', 'JE2 1AA']) {
-    expect(postcodeRegion(outside)).toBeUndefined();
-    expect(postcodeOutsideArea(outside)).toBe(outside.slice(0, 2));
-  }
+  expect(['MK40 1AA', 'cf10 1aa', 'EH1 1AA', 'BT1 1AA', 'IM1 1AA'].map((postcode) => postcodeRegion(postcode)))
+    .toEqual(['England', 'Wales', 'Scotland', 'Northern Ireland', 'Isle of Man']);
+  for (const outside of ['GY1 1AA', 'JE2 1AA']) expect(postcodeRegion(outside)).toBeUndefined();
+  for (const outside of ['IM1 1AA', 'GY1 1AA', 'JE2 1AA']) expect(postcodeOutsideArea(outside)).toBe(outside.slice(0, 2));
   expect(postcodeBorderArea('CH5 1AA')).toBe('CH');
   expect(postcodeRegion('CH5 1AA')).toBeUndefined();
   expect(postcodeRegion('CH5 1AA', 'Wales')).toBe('Wales');

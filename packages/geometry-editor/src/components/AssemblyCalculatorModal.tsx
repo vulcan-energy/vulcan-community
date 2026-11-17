@@ -77,7 +77,7 @@ import type {
 } from '../lib/assemblyTypes';
 import { FHS_MASS_CLASS_COMMENTARY } from '../lib/assemblyAppliedUi';
 import { roundToTwoDecimals } from '../geometry/constants';
-import type { GroundFloorType } from '../lib/groundUValueCalculator';
+import type { GroundFloorType } from '../lib/groundFloor';
 import type { GeometryWorkspaceResourcePort } from '../../../geometry-editor-host/src';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
 import { targetRules } from '../../../geometry-editor-host/src/schemaPort';

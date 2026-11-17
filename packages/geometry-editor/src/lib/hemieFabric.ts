@@ -17,7 +17,7 @@ export const HEMIE_AGE_BAND = 'HEMIE_age_band';
 const SCOTLAND_AREAS = new Set(['AB', 'DD', 'DG', 'EH', 'FK', 'G', 'HS', 'IV', 'KA', 'KW', 'KY', 'ML', 'PA', 'PH', 'ZE']);
 const WALES_AREAS = new Set(['CF', 'SA']);
 const BORDER_AREAS = new Set(['CA', 'CH', 'HR', 'LD', 'LL', 'NP', 'SY', 'TD']);
-/** The Isle of Man and the Channel Islands, outside the UK EPC schemes. */
+/** The Crown dependencies, outside the UK. HEM:EPC covers the Isle of Man (IM) as its own region, not the Channel Islands. */
 const OUTSIDE_AREAS = new Set(['IM', 'GY', 'JE']);
 const ENGLAND_AREAS = new Set(('AL B BA BB BD BH BL BN BR BS CB CM CO CR CT CV CW DA DE DH DL DN DT DY E EC EN EX FY GL GU HA '
   + 'HD HG HP HU HX IG IP KT L LA LE LN LS LU M ME MK N NE NG NN NR NW OL OX PE PL PO PR RG RH RM S SE SG SK SL SM SN SO '
@@ -37,7 +37,7 @@ export function postcodeBorderArea(postcode: string | undefined): string | undef
   return area && BORDER_AREAS.has(area) ? area : undefined;
 }
 
-/** The postcode's area when it is outside the UK EPC schemes. */
+/** The postcode's area when it is outside the UK (a Crown dependency). */
 export function postcodeOutsideArea(postcode: string | undefined): string | undefined {
   const area = postcodeArea(postcode);
   return area && OUTSIDE_AREAS.has(area) ? area : undefined;
@@ -58,6 +58,7 @@ export function postcodeRegion(postcode: string | undefined, statedNation?: stri
   if (!area) return undefined;
   if (BORDER_AREAS.has(area)) return NATIONS.find((nation) => nation === statedNation);
   if (area === 'BT') return 'Northern Ireland';
+  if (area === 'IM') return 'Isle of Man';
   if (SCOTLAND_AREAS.has(area)) return 'Scotland';
   if (WALES_AREAS.has(area)) return 'Wales';
   return ENGLAND_AREAS.has(area) ? 'England' : undefined;

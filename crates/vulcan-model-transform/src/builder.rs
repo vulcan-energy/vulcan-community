@@ -3337,12 +3337,24 @@ impl JSONBuilder {
                                 let wind = row_extra
                                     .and_then(|extra| extra.get("wind_speed_mps"))
                                     .and_then(Value::as_f64);
-                                match crate::ground_u_value::ground_u_value(element_obj_map, wind) {
+                                match crate::ground_u_value::ground_floor_u_value(
+                                    element_obj_map,
+                                    wind,
+                                ) {
                                     Some(u) => {
                                         element_obj_map.insert(
                                             "u_value".into(),
                                             json_number(u, &format!("{element_name} u_value"))?,
                                         );
+                                        if crate::ground_u_value::edge_thickness_missing(
+                                            element_obj_map,
+                                        ) {
+                                            self.schema_omissions.borrow_mut().push(crate::finalization::SchemaOmission {
+                                                code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
+                                                path: crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name, "edge_insulation"]),
+                                                message: format!("Ground floor '{element_name}': edge insulation with no thickness counts its whole resistance in the floor's U-value (BS EN ISO 13370 Annex D takes off the ground it replaces). Enter its thickness to include that."),
+                                            });
+                                        }
                                     }
                                     None => {
                                         let floor_type = element_obj_map
@@ -10587,6 +10599,52 @@ ground 1,Living,BuildingElementGround,31,,5,4,18,Slab_no_edge_insulation,,,{}
 
         assert_eq!(grounds["ground 0"]["total_area"].as_f64(), Some(45.0));
         assert_eq!(grounds["ground 1"]["total_area"].as_f64(), Some(31.0));
+    }
+
+    #[test]
+    fn derived_ground_u_with_edge_insulation_of_no_thickness_says_so() {
+        // Vulcan conversion rule: with no thickness, the edge insulation's whole resistance counts.
+        let csv = |edge: &str| {
+            format!(
+                r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Ground Elements
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,extra_json
+ground 0,Living,BuildingElementGround,8,2,4,20,Slab_edge_insulation,,0.2,"{{""thermal_resistance_floor_construction"":1,""edge_insulation"":[{edge}]}}"
+"#
+            )
+        };
+        let notices = |edge: &str| {
+            let mut parser = CSVParser::new();
+            let data = parser.parse_csv(&csv(edge)).expect("CSV should parse");
+            let mut builder =
+                JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+            let mut result = builder.defaults.clone();
+            builder
+                .build_zone_structure(&mut result, &data)
+                .expect("Zone structure should build");
+            builder
+                .process_root_level_sections(&mut result, &data)
+                .expect("Root sections should process");
+            assert!(result["Zone"]["Living"]["BuildingElement"]["ground 0"]["u_value"].is_number());
+            builder
+                .take_schema_omissions()
+                .into_iter()
+                .filter(|o| o.path.ends_with("/edge_insulation"))
+                .count()
+        };
+        assert_eq!(
+            notices(r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1}"#),
+            1
+        );
+        assert_eq!(
+            notices(
+                r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1,""thickness"":0.06}"#
+            ),
+            0
+        );
     }
 
     #[test]

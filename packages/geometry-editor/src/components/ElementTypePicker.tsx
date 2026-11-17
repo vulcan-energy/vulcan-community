@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import ReactDOM from 'react-dom';
 import type { ElementType } from '../geometry/types';
 import {
+  ELEMENT_TYPE_ORDER,
   getElementTypeMenuOption,
   getElementTypeMenuSections,
   getElementTypeSectionId,
@@ -13,7 +14,8 @@ import {
 import './ElementTypePicker.css';
 
 type ElementTypePickerProps = {
-  value: ElementType;
+  /** None when the picker chooses a type for something new. */
+  value: ElementType | null;
   options: readonly ElementType[];
   /** Shown on the trigger in place of the type's own name (a Systems row that is not a plant). */
   valueLabel?: string;
@@ -52,9 +54,9 @@ export function ElementTypePicker({
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<MenuPosition | null>(null);
   const sections = useMemo(() => getElementTypeMenuSections(options), [options]);
-  const selectedOption = getElementTypeMenuOption(value);
-  const selectedSection = sections.find((section) => section.types.includes(value));
-  const fallbackSectionId = sections[0]?.id ?? getElementTypeSectionId(value);
+  const selectedOption = value ? getElementTypeMenuOption(value) : null;
+  const selectedSection = value ? sections.find((section) => section.types.includes(value)) : undefined;
+  const fallbackSectionId = sections[0]?.id ?? getElementTypeSectionId(value ?? ELEMENT_TYPE_ORDER[0]);
   const [expandedSectionId, setExpandedSectionId] = useState<ElementTypeSectionId>(
     selectedSection?.id ?? fallbackSectionId,
   );
@@ -199,7 +201,7 @@ export function ElementTypePicker({
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={valueLabel ?? `${selectedOption.label}: ${selectedOption.subtitle}`}
+        title={valueLabel ?? (selectedOption ? `${selectedOption.label}: ${selectedOption.subtitle}` : placeholder)}
         onClick={() => {
           if (disabled) return;
           if (!open) setExpandedSectionId(selectedSection?.id ?? fallbackSectionId);

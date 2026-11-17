@@ -10,7 +10,6 @@ import { assemblySourceValuesFor, elementSubtype } from "../lib/fieldDefault";
 import { useTargetRules } from "../hooks/useTargetRules";
 import {
   BUILT_IN_FABRIC_PRESETS,
-  FabricTabCloseContext,
   FABRIC_PRESET_KEYS,
   fabricPresetValuesProblem,
   fabricRowField,
@@ -23,6 +22,7 @@ import {
 } from "../lib/fabricPreset";
 import type { CreationDefaultAssemblyIds } from "../lib/multiSelectAssemblyApply";
 import { useGeometryStore } from "../stores/geometryStore";
+import { FabricTabCloseContext } from "./fabricTabCloseContext";
 import { StandardDropdown } from "./StandardDropdown";
 import "./FabricTable.css";
 
@@ -422,7 +422,6 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
       </table>
       {libraryLoading && !library ? <p className="fabric-table__help">Loading the assembly library…</p>
         : libraryError ? <p className="fabric-table__help fabric-table__help--error">Could not load input/assembly_library/: {libraryError}</p> : null}
-      <p className="fabric-table__help">Select a count to show those elements on the drawing.</p>
       <p className="fabric-table__help">
         Elements take these values where they state none of their own; new elements take the build-up where one is chosen.
       </p>

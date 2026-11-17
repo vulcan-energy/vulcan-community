@@ -11,7 +11,7 @@ import { parseVulcanAssemblyV1FromExtraJson } from './assemblyAppliedUi';
 import { arealHeatCapacityBandFromJPerM2K, arealHeatCapacityWrite } from './assemblyCalculator';
 import { ROW_ONLY_ELEMENT_TYPES } from '../geometry/io/geometryCsvLayouts';
 import type { DefaultsLookup, OpaqueFabricVariant } from './defaultsCache';
-import { parseWindShieldLocation } from './groundUValueCalculator';
+import { parseWindShieldLocation } from './groundFloor';
 import { readRecord } from './jsonTypes';
 import { normalizeMechanicalVentilationVentType } from './mechanicalVentilationBranches';
 import { classifyOpaqueFabricVariant, classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';

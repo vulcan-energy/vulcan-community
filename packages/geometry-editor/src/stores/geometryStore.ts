@@ -1600,7 +1600,7 @@ export interface GeometryState extends
   // Placeholder actions
   createPlaceholderZone: () => string; // returns id
   createPlaceholderElement: (zoneId: string, type: ElementType, parentElementName?: string) => string; // returns id
-  removePlaceholder: (type: 'zone' | 'element' | 'global', id: string) => void;
+  removePlaceholder: (zoneId: string) => void;
   finalizeRoom: (roomElementIds: string[]) => void;
   snapSelectedElements: (elementIds: string[], snapTol: number) => void;
   rightAlignSelectedElements: (elementIds: string[], angleTolDeg: number) => void;
@@ -4047,6 +4047,16 @@ const createGeometryState = (
         arealHeatCapacity: creationRules.arealHeatCapacity,
       }) as Element;
     }
+    // A new fan or PV array on a model with one electricity supply takes it.
+    if (creationRules.hemDatabaseProducts && (type === 'MechanicalVentilation' || type === 'OnSiteGeneration')) {
+      const record = (value: unknown): Record<string, unknown> =>
+        value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const supplies = record(record(get().defaultsJson).EnergySupply);
+      const electric = Object.keys(supplies).filter((name) => record(supplies[name]).fuel === 'electricity');
+      if (electric.length === 1) {
+        newElement = { ...newElement, extra_json: { ...record(newElement.extra_json), EnergySupply: electric[0] } } as Element;
+      }
+    }
     newElement = { ...newElement, _nameAutoSync: true };
 
     const selectionType = isGlobalObject(newElement) ? 'global' : 'element';
@@ -4059,7 +4069,7 @@ const createGeometryState = (
       return {
         elementsById: nextElementsById,
         elementIds: nextElementIds,
-      selection: { type: selectionType, id, isPlaceholder: true }
+      selection: { type: selectionType, id }
       };
     });
     return id;
@@ -4891,65 +4901,28 @@ const createGeometryState = (
     }
   },
 
-  removePlaceholder: (type, id) => {
-    if (type === 'zone') {
-      set((state) => {
-        const filteredZones = state.zones.filter(z => z.id !== id);
-        let newSelection = state.selection;
+  removePlaceholder: (id) => {
+    set((state) => {
+      const filteredZones = state.zones.filter(z => z.id !== id);
+      let newSelection = state.selection;
 
-        // If the removed placeholder was currently selected, try to find a fallback selection
-        if (state.selection && state.selection.id === id) {
-          // Try to select the most recently created non-placeholder zone
-          const nonPlaceholderZones = filteredZones.filter(z => !z.isPlaceholder);
-          if (nonPlaceholderZones.length > 0) {
-            const mostRecentZone = nonPlaceholderZones[nonPlaceholderZones.length - 1];
-            newSelection = { type: 'zone', id: mostRecentZone.id };
-          } else {
-            newSelection = null;
-          }
+      // If the removed placeholder was currently selected, try to find a fallback selection
+      if (state.selection && state.selection.id === id) {
+        // Try to select the most recently created non-placeholder zone
+        const nonPlaceholderZones = filteredZones.filter(z => !z.isPlaceholder);
+        if (nonPlaceholderZones.length > 0) {
+          const mostRecentZone = nonPlaceholderZones[nonPlaceholderZones.length - 1];
+          newSelection = { type: 'zone', id: mostRecentZone.id };
+        } else {
+          newSelection = null;
         }
+      }
 
-        return {
-          zones: filteredZones,
-          selection: newSelection
-        };
-      });
-    } else {
-      set((state) => {
-        const remainingElementsById = { ...state.elementsById };
-        delete remainingElementsById[id];
-        const remainingElementIds = state.elementIds.filter(elementId => elementId !== id);
-        let newSelection = state.selection;
-
-        // If the removed placeholder was currently selected, try to find a fallback selection
-        if (state.selection && state.selection.id === id) {
-          // Try to select the most recently created non-placeholder element, or fall back to a zone
-          const nonPlaceholderElements = Object.values(remainingElementsById).filter(e => !e.isPlaceholder);
-          if (nonPlaceholderElements.length > 0) {
-            const mostRecentElement = nonPlaceholderElements[nonPlaceholderElements.length - 1];
-            newSelection = {
-              type: isGlobalObject(mostRecentElement) ? 'global' : 'element',
-              id: mostRecentElement.id
-            };
-          } else {
-            // No elements to fall back to, try to select the most recent zone
-            const nonPlaceholderZones = state.zones.filter(z => !z.isPlaceholder);
-            if (nonPlaceholderZones.length > 0) {
-              const mostRecentZone = nonPlaceholderZones[nonPlaceholderZones.length - 1];
-              newSelection = { type: 'zone', id: mostRecentZone.id };
-            } else {
-              newSelection = null;
-            }
-          }
-        }
-
-        return {
-          elementsById: remainingElementsById,
-          elementIds: remainingElementIds,
-          selection: newSelection
-        };
-      });
-    }
+      return {
+        zones: filteredZones,
+        selection: newSelection
+      };
+    });
   },
 
   addZone: (zone) => set((state) => {
@@ -5969,7 +5942,17 @@ const createGeometryState = (
           const onlyPitchChanged = Object.keys(updates).length === 1 && 'pitch' in updates;
 
           if (!compatible && !onlyPitchChanged) {
-            (normalizedUpdates as any).coordinates = generateDefaultCoordinates(tentativeAfterLine);
+            const generated = generateDefaultCoordinates(tentativeAfterLine);
+            // One point in the update is where the element is placed: centre the default shape on it.
+            const placed = normalizedUpdates.coordinates;
+            // Only a default the type accepts: one it rejects is regenerated (at the origin) on the next edit.
+            const fits = isTypeShapeCompatible(tentativeAfterLine.type, getElementShape({ ...tentativeAfterLine, coordinates: generated } as Element));
+            const at = fits && Array.isArray(placed) && placed.length === 1 ? placed[0] : null;
+            const cx = generated.reduce((sum, p) => sum + p.x, 0) / generated.length;
+            const cy = generated.reduce((sum, p) => sum + p.y, 0) / generated.length;
+            (normalizedUpdates as any).coordinates = at
+              ? generated.map((p) => ({ x: p.x + at.x - cx, y: p.y + at.y - cy, z: at.z }))
+              : generated;
           }
         }
         const tentativeWithNormalizedCoords = { ...prevElement, ...normalizedUpdates } as Element;

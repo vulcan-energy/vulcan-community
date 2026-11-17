@@ -486,24 +486,24 @@ export function flattenSystemSubtypePlantSchemas(
 }
 
 /**
- * Field defaults for an element's systems: the target's derived values (by the system's model
- * path, e.g. `/SpaceHeatSystem/Heating circuit`), and on an existing building the DESNZ-defined
+ * The target's derived values by each field's own model path (`/SpaceHeatSystem/Heating circuit/design_flow_temp`),
+ * so a value derived for one of several like objects (two coils of one cylinder) shows on that one only.
+ */
+export function derivedFieldDefaults(derived: TargetSystemDefaults['derived'] | undefined): Record<string, unknown> {
+  return Object.fromEntries((derived ?? []).map((item) => [`${item.path}/${item.field.replace(/~/g, '~0').replace(/\//g, '~1')}`, item.value]));
+}
+
+/**
+ * Field defaults for an element's systems on an existing building: the DESNZ-defined
  * defaults the conversion states for a direct feed's maximum power (15 kW), a mixer shower's
  * flow rate without a product (9 L/min) and a direct electric boiler's manufacture year (unknown).
  */
 export function systemFieldDefaults(
-  derived: TargetSystemDefaults['derived'] | undefined,
   extraJson: unknown,
   existing: boolean,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const extra = readRecord(extraJson);
-  for (const item of derived ?? []) {
-    const segments = item.path.split('/').slice(1).map((s) => s.replace(/~1/g, '/').replace(/~0/g, '~'));
-    let node: unknown = extra;
-    for (const segment of segments) node = readRecord(node)[segment];
-    if (node && typeof node === 'object') out[item.field] = item.value;
-  }
   // HEM recirculates no return water unless a fraction is stated (`unwrap_or(0.0)` in the engine's emitters).
   if (Object.values(readRecord(extra.SpaceHeatSystem)).some((system) => readRecord(system).type === 'WetDistribution')) out.bypass_fraction_recirculated ??= 0;
   if (existing) {

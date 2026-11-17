@@ -81,31 +81,6 @@ export const electricBatteryFormModule: ElementFormModule<ElectricBatteryFormSta
     // Legacy resetFormFields never reset battery state; preserved as-is.
   },
 
-  buildElementData(state, ctx) {
-    // Build element data with main UI fields
-    const elementData: Record<string, unknown> = {
-      ...ctx.baseData,
-      capacity: state.batteryCapacityInput.value === '' ? undefined : state.batteryCapacityInput.value,
-      charge_discharge_efficiency_round_trip: state.batteryEfficiencyInput.value === '' ? undefined : state.batteryEfficiencyInput.value,
-      battery_location: state.batteryLocation || undefined,
-      zoneId: ctx.elementZoneId || undefined
-    };
-
-    // Auto-remove main UI fields from extra_json to avoid duplication
-    if (elementData.extra_json) {
-      const restExtraJson = { ...readExtraJsonRecord(elementData.extra_json) };
-      delete restExtraJson.capacity;
-      delete restExtraJson.charge_discharge_efficiency_round_trip;
-      delete restExtraJson.battery_location;
-      delete restExtraJson.threshold_charges;
-      delete restExtraJson.threshold_prices;
-      delete restExtraJson.tariff;
-      elementData.extra_json = Object.keys(restExtraJson).length > 0 ? restExtraJson : undefined;
-    }
-
-    return elementData as Partial<Element>;
-  },
-
   renderPanel(state, ctx) {
     const { batteryCapacityInput, batteryEfficiencyInput, batteryLocation, setBatteryLocation, gridInputs, ratingInputs, extra, commitExtra } = state;
     const {

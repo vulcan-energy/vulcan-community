@@ -49,10 +49,15 @@ const COMMON_WALL_HEIGHT: f64 = 1.8;
 /// ours: how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
 /// DESNZ-defined: the areal heat capacity (J/m².K) of a heated pitched roof, a door and a window
-/// that state none. HEMIE reads a window's only in a party or sheltered wall.
+/// that state none, as the field defaults of HEMIE's `HeatedPitchedRoofConstruction`,
+/// `AbstractDoorConstruction` and `WindowConstruction` from HEMIE 0.18.2. The pinned HEMIE requires
+/// the field, so the converter fills it. HEMIE reads a window's only in a party or sheltered wall.
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
 const DOOR_HEAT_CAPACITY: f64 = 50_000.0;
 const WINDOW_HEAT_CAPACITY: f64 = 20_000.0;
+/// Assumption pending DESNZ E73 (Vulcan's assumption registry lists it): XPS edge insulation with
+/// no stated conductivity takes the DESNZ-defined conductivity of HEMIE's `Material.XPS` (W/m.K).
+const XPS_CONDUCTIVITY: f64 = 0.036;
 /// Assumption pending DESNZ E12 (Vulcan's assumption registry lists it): a solid or basement
 /// floor of age band A to H with no stated insulation has construction resistance 0 in HEMIE (no
 /// insulation by age band, no material resistance), which the EPC wrapper and HEM reject. The
@@ -665,6 +670,25 @@ fn wall_kind(e: &El) -> Option<Kind> {
         "BuildingElementPartyWall" => Some(Kind::Party),
         "BuildingElementAdjacentUnconditionedSpace_Simple" => Some(Kind::Sheltered),
         _ => None,
+    }
+}
+
+/// A wall drawn off vertical: it states a pitch other than 90°.
+fn leaning(e: &El) -> bool {
+    e.num("pitch").is_some_and(|p| (p - 90.0).abs() > 1e-6)
+}
+
+/// A wall pitch the EPC wrapper and HEM take: over 60° and up to 120° from horizontal.
+fn wall_pitch(p: f64) -> bool {
+    p > 60.0 && p <= 120.0
+}
+
+/// A wall's vertical height from its drawn height, which is measured along a leaning wall's
+/// slope (derived from the model). A pitch outside the wall range is its own error.
+fn vertical(e: &El, height: f64) -> f64 {
+    match e.num("pitch") {
+        Some(p) if leaning(e) && wall_pitch(p) => height * p.to_radians().sin(),
+        _ => height,
     }
 }
 
@@ -1662,9 +1686,13 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             continue;
         }
         if let Some(kind) = wall_kind(e) {
-            if e.num("pitch").is_some_and(|p| (p - 90.0).abs() > 1e-6) {
-                ctx.errors.push(error("WALLS", e.path(), format!("'{}' is a leaning wall (pitch {}). The existing-building converter takes vertical walls only.", e.name, e.num("pitch").unwrap_or_default())));
-            } else if e.text("parent_element").is_some() && bundles::tag(e).is_none() {
+            // HEMIE walls take any pitch from 0° to 180°, but the EPC wrapper and HEM take a wall
+            // only over 60° and up to 120° (below is a roof, above a floor). The wall still closes
+            // its storey outline.
+            if e.num("pitch").is_some_and(|p| !wall_pitch(p)) {
+                ctx.errors.push(error("WALLS", e.path(), format!("'{}' has pitch {}°. The existing-building EPC takes a wall pitched over 60° and up to 120° from horizontal: correct its pitch, or draw it as a roof or floor.", e.name, e.num("pitch").unwrap_or_default())));
+            }
+            if e.text("parent_element").is_some() && bundles::tag(e).is_none() {
                 ctx.errors.push(error("WALLS", e.path(), format!("'{}' is a wall inside another element, which the existing-building converter does not take. Draw it as a wall of the storey outline.", e.name)));
             } else {
                 walls.push((e, kind));
@@ -1711,7 +1739,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     let (mut common, mut low) = (0.0, 0.0);
     for (w, kind) in &walls {
         if w.level == top_level && *kind == Kind::External && !w.has_profile() {
-            let h = ctx.need(w, "height")?;
+            let h = vertical(w, ctx.need(w, "height")?);
             common += w.length();
             if h < COMMON_WALL_HEIGHT {
                 low += w.length();
@@ -1762,6 +1790,11 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         rings.push(ring);
     }
     let room_walls: Vec<&El> = roof_room.map(on_level).unwrap_or_default();
+    // HEMIE derives a room in the roof's knee walls and gables from the roof: they take no pitch.
+    if let Some(w) = room_walls.iter().find(|w| leaning(w)) {
+        ctx.errors.push(error("WALLS", w.path(), format!("'{}' is a leaning wall in the room in the roof (pitch {}°). The existing-building EPC takes vertical knee walls and gables there: make it vertical.", w.name, w.num("pitch").unwrap_or_default())));
+        return None;
+    }
     if let (Some(level), Some(top)) = (roof_room, rings.last()) {
         if let Some(w) = room_walls
             .iter()
@@ -1909,7 +1942,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         let h = if bundles::tag(w).is_some() {
                             ctx.eaves(w)
                         } else {
-                            ctx.need(w, "height")
+                            ctx.need(w, "height").map(|h| vertical(w, h))
                         };
                         let Some(h) = h else {
                             continue;
@@ -1925,6 +1958,10 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                         value.insert("wall_type".into(), json!(kind.wall_type()));
                         value.insert("storey_index".into(), json!(s - bottom));
                         value.insert("floorplan_index".into(), json!(i));
+                        // A leaning wall states its pitch; HEMIE takes 90° otherwise.
+                        if leaning(w) {
+                            value.insert("pitch".into(), json!(w.num("pitch")));
+                        }
                         hemie_walls.push(HemieWall {
                             part: pi,
                             storey: level as usize,
@@ -2222,6 +2259,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         let mut bp = Map::new();
         if conservatory[pi] {
             bp.insert("is_non_separated_conservatory".into(), json!(true));
+        } else {
+            let list: Vec<String> = part.ceilings.iter().map(|c| format!("{c} m")).collect();
+            ctx.notices.push(notice("/Zone", format!("{}: ceiling height {}, each storey's wall height less the {STOREY_GAP} m floor zone above it (a wall runs from its floor to the floor or roof above).", names[pi], list.join(", "))));
         }
         bp.insert("storeys".into(), Value::Array(storeys));
         bp.insert("walls".into(), Value::Array(part_walls));
@@ -2391,8 +2431,8 @@ const ENGLAND_AREAS: [&str; 95] = [
     "S", "SE", "SG", "SK", "SL", "SM", "SN", "SO", "SP", "SR", "SS", "ST", "SW", "TA", "TF", "TN",
     "TQ", "TR", "TS", "TW", "UB", "W", "WA", "WC", "WD", "WF", "WN", "WR", "WS", "WV", "YO",
 ];
-/// The Isle of Man and the Channel Islands, outside the UK EPC schemes.
-const OUTSIDE_AREAS: [&str; 3] = ["IM", "GY", "JE"];
+/// The Channel Islands: HEMIE's regions are the four nations and the Isle of Man (IM).
+const OUTSIDE_AREAS: [&str; 2] = ["GY", "JE"];
 const NATIONS: [&str; 4] = ["England", "Wales", "Scotland", "Northern Ireland"];
 
 enum PostcodeNation {
@@ -2428,6 +2468,7 @@ fn postcode_region(postcode: &str) -> Option<(String, PostcodeNation)> {
     }
     let region = match area.as_str() {
         "BT" => PostcodeNation::Derived("Northern Ireland"),
+        "IM" => PostcodeNation::Derived("Isle of Man"),
         a if SCOTLAND_AREAS.contains(&a) => PostcodeNation::Derived("Scotland"),
         a if WALES_AREAS.contains(&a) => PostcodeNation::Derived("Wales"),
         a if ENGLAND_AREAS.contains(&a) => PostcodeNation::Derived("England"),
@@ -2451,7 +2492,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
         ctx.errors.push(error("POSTCODE", path, if postcode.trim().is_empty() {
             "The model has no postcode, which gives the region. Enter the postcode in Global Settings.".into()
         } else {
-            format!("Postcode '{postcode}' is not a postcode in England, Wales, Scotland or Northern Ireland, so the region is not known. Check the Postcode in Global Settings.")
+            format!("Postcode '{postcode}' is not a postcode in England, Wales, Scotland, Northern Ireland or the Isle of Man, so the region is not known. Check the Postcode in Global Settings.")
         }));
         return None;
     };
@@ -2464,7 +2505,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
             return Some(region.into());
         }
         PostcodeNation::Outside => {
-            ctx.errors.push(error("POSTCODE", path, format!("Postcode {area} is outside England, Wales, Scotland and Northern Ireland; HEM:EPC does not cover it.")));
+            ctx.errors.push(error("POSTCODE", path, format!("Postcode {area} is outside England, Wales, Scotland, Northern Ireland and the Isle of Man; HEM:EPC does not cover it.")));
             return None;
         }
         PostcodeNation::Border => {}
@@ -2689,13 +2730,15 @@ fn edge_insulation(ctx: &mut Ctx, g: &El) -> Option<Value> {
             }
         }
         if let Some(material) = item["material"].as_str() {
-            // HEMIE takes a material's conductivity from its own table, which has none for XPS.
-            // A stated resistance needs no conductivity.
+            // HEMIE takes an edge insulation material's conductivity from its own table
+            // (`insulation_conductivity`), which has none for XPS: `XPS_CONDUCTIVITY` stands in.
+            // A stated resistance needs none.
             if material == "XPS"
                 && !value.contains_key("thermal_conductivity")
                 && !value.contains_key("thermal_resistance")
             {
-                ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' has XPS {kind} edge insulation, which HEM:EPC has no default thermal conductivity for. State its thermal conductivity.", g.name)));
+                value.insert("thermal_conductivity".into(), json!(XPS_CONDUCTIVITY));
+                ctx.notices.push(notice(&g.path(), format!("Ground floor '{}': its XPS {kind} edge insulation states no thermal conductivity, so it takes the default {XPS_CONDUCTIVITY} W/m·K. State it to change it.", g.name)));
             }
             value.insert("material".into(), json!(material));
         }
@@ -3365,8 +3408,9 @@ fn passive_vents(ctx: &mut Ctx, csv: &Rows, walls: &mut [HemieWall]) {
 
 /// The HEMIE InfiltrationVentilation Geometry needs: the model's ventilation inputs and its air
 /// test, or with none the inputs of HEMIE's leakage estimate (`leakage_estimate_inputs`).
-/// Derived from the model: the height from the dwelling's base to the top of its highest heated
-/// storey or room in the roof, over every building part (DESNZ question E46 on roof rooms).
+/// Derived from the model as HEMIE's `calculate_dwelling_height` derives it: the height from the
+/// dwelling's base to the top of its highest storey, over every building part. A room in the roof
+/// is not a storey there, so it adds nothing.
 fn dwelling_height(geometry: &Map<String, Value>, dwelling: Option<f64>) -> f64 {
     geometry["building_parts"]
         .as_object()
@@ -3382,10 +3426,7 @@ fn dwelling_height(geometry: &Map<String, Value>, dwelling: Option<f64>) -> f64 
             let base = part["base_height"]
                 .as_f64()
                 .map_or(0.0, |b| b - dwelling.unwrap_or(0.0));
-            let room = part["roof"]["maximum_ceiling_height"]
-                .as_f64()
-                .map_or(0.0, |h| STOREY_GAP + h);
-            base + ceilings.iter().sum::<f64>() + STOREY_GAP * (ceilings.len() as f64 - 1.0) + room
+            base + ceilings.iter().sum::<f64>() + STOREY_GAP * (ceilings.len() as f64 - 1.0)
         })
         .fold(0.0, f64::max)
 }
@@ -3466,7 +3507,7 @@ fn infiltration(
         None => {
             let height = (drawn_height * 1000.0).round() / 1000.0;
             out.insert("ventilation_zone_height".into(), json!(height));
-            ctx.notices.push(notice("/InfiltrationVentilation/Leaks/ventilation_zone_height", format!("No ventilation zone height is given, so the existing-building EPC uses the drawn height of the dwelling, {height} m. Give it in Global Settings > Ventilation Environment to state it.")));
+            ctx.notices.push(notice("/InfiltrationVentilation/Leaks/ventilation_zone_height", format!("No ventilation zone height is given, so the existing-building EPC uses the drawn height of the dwelling's storeys, {height} m; a room in the roof is not counted. Give it in Global Settings > Ventilation Environment to state it.")));
         }
     }
     // Derived from the model: the envelope area of the drawn elements. The schema requires it
@@ -3882,6 +3923,53 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
+    fn a_leaning_wall_takes_its_stated_pitch() {
+        let text = house(gable_roof()).replace(
+            "W00,Z,BuildingElementOpaque,1,90,",
+            "W00,Z,BuildingElementOpaque,1,80,",
+        );
+        assert_ne!(text, house(gable_roof()));
+        let (model, errors, _) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let walls = model["Zone"]["building_parts"]["Main"]["walls"]
+            .as_array()
+            .unwrap();
+        let pitches: Vec<&Value> = walls.iter().filter_map(|w| w.get("pitch")).collect();
+        assert_eq!(pitches, [&json!(80.0)], "{walls:#?}");
+        // Its drawn height runs along the slope: the storey takes its vertical height, so the
+        // ground storey is lower than the 2.55 m of the vertical first floor.
+        let storeys = model["Zone"]["building_parts"]["Main"]["storeys"]
+            .as_array()
+            .unwrap();
+        let ground = storeys[0]["ceiling_height"].as_f64().unwrap();
+        assert!(ground > 2.5 && ground < 2.55, "{storeys:#?}");
+        assert_eq!(storeys[1]["ceiling_height"], 2.55);
+        // The EPC wrapper and HEM take a wall over 60° and up to 120° only: others fail, naming it.
+        for pitch in ["60", "200"] {
+            let (_, errors, _) = run(&text.replace(",1,80,", &format!(",1,{pitch},")));
+            assert_eq!(errors.len(), 1, "{errors:#?}");
+            assert!(
+                errors[0]
+                    .message
+                    .starts_with(&format!("'W00' has pitch {pitch}°")),
+                "{errors:#?}"
+            );
+        }
+        // A room in the roof's gables take no pitch in HEMIE: a leaning one fails, naming it.
+        let mut exposed = heated_roof();
+        exposed.push(gable("G W", [0.0, 0.0], [0.0, 6.0]).replace(",1,90,", ",1,80,"));
+        exposed.push(gable("G E", [8.0, 0.0], [8.0, 6.0]));
+        let (_, errors, _) = run(&house(exposed));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0]
+                .message
+                .starts_with("'G W' is a leaning wall in the room in the roof"),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
     fn with_no_ventilation_zone_height_the_drawn_height_is_used() {
         let mut model = full_input();
         model["InfiltrationVentilation"]["Leaks"]
@@ -3898,6 +3986,13 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert!(notices
             .iter()
             .any(|n| n.path.ends_with("ventilation_zone_height")));
+        // Each storey's ceiling is its wall height less the floor zone, reported.
+        assert!(
+            notices.iter().any(|n| n.message.starts_with(
+                "Main: ceiling height 2.55 m, 2.55 m, each storey's wall height less the 0.25 m"
+            )),
+            "{notices:#?}"
+        );
     }
 
     #[test]
@@ -3940,13 +4035,18 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             model["Zone"]["constructions"][key]["edge_insulation"],
             json!({"vertical": {"thickness": 0.05, "material": "EPS"}, "horizontal": {"width": 0.6, "thickness": 0.03, "material": "PIR", "thermal_conductivity": 0.022}})
         );
-        // HEMIE has no conductivity for XPS, so it must be stated.
+        // HEMIE's edge insulation table has no conductivity for XPS: it takes the default, reported.
         let xps = r#""{""edge_insulation"":[{""type"":""vertical"",""material"":""XPS""}]}""#;
-        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge(xps)));
-        assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert!(errors[0]
-            .message
-            .contains("Ground floor 'Floor' has XPS vertical edge insulation"));
+        let (model, errors, notices) = run(&csv(SETTINGS, &exposed, &edge(xps)));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(model["Zone"]["constructions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|c| c["edge_insulation"]["vertical"]
+                == json!({"material": "XPS", "thermal_conductivity": 0.036})));
+        assert!(notices.iter().any(|n| n.message
+            == "Ground floor 'Floor': its XPS vertical edge insulation states no thermal conductivity, so it takes the default 0.036 W/m·K. State it to change it."));
         let with_conductivity = xps.replace(r#""XPS""#, r#""XPS"",""thermal_conductivity"":0.034"#);
         let (_, errors, _) = run(&csv(SETTINGS, &exposed, &edge(&with_conductivity)));
         assert!(errors.is_empty(), "{errors:#?}");
@@ -4166,7 +4266,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let mut exposed = heated_roof();
         exposed.push(gable("G W", [0.0, 0.0], [0.0, 6.0]));
         exposed.push(gable("G E", [8.0, 0.0], [8.0, 6.0]));
-        let (model, errors, _) = run(&house(exposed));
+        let (model, errors, _) = run(&house(exposed.clone()));
         assert!(errors.is_empty(), "{errors:#?}");
         let main = &model["Zone"]["building_parts"]["Main"];
         let room = &main["roof"];
@@ -4176,6 +4276,18 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert_eq!(room["maximum_ceiling_height"], 2.5);
         assert!(room.get("front_knee_wall").is_none() && room.get("back_wall").is_none());
         assert_eq!(main["storeys"].as_array().unwrap().len(), 2);
+        // The derived ventilation zone height is HEMIE's: the two storeys, not the room in the roof.
+        let mut input = full_input();
+        input["InfiltrationVentilation"]["Leaks"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ventilation_zone_height");
+        let (model, errors, _) = run_on(&house(exposed), input);
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(
+            model["InfiltrationVentilation"]["Leaks"]["ventilation_zone_height"],
+            5.35
+        );
     }
 
     #[test]
@@ -4800,6 +4912,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             ("cf10 1aa", "Wales"),
             ("EH1 1AA", "Scotland"),
             ("BT1 1AA", "Northern Ireland"),
+            ("IM1 1AA", "Isle of Man"),
         ] {
             let text = house(gable_roof()).replace("MK40 1AA", postcode);
             let (model, errors, notices) = run(&text);
@@ -4840,11 +4953,11 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         // Elsewhere the nation comes from the postcode, whatever a stale stated nation says.
         let stale = house(gable_roof()).replace("Postcode,", "HEMIE_nation,Wales\nPostcode,");
         assert_eq!(run(&stale).0["Zone"]["region"], "England");
-        for area in ["IM", "GY", "JE"] {
+        for area in ["GY", "JE"] {
             let (_, errors, _) = run(&house(gable_roof()).replace("MK40", &format!("{area}1")));
             assert_eq!(errors.len(), 1, "{area}: {errors:#?}");
             assert_eq!(errors[0].path, "/Metadata/Postcode");
-            assert_eq!(errors[0].message, format!("Postcode {area} is outside England, Wales, Scotland and Northern Ireland; HEM:EPC does not cover it."));
+            assert_eq!(errors[0].message, format!("Postcode {area} is outside England, Wales, Scotland, Northern Ireland and the Isle of Man; HEM:EPC does not cover it."));
         }
         for postcode in ["", "MK40", "XX1 1AA", "M1X 1AA1"] {
             let (_, errors, _) = run(&house(gable_roof()).replace("MK40 1AA", postcode));

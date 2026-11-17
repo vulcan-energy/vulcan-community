@@ -6,7 +6,6 @@
 // element-selection chain (there is no ThermalBridgePoint case in the
 // global-selection chain), so this module's single hydrate covers it.
 
-import type { Element } from '../../geometry/types';
 import { StandardInput } from '../StandardInput';
 import { decimalInputProps, useDecimalInput } from './formPrimitives';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
@@ -31,13 +30,6 @@ export const thermalBridgePointFormModule: ElementFormModule<ThermalBridgePointF
 
   reset(state) {
     state.heatTransferCoeffInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      heat_transfer_coeff: state.heatTransferCoeffInput.value
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

@@ -11,7 +11,7 @@
 // orchestrator via useServiceLineFormState and captured here from
 // ctx.serviceLine at useFormState time (same precedent as
 // ThermalBridgeLinear's and MechanicalVentilationDuctwork's own capture), so
-// hydrate/reset/buildElementData/renderPanel (which the module contract
+// hydrate/reset/renderPanel (which the module contract
 // doesn't hand ctx.serviceLine directly) can still reach it.
 //
 // WP does not use ctx.shared (unlike MVD's parentElement) — it has no
@@ -70,17 +70,6 @@ export const waterPipeworkFormModule: ElementFormModule<WaterPipeworkFormState> 
     state.setLocation('');
     state.setPipeworkType('');
     resetServiceLine(state.serviceLine);
-  },
-
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      simplified_pipework: false,
-      location: state.location || undefined,
-      pipework_type: state.pipeworkType || undefined,
-      length: state.serviceLine.lengthInput.value,
-      zoneId: undefined, // Global object
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

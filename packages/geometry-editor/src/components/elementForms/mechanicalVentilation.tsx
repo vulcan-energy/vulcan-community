@@ -11,7 +11,7 @@
 // extracted wall family (see elementForms/types.ts's ElementFormSharedCtx doc
 // comment) and are read/written only through ctx.shared, captured into this
 // module's own returned state during useFormState (same precedent as
-// OnSiteGeneration's getCurrentOrientation) so hydrate/reset/buildElementData/
+// OnSiteGeneration's getCurrentOrientation) so hydrate/reset/
 // renderPanel — which the module contract doesn't hand ctx.shared directly —
 // can still reach them.
 //
@@ -26,14 +26,8 @@
 // ctx.shared.applyOrientationToGeometry (the wall family's rotate-the-polygon
 // path).
 //
-// elementIds/elementsById/getGlobalOrientationOffset are captured from
-// ElementFormStateCtx into this module's own state purely so buildElementData
-// (which only receives the narrower ElementFormBuildCtx) can still resolve
-// the live parent element and the global plan-rotation offset at save time —
-// same precedent as ThermalBridgeLinear/MechanicalVentilationDuctwork
-// capturing ctx.serviceLine. renderPanel receives the full
-// ElementFormRenderCtx already, so it reads elementIds/elementsById/
-// getGlobalOrientationOffset from ctx directly instead.
+// renderPanel reads elementIds/elementsById/getGlobalOrientationOffset from
+// its ElementFormRenderCtx.
 //
 // getParentByName/getParentOrientation360/buildMechanicalVentilationParentPatch
 // are pure functions shared with the wall family (still inline in
@@ -93,19 +87,13 @@ export interface MechanicalVentilationFormState {
   orientation360: number;
   setOrientation360: (value: number) => void;
   applyParentPitchOrientationForDisplay: (pitch: number | undefined, orientation: number | undefined) => void;
-  /** Passed through from ElementFormStateCtx so buildElementData (which only
-   * receives ElementFormBuildCtx) can still resolve the live parent and the
-   * global plan-rotation offset — see module header comment. */
-  elementIds: readonly string[];
-  elementsById: Record<string, Element>;
-  getGlobalOrientationOffset: () => number;
 }
 
 function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationFormState {
   const [ventType, setVentType] = useState<string>('');
 
   const isExistingElementSelection = (): boolean =>
-    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
+    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
 
   const commitMechanicalVentilationPositionField = (
     field: 'mid_height_air_flow_path' | 'orientation360' | 'pitch',
@@ -149,9 +137,6 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationFormState 
     orientation360: ctx.shared.orientation360,
     setOrientation360: ctx.shared.setOrientation360,
     applyParentPitchOrientationForDisplay: ctx.shared.applyParentPitchOrientationForDisplay,
-    elementIds: ctx.elementIds,
-    elementsById: ctx.elementsById,
-    getGlobalOrientationOffset: ctx.getGlobalOrientationOffset,
   };
 }
 
@@ -183,42 +168,6 @@ export const mechanicalVentilationFormModule: ElementFormModule<MechanicalVentil
   reset(state) {
     state.setVentType('');
     state.mechanicalVentilationMidHeightInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    const parent = getParentByName(state.elementsById, state.elementIds, state.parentElement);
-    let extraJson: Record<string, unknown> = {};
-    if (typeof state.mechanicalVentilationMidHeightInput.value === 'number') {
-      extraJson = applyMechanicalVentilationCsvPositionColumns(
-        extraJson,
-        state.ventType,
-        { mid_height_air_flow_path: state.mechanicalVentilationMidHeightInput.value },
-      );
-    }
-    const draft = {
-      ...ctx.baseData,
-      type: 'MechanicalVentilation',
-      vent_type: state.ventType || undefined,
-      parent_element: state.parentElement || null,
-      extra_json: Object.keys(extraJson).length > 0 ? extraJson : undefined,
-    } as Element;
-    const parentPatch = buildMechanicalVentilationParentPatch(
-      draft,
-      parent,
-      state.parentElement,
-      state.ventType,
-      state.getGlobalOrientationOffset(),
-    );
-    const nextExtra =
-      parentPatch.extra_json ??
-      (Object.keys(extraJson).length > 0 ? extraJson : undefined);
-    return {
-      ...ctx.baseData,
-      vent_type: state.ventType || undefined,
-      parent_element: parentPatch.parent_element ?? (state.parentElement || null),
-      extra_json: nextExtra,
-      zoneId: undefined, // Global object
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {
