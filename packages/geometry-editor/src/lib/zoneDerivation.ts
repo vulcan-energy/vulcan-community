@@ -718,6 +718,84 @@ export function getEffectiveStoreyHeight(floor: Floor, elements: Element[]): num
 }
 
 /**
+ * A wall that carries its storey's height: a straight vertical wall that is not a door, a bay or
+ * conservatory part, or a wall with a drawn outline.
+ */
+export function isStoreyHeightWall(element: Element): boolean {
+  if (!isVerticalLineWall(element) || getHemieBundle(element)) return false;
+  return (element.extra_json as { geometry_face?: unknown } | undefined)?.geometry_face === undefined;
+}
+
+/** The height most of a storey's walls stand at, by length (ties: the taller); 0 with none. */
+function mostCommonStoreyWallHeight(zIndex: number, elements: Element[]): number {
+  const lengthByHeight = new Map<number, number>();
+  for (const el of elements) {
+    if (!isStoreyHeightWall(el) || Math.floor(el.coordinates[0]?.z ?? 0) !== zIndex) continue;
+    const h = (el as { height?: unknown }).height;
+    if (typeof h !== 'number' || !Number.isFinite(h) || h <= 0) continue;
+    const [a, b] = el.coordinates;
+    const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+    const key = roundToTwoDecimals(h);
+    lengthByHeight.set(key, (lengthByHeight.get(key) ?? 0) + length);
+  }
+  let best = 0;
+  let bestLength = -1;
+  for (const [h, length] of lengthByHeight) {
+    if (length > bestLength + 1e-9 || (Math.abs(length - bestLength) <= 1e-9 && h > best)) {
+      best = h;
+      bestLength = length;
+    }
+  }
+  return best;
+}
+
+/**
+ * The height a storey gives its walls (the floor picker's Height): the height typed in the floor
+ * picker, else the height most of its straight walls stand at (by length; a stair, gable or knee
+ * wall does not set it), else, for a storey with no walls yet, the nearest storey's towards the
+ * ground. 0 when nothing gives one. New walls take it and the walls standing at it follow it.
+ *
+ * The floor stack, zone and ventilation derivations keep {@link getStrictStoreyHeight} (the tallest
+ * wall when untyped); the two agree once the height is typed or the storey's walls are one height.
+ */
+export function getStoreyHeight(zIndex: number, floors: Floor[], elements: Element[]): number {
+  const own = (z: number): number => {
+    const floor = floors.find((candidate) => candidate.zIndex === z);
+    if (floor?.heightUserOverride === true) return Number.isFinite(floor.height) && floor.height > 0 ? floor.height : 0;
+    return mostCommonStoreyWallHeight(z, elements);
+  };
+  const step = zIndex > 0 ? -1 : 1;
+  for (let z = zIndex; ; z += step) {
+    const height = own(z);
+    if (height > 0) return height;
+    if (z === 0) return 0;
+  }
+}
+
+/**
+ * When a storey's height changes from `oldHeight` to `newHeight`, its walls that stood at the old
+ * height follow it (with their area). Walls of another height (a gable, a split level) keep theirs.
+ */
+export function storeyWallHeightPatches(
+  zIndex: number,
+  oldHeight: number,
+  newHeight: number,
+  elements: Element[],
+): Array<{ elementId: string; patch: { height: number; area: number } }> {
+  if (!(oldHeight > 0) || !(newHeight > 0) || Math.abs(oldHeight - newHeight) < 1e-6) return [];
+  const out: Array<{ elementId: string; patch: { height: number; area: number } }> = [];
+  for (const el of elements) {
+    if (!isStoreyHeightWall(el) || Math.floor(el.coordinates[0]?.z ?? 0) !== zIndex) continue;
+    const h = (el as { height?: unknown }).height;
+    if (typeof h !== 'number' || Math.abs(h - oldHeight) > ZONE_OVERRIDE_EPSILON) continue;
+    const width = (el as { width?: unknown }).width;
+    const area = typeof width === 'number' && Number.isFinite(width) ? roundToTwoDecimals(width * newHeight) : 0;
+    out.push({ elementId: el.id, patch: { height: newHeight, area } });
+  }
+  return out;
+}
+
+/**
  * Return a shallow-copy of the floors array with each `height` replaced by its *effective* value
  * (see {@link getEffectiveStoreyHeight}). Use this whenever you need to compute cumulative base
  * heights — callers that already pass `floors` into derivation helpers should wrap with this.
@@ -966,6 +1044,14 @@ function buildTransparentBaseHeightDependentPatch(
   return patch;
 }
 
+/** A vent's air-flow height is above ground, so it moves with its storey's base. */
+function ventHeightPatch(element: Element, delta: number): FloorMoveBaseHeightPatch | null {
+  if (element.type !== 'Vents') return null;
+  const mid = element.mid_height_air_flow_path;
+  if (typeof mid !== 'number' || !Number.isFinite(mid)) return null;
+  return { mid_height_air_flow_path: roundToTwoDecimals(mid + delta) };
+}
+
 export function calculateBaseHeightPatchForFloorMove(
   element: Element,
   newFloorZ: number,
@@ -984,13 +1070,14 @@ export function calculateBaseHeightPatchForFloorMove(
   const oldFloorZ = Math.floor(coordinates[0]?.z ?? 0);
   const oldFloorBaseHeight = calculateDerivedBaseHeight(oldFloorZ, floors);
   const newFloorBaseHeight = calculateDerivedBaseHeight(newFloorZ, floors);
+  const ventPatch = ventHeightPatch(element, newFloorBaseHeight - oldFloorBaseHeight);
   // Fall back to the old slab when the element has no authored value yet — preserves the
   // "starts flush with the floor" assumption used by `_base_height` for adjacent fabric.
   const currentBaseHeight = classification.storedValue ?? oldFloorBaseHeight;
   const heightAboveOldFloor = currentBaseHeight - oldFloorBaseHeight;
   const nextBaseHeight = roundToTwoDecimals(newFloorBaseHeight + heightAboveOldFloor);
 
-  return buildBaseHeightPatch(element, classification, currentBaseHeight, nextBaseHeight);
+  return { ...buildBaseHeightPatch(element, classification, currentBaseHeight, nextBaseHeight), ...ventPatch };
 }
 
 /**
@@ -1034,18 +1121,19 @@ export function calculateBaseHeightPatchForFloorStackChange(
   const oldDerived = calculateDerivedBaseHeight(floorZ, oldFloors);
   const newDerived = calculateDerivedBaseHeight(floorZ, newFloors);
   if (Math.abs(newDerived - oldDerived) < 1e-4) return null;
+  const ventPatch = ventHeightPatch(element, newDerived - oldDerived);
 
   const classification = classifyAuthoredBaseHeight(element);
   // Skip elements that have never had a base_height authored — the 3D viewer derives
   // their elevation from Floor.height directly, so no patch is needed.
-  if (!classification || classification.storedValue == null) return null;
+  if (!classification || classification.storedValue == null) return ventPatch;
 
   // Preserve the element's offset above the old slab. Same semantics as the floor-move helper,
   // applied to "the floor stack changed under this element".
   const offsetAboveOldSlab = classification.storedValue - oldDerived;
   const nextBaseHeight = roundToTwoDecimals(newDerived + offsetAboveOldSlab);
 
-  return buildBaseHeightPatch(element, classification, classification.storedValue, nextBaseHeight);
+  return { ...buildBaseHeightPatch(element, classification, classification.storedValue, nextBaseHeight), ...ventPatch };
 }
 
 /**

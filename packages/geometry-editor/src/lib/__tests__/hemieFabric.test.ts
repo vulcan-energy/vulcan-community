@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieDefaultPlaceholder, hemieValueLabel,
+import { hasDoubleGlazedWindow, hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieDefaultPlaceholder, hemieValueLabel,
   hemieConstructionKeys, hemieDetailFields, hemieHiddenDetails, hemieFinishEnum, hemieOutsideSurface, statedOutsideSurfaceMethod, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
@@ -244,4 +244,13 @@ it('shows a roof the beams its insulation location reads', () => {
   expect(beams('heated_pitched_roof')).toEqual(['rafter_depth', 'percentage_area_of_timber_rafters']);
   expect(hemieDetailFields('unheated_pitched_roof', undefined)).toContain('ceiling_thickness');
   expect(hemieHiddenDetails('unheated_pitched_roof', 'at_rafters', { joist_depth: 100, rafter_depth: 150 })).toEqual(['joist_depth']);
+});
+
+it('finds a double-glazed window as the converter does: the window\'s own glazing, else the window construction\'s', () => {
+  const window = (extra_json: Record<string, unknown> = {}) => el({ type: 'BuildingElementTransparent', extra_json });
+  const double = { HEMIE_construction_window: '{"glazing_type":"double"}' };
+  expect(hasDoubleGlazedWindow([window()], double)).toBe(true);
+  expect(hasDoubleGlazedWindow([window({ glazing_type: 'single' })], double)).toBe(false);
+  expect(hasDoubleGlazedWindow([window({ glazing_type: 'double' })], {})).toBe(true);
+  expect(hasDoubleGlazedWindow([el({ type: 'BuildingElementOpaque', pitch: 90 })], double)).toBe(false);
 });

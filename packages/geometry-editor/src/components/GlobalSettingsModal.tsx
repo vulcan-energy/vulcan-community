@@ -22,19 +22,18 @@ import {
 } from "../../../geometry-editor-host/src/editorServicePorts";
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
 import { targetFieldAvailability } from "../lib/schemaCache";
-import { HEMIE_NATION, NATIONS, postcodeBorderArea, postcodeUnrecognised } from "../lib/hemieFabric";
-import { SourceNote } from "./FieldSource";
+import { HEMIE_NATION, NATIONS, hasDoubleGlazedWindow, postcodeBorderArea, postcodeRegion, postcodeUnrecognised } from "../lib/hemieFabric";
+import { FieldLabelRow, Readout, SourceNote } from "./FieldSource";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
 import {
   unsetMetadataInputIssues,
   collectGlobalSettingsWarnings,
+  derivedApplianceValue,
   fhsBedroomCountIssue,
   globalSettingsFieldSection,
-  METADATA_INPUT_LABELS,
   smartMeterGuidIssue,
-  type TargetInputRow,
   targetBuildTypes,
   buildTypeHasStoreyRows,
 } from "../lib/globalSettingsValidation";
@@ -64,6 +63,7 @@ import {
 } from "../stores/geometryStore";
 import { DerivedNumberField } from "./DerivedNumberField";
 import { FabricTable } from "./FabricTable";
+import { CompactSegmentedControl } from "./WindowDetailControls";
 import { FabricTabCloseContext } from "./fabricTabCloseContext";
 import { ModalHeader } from "./ModalHeader";
 import { ResetFieldButton } from "./ResetFieldButton";
@@ -115,6 +115,8 @@ export type GlobalSettingsModalProps = Readonly<{
   onIndicatorChange?: (indicator: GlobalSettingsIndicator | null) => void;
   /** A CSV Metadata key: on open, its tab and section open and its field scrolls into view and takes focus. */
   focusFieldKey?: string;
+  /** HEM:EPC Site: the distant shading the model has, with the way to edit it on the plan. */
+  distantShadingSection?: ReactNode;
 }>;
 
 const ROOM_COUNT_COMPLIANCE_ROWS: {
@@ -222,32 +224,74 @@ function DefaultsEditIcon() {
   );
 }
 
-type RequiredYesNoKey = TargetInputRow | "PartGcompliance" | "Ventilation_noise_nuisance";
 const APPLIANCE_ROWS = ["Appliances_has_dryer", "Appliances_has_dishwasher", "Appliances_has_separate_fridge_or_freezer"] as const;
+const APPLIANCE_LABELS: Readonly<Record<(typeof APPLIANCE_ROWS)[number], string>> = {
+  Appliances_has_dryer: "Clothes dryer",
+  Appliances_has_dishwasher: "Dishwasher",
+  Appliances_has_separate_fridge_or_freezer: "Separate fridge or freezer",
+};
+const ROOM_COUNT_SHORT_LABELS: Partial<Record<DwellingCountField, string>> = {
+  NumberOfBedrooms: "Bedrooms",
+  NumberOfWetRooms: "Wet rooms",
+  NumberOfHabitableRooms: "Habitable rooms",
+  NumberOfHotTappedRooms: "Hot-tapped rooms",
+};
+
+// HEM:EPC Global values layout.
+const EPC_FIELD: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, minWidth: 0 };
+const EPC_HELP: React.CSSProperties = { fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" };
+const EPC_GROUP: React.CSSProperties = {
+  display: "flex", flexDirection: "column", gap: "var(--spacing-md)",
+  borderTop: "1px solid var(--border-subtle)", paddingTop: "var(--spacing-md)", marginTop: "var(--spacing-sm)",
+};
+const EPC_GROUP_TITLE: React.CSSProperties = { margin: 0, fontSize: 14, fontWeight: 600, color: "var(--text-primary)" };
+const EPC_COLUMNS: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "var(--spacing-md) var(--spacing-sm)", alignItems: "start" };
+const EPC_ROOMS: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: "var(--spacing-sm)" };
+const EPC_APPLIANCES: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: "var(--spacing-sm)", alignItems: "end" };
+const EPC_MORE: React.CSSProperties = { border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", padding: "8px 12px" };
+const EPC_MORE_SUMMARY: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 };
+
+const yesNoWords = (flag: boolean) => (flag ? "Yes" : "No");
+
+/**
+ * A Yes/No the target requires, as two segments; unset, neither is chosen. A value the model gives
+ * while unset (`given`: the drawing's, or the default) shows chosen with its source, and once the
+ * user picks the other one a note offers it back.
+ */
+function YesNoField({ label, fieldKey, value, given, source, useLabel, onChange }: {
+  label: string;
+  fieldKey: string;
+  value: boolean | undefined;
+  given?: boolean;
+  source?: string;
+  useLabel?: string;
+  onChange: (value: boolean | undefined) => void;
+}) {
+  const shown = value ?? given;
+  return (
+    <div data-field-key={fieldKey} style={EPC_FIELD}>
+      <span className="standard-input-label">{label}</span>
+      <CompactSegmentedControl
+        fullWidth
+        ariaLabel={label}
+        value={shown === undefined ? "" : shown ? "yes" : "no"}
+        options={[{ value: "yes", label: "Yes" }, { value: "no", label: "No" }]}
+        // Picking the value already given keeps it following its source.
+        onChange={(next) => { if (value !== undefined || (next === "yes") !== given) onChange(next === "yes"); }}
+      />
+      {given === undefined ? null : value === undefined ? (
+        <SourceNote>{source}</SourceNote>
+      ) : value !== given ? (
+        <ResetFieldButton align="note" label={`${useLabel}: ${yesNoWords(given)}`} title={`${useLabel}: ${yesNoWords(given)}`}
+          ariaLabel={`${label}: ${useLabel?.toLowerCase()}, ${yesNoWords(given)}`} onClick={() => onChange(undefined)} />
+      ) : null}
+    </div>
+  );
+}
 
 /** An issue as Global Settings itself shows it: no pointer back to Global Settings. */
 const inGlobalSettingsWords = (issue: string) =>
   issue.replace(/^Global Settings: /, "").replace(" Enter it in Global Settings.", " Enter it below.");
-
-/** A TRUE or FALSE row the target requires: empty until the user picks, never a box that reads as "no". */
-function RequiredYesNo({ label, value, onChange, placeholder = "Select..." }: {
-  label: ReactNode;
-  value: boolean | undefined;
-  onChange: (value: boolean | undefined) => void;
-  placeholder?: string;
-}) {
-  return (
-    <StandardDropdown
-      label={label}
-      value={value === undefined ? "" : value ? "TRUE" : "FALSE"}
-      onChange={(next) => onChange(next === "" ? undefined : next === "TRUE")}
-      options={[{ value: "TRUE", label: "Yes" }, { value: "FALSE", label: "No" }]}
-      placeholder={placeholder}
-      variant="ghost"
-      size="md"
-    />
-  );
-}
 
 function buildComplianceFieldLabel(
   label: string,
@@ -558,6 +602,7 @@ export function GlobalSettingsModal({
   externalDetailProfileSection,
   onIndicatorChange,
   focusFieldKey,
+  distantShadingSection,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
   const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null;
@@ -668,19 +713,16 @@ export function GlobalSettingsModal({
     hardcodedExtra,
     useFHSSchema
   );
-  // DESNZ question E17: an existing building with no air test gives HEMIE's leakage-estimate inputs.
-  const estimatedAirtightness =
-    epcTarget && complianceSettings.IsExistingBuilding === true && complianceSettings.AirPermeability_test_result === undefined;
+  // The converter asks for the double glazing date only when a placed window is double glazed.
+  const doubleGlazed = useMemo(
+    () => epcTarget && hasDoubleGlazedWindow(Object.values(elementsById), complianceSettings.hemieSettings),
+    [epcTarget, elementsById, complianceSettings.hemieSettings],
+  );
   const setHemieSetting = (key: string, value: string) => {
     const others = { ...complianceSettings.hemieSettings };
     delete others[key];
     setComplianceSettings({ hemieSettings: value === "" ? others : { ...others, [key]: value } });
   };
-  const requiredYesNoProps = (key: RequiredYesNoKey, label = METADATA_INPUT_LABELS[key] ?? key) => ({
-    label: complianceFieldLabel(label, key),
-    value: complianceSettings[key],
-    onChange: (value: boolean | undefined) => setComplianceSettings({ [key]: value }),
-  });
   const complianceFieldUnit = (paramId: string, label = paramId) => {
     const presentation = complianceFieldPresentation(paramId, label);
     return presentation.unit.status === "resolved" ? presentation.unit.display : undefined;
@@ -831,12 +873,17 @@ export function GlobalSettingsModal({
   const effectiveStoreysInDwelling =
     complianceSettings.storeys_in_dwelling ??
     dwellingDetailsSuggestion.storeysInDwelling;
+  // An existing building's conversion counts the storeys itself and reads no stated count: shown as is.
+  const convertedStoreysInDwelling = useGeometryStore((state) => state.targetValidation?.storeysInDwelling);
+  // The built form the conversion works out from the party walls (HEM:EPC).
+  const convertedBuiltForm = useGeometryStore((state) => state.targetValidation?.builtForm);
+  const storeysFromConversion = constructionBands;
   const effectiveStoreyOfDwelling =
     complianceSettings.storey_of_dwelling ??
     dwellingDetailsSuggestion.storeyOfDwelling;
   const isBuildTypeManual = complianceSettings.build_type !== undefined;
   const isStoreysInDwellingManual =
-    complianceSettings.storeys_in_dwelling !== undefined;
+    !storeysFromConversion && complianceSettings.storeys_in_dwelling !== undefined;
   const isStoreyOfDwellingManual =
     complianceSettings.storey_of_dwelling !== undefined;
 
@@ -850,6 +897,11 @@ export function GlobalSettingsModal({
     (suggestedVentHeight > 0 ? suggestedVentHeight : undefined);
   const isVentHeightManualOverride =
     complianceSettings.AirPermeability_ventilation_zone_height !== undefined;
+  // Where the target derives the height (an existing building), it is the converter's, which the
+  // live target check reports; the editor's sum of storey heights is not used there.
+  const ventHeightFromConverter = derivedRows.has("AirPermeability_ventilation_zone_height");
+  const convertedVentHeight = useGeometryStore((state) => state.targetValidation?.ventilationZoneHeight);
+  const shownVentHeight = ventHeightFromConverter ? convertedVentHeight ?? 0 : suggestedVentHeight;
   const suggestedVentBaseHeight = useMemo(
     () =>
       calculateSuggestedVentilationBaseHeight(
@@ -1045,7 +1097,7 @@ export function GlobalSettingsModal({
       { zones, elementsById, spaceLabelsById, spaceLabelIds, complianceSettings, floors, elements: Object.values(elementsById) },
       targetRoot,
       defaultsJson,
-      { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows, derivedMetadataRows },
+      { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows, derivedMetadataRows, constructionBands },
     ));
     const bedroomCountIssue = fhsBedroomCountIssue(
       complianceSettings.NumberOfBedrooms
@@ -1093,6 +1145,7 @@ export function GlobalSettingsModal({
     storeyBuildTypes,
     desnzDefaultRows,
     derivedMetadataRows,
+    constructionBands,
     zones,
   ]);
 
@@ -1132,8 +1185,10 @@ export function GlobalSettingsModal({
         complianceValidationEnabled: targetValidationFlags(schemaPort, complianceSettings).complianceValidationEnabled,
         complianceSettings,
         globalOrientationOffset,
+        storeysFromConversion: constructionBands,
       }),
     [
+      constructionBands,
       complianceSettings,
       schemaPort,
       elementsById,
@@ -1196,7 +1251,8 @@ export function GlobalSettingsModal({
   // Focus lands inside the dialog on open so Escape reaches its key handler.
   const attachContainer = useCallback((el: HTMLDialogElement | null) => {
     containerRef.current = el;
-    el?.focus();
+    // Re-attached (a new model's first renders), it keeps a field's focus.
+    if (el && !el.contains(document.activeElement)) el.focus();
   }, []);
 
   // focusFieldKey: a new request opens its tab and section during render; the effect
@@ -1218,37 +1274,49 @@ export function GlobalSettingsModal({
   useEffect(() => {
     const container = containerRef.current;
     if (!focusRequest || !container) return;
+    const fieldSelector = `[data-field-key="${CSS.escape(focusRequest)}"]`;
     const target =
-      container.querySelector(`[data-field-key="${CSS.escape(focusRequest)}"]`)
+      container.querySelector(fieldSelector)
       ?? container.querySelector(`[data-field-section="${globalSettingsFieldSection(focusRequest)}"]`);
     target?.scrollIntoView?.({ block: "center" });
-    target?.closest("label")?.control?.focus({ preventScroll: true });
+    // A labelled input, else a field's own buttons (the pathway switch).
+    const control = target?.closest("label")?.control
+      ?? (target?.matches(fieldSelector) ? target.querySelector("button") : null);
+    control?.focus({ preventScroll: true });
   }, [focusRequest]);
-  // Postcode, nation and build type: where a survey starts, so shown first on HEM:EPC and ahead of the
-  // fabric on a construction-band target. A new-build EPC input has no postcode, so it is not shown there.
-  const surveyFirst = epcTarget || constructionBands;
   // Closed, the modal only reports its indicator (above); the form below is built when open.
   if (!isOpen || typeof document === "undefined") return null;
-  const surveyFields = (
-    <>
-      {epcTarget && !constructionBands ? null : <StandardInput
-        type="text"
-        label={<span data-field-key="Postcode">Property postcode</span>}
-        value={propertyPostcode ?? ""}
-        onChange={(event) => {
-          const value = event.target.value.toUpperCase();
-          setPropertyPostcode(value || undefined);
-        }}
-        placeholder="e.g. MK40 1AA"
-        helperText={constructionBands
-          ? "Sets the nation, which sets the years of each age band."
-          : "Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."}
-        autoComplete="postal-code"
-        error={constructionBands && postcodeUnrecognised(propertyPostcode) ? "Postcode not recognised" : undefined}
-        variant="ghost"
-        size="md"
-      />}
-      {constructionBands && borderArea ? (
+  /** A build type pick: the target's suggestion is stored as unset, and the user's choice replaces the file's. */
+  const setBuildType = (value: string) => {
+            if (value === shownBuildType) return;
+            const next =
+              value === ""
+                ? undefined
+                : value;
+            const patch: Parameters<
+              typeof setComplianceSettings
+            >[0] = {
+              build_type:
+                next === suggestedBuildType
+                  ? undefined
+                  : next,
+            };
+            const nextEffectiveBuildType =
+              next ?? suggestedBuildType;
+            if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType, storeyBuildTypes)) {
+              patch.storey_of_dwelling = undefined;
+              patch.storeys_in_building = undefined;
+            }
+            // The user's choice replaces the file's build type.
+            if (fileBuildType) {
+              const unread = { ...complianceSettings.unreadMetadataRows };
+              delete unread.General_build_type;
+              patch.unreadMetadataRows = unread;
+            }
+            setComplianceSettings(patch);
+  };
+  // In a postcode area that spans two nations, the model states the nation.
+  const nationField = constructionBands && borderArea ? (
         <StandardDropdown
           label={<span data-field-key={HEMIE_NATION}>Nation</span>}
           value={complianceSettings.hemieSettings?.[HEMIE_NATION] ?? ""}
@@ -1263,7 +1331,343 @@ export function GlobalSettingsModal({
           variant="ghost"
           size="md"
         />
-      ) : null}
+  ) : null;
+  // A flat or maisonette's storey rows, where the target takes them.
+  const storeyRowFields = buildTypeHasStoreyRows(targetRoot, shownBuildType, storeyBuildTypes) ? (
+                          <>
+                            {showStoreyOfDwelling && (
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "var(--spacing-xs)",
+                              }}
+                            >
+                              <StandardInput
+                                type="number"
+                                unit={complianceFieldUnit("General_storey_of_dwelling", "Storey of dwelling")}
+                                label={
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "6px",
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    {complianceFieldLabel(
+                                      "Storey of dwelling",
+                                      "General_storey_of_dwelling",
+                                      dwellingDetailsSuggestion.explanation
+                                    )}
+                                    {effectiveStoreyOfDwelling !==
+                                      undefined && (
+                                      <span
+                                        style={{
+                                          fontSize: 11,
+                                          fontWeight: 400,
+                                          color: isStoreyOfDwellingManual
+                                            ? "var(--text-warning)"
+                                            : "var(--text-muted)",
+                                        }}
+                                      >
+                                        {isStoreyOfDwellingManual
+                                          ? "(set by you)"
+                                          : "(auto)"}
+                                      </span>
+                                    )}
+                                  </div>
+                                }
+                                value={
+                                  effectiveStoreyOfDwelling?.toString() || ""
+                                }
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  if (raw === "") {
+                                    setComplianceSettings({
+                                      storey_of_dwelling: undefined,
+                                    });
+                                    return;
+                                  }
+                                  const val = Math.floor(parseFloat(raw) || 0);
+                                  setComplianceSettings({
+                                    storey_of_dwelling:
+                                      val ===
+                                      dwellingDetailsSuggestion.storeyOfDwelling
+                                        ? undefined
+                                        : val,
+                                  });
+                                }}
+                                placeholder={
+                                  dwellingDetailsSuggestion.storeyOfDwelling?.toString() ||
+                                  "Lowest occupied storey"
+                                }
+                                helperText={epcTarget ? "The ground floor is 1." : undefined}
+                                min="-50"
+                                max="199"
+                                step="1"
+                                variant="ghost"
+                                size="md"
+                              />
+                              {isStoreyOfDwellingManual &&
+                                dwellingDetailsSuggestion.storeyOfDwelling !==
+                                  undefined && (
+                                  <ResetFieldButton
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      setComplianceSettings({
+                                        storey_of_dwelling: undefined,
+                                      });
+                                    }}
+                                    title={`Reset to suggested storey of dwelling (${dwellingDetailsSuggestion.storeyOfDwelling})`}
+                                    ariaLabel="Reset storey of dwelling to suggested value"
+                                    align="input-row"
+                                  />
+                                )}
+                            </div>
+                            )}
+
+                            <StandardInput
+                              type="number"
+                              unit={complianceFieldUnit("General_storeys_in_building", "Storeys in building")}
+                              label={complianceFieldLabel(
+                                "Storeys in building",
+                                "General_storeys_in_building"
+                              )}
+                              value={
+                                complianceSettings.storeys_in_building?.toString() ||
+                                ""
+                              }
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                const val =
+                                  raw === ""
+                                    ? undefined
+                                    : Math.max(
+                                        1,
+                                        Math.floor(parseFloat(raw) || 1)
+                                      );
+                                setComplianceSettings({
+                                  storeys_in_building: val,
+                                });
+                              }}
+                              placeholder="Required for flats"
+                              min="1"
+                              step="1"
+                              variant="ghost"
+                              size="md"
+                            />
+                          </>
+  ) : null;
+  // Thermal bridging defaults: every target but an existing building's, which takes none.
+  const thermalBridgingSection = constructionBands ? null : (
+              <div
+                data-field-section="thermalBridging"
+                style={{
+                  marginTop: "var(--spacing-md)",
+                  borderTop: "1px solid var(--border-subtle)",
+                  paddingTop: "var(--spacing-md)",
+                }}
+              >
+                <div
+                  onClick={() =>
+                    setThermalBridgingExpanded(!thermalBridgingExpanded)
+                  }
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    cursor: "pointer",
+                    padding: "var(--spacing-sm)",
+                    borderRadius: "var(--radius-md)",
+                    background: thermalBridgingExpanded
+                      ? "var(--bg-secondary)"
+                      : "transparent",
+                    transition: "var(--transition-colors)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontWeight: "var(--font-weight-semibold)",
+                      fontSize: "var(--font-size-md)",
+                      flex: "1 1 auto",
+                      minWidth: 0,
+                    }}
+                  >
+                    Thermal bridging
+                  </span>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    style={{
+                      transform: thermalBridgingExpanded
+                        ? "rotate(180deg)"
+                        : "rotate(0deg)",
+                      transition: "transform var(--transition-normal) ease",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+
+                {thermalBridgingExpanded && (
+                  <div
+                    style={{
+                      padding: "var(--spacing-md)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "var(--spacing-md)",
+                    }}
+                  >
+                    {externalDetailProfileSection}
+
+                    <details
+                      open={junctionPsiFallbackExpanded}
+                      onToggle={(event) =>
+                        setJunctionPsiFallbackExpanded(event.currentTarget.open)
+                      }
+                      style={{
+                        borderTop: "1px solid var(--border-subtle)",
+                        paddingTop: 10,
+                      }}
+                    >
+                      <summary
+                        style={{
+                          cursor: "pointer",
+                          color: "var(--text-secondary)",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        Advanced fallback ψ source · {junctionPsiFallbackLabel}
+                      </summary>
+                      <div
+                        style={{
+                          marginTop: 10,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          Optional CSV under{" "}
+                          <code style={{ fontSize: 10 }}>
+                            {JUNCTION_PSI_DEFAULTS_DIR}/
+                          </code>
+                          . Omitted rows use Table 3.7. Reference:{" "}
+                          <code style={{ fontSize: 10 }}>
+                            {DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH}
+                          </code>
+                          .
+                        </div>
+                        {defaultsCheckReady ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                              alignItems: "stretch",
+                            }}
+                          >
+                            <StandardDropdown
+                              value={junctionPsiDefaultsPath || ""}
+                              onChange={(v) =>
+                                setJunctionPsiDefaultsPath(v || undefined)
+                              }
+                              options={junctionPsiDropdownOptions}
+                              variant="ghost"
+                              size="md"
+                            />
+                            <div
+                              style={{
+                                display: "flex",
+                                flexWrap: "wrap",
+                                gap: 8,
+                                alignItems: "center",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-small"
+                                disabled={
+                                  !(junctionPsiDefaultsPath || "").trim() ||
+                                  junctionPsiDefaultsLoading
+                                }
+                                onClick={() =>
+                                  void openJunctionPsiDefaultsCsv()
+                                }
+                              >
+                                Open CSV
+                              </button>
+                              {junctionPsiDefaultsLoading && (
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    color: "var(--text-muted)",
+                                  }}
+                                >
+                                  Loading…
+                                </span>
+                              )}
+                            </div>
+                            {junctionPsiDefaultsError ? (
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: "var(--text-danger, #f87171)",
+                                }}
+                              >
+                                {junctionPsiDefaultsError}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div
+                            style={{ fontSize: 11, color: "var(--text-muted)" }}
+                          >
+                            Open a workspace folder first to use a junction ψ
+                            table.
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                )}
+              </div>
+  );
+  const surveyFields = (
+    <>
+      <StandardInput
+        type="text"
+        label={<span data-field-key="Postcode">Property postcode</span>}
+        value={propertyPostcode ?? ""}
+        onChange={(event) => {
+          const value = event.target.value.toUpperCase();
+          setPropertyPostcode(value || undefined);
+        }}
+        placeholder="e.g. MK40 1AA"
+        helperText="Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."
+        autoComplete="postal-code"
+        variant="ghost"
+        size="md"
+      />
 
       <div
         style={{
@@ -1305,34 +1709,7 @@ export function GlobalSettingsModal({
             </div>
           }
           value={shownBuildType || ""}
-          onChange={(value) => {
-            if (value === shownBuildType) return;
-            const next =
-              value === ""
-                ? undefined
-                : value;
-            const patch: Parameters<
-              typeof setComplianceSettings
-            >[0] = {
-              build_type:
-                next === suggestedBuildType
-                  ? undefined
-                  : next,
-            };
-            const nextEffectiveBuildType =
-              next ?? suggestedBuildType;
-            if (nextEffectiveBuildType !== undefined && !buildTypeHasStoreyRows(targetRoot, nextEffectiveBuildType, storeyBuildTypes)) {
-              patch.storey_of_dwelling = undefined;
-              patch.storeys_in_building = undefined;
-            }
-            // The user's choice replaces the file's build type.
-            if (fileBuildType) {
-              const unread = { ...complianceSettings.unreadMetadataRows };
-              delete unread.General_build_type;
-              patch.unreadMetadataRows = unread;
-            }
-            setComplianceSettings(patch);
-          }}
+          onChange={setBuildType}
           options={[
             {
               value: "",
@@ -1372,6 +1749,416 @@ export function GlobalSettingsModal({
             />
           )}
       </div>
+    </>
+  );
+  // HEM:EPC Global values: the pathway, then the survey's order (property, rooms and services, air
+  // test, site). A value the model gives shows as a placeholder with its source; rows the run drops are not shown.
+  const existingBuilding = complianceSettings.IsExistingBuilding === true;
+  const appliances = Object.values(elementsById);
+  const airTest =
+    complianceSettings.AirPermeability_test_pressure === "Standard" ? "blower"
+    : complianceSettings.AirPermeability_test_pressure === "Pulse test only" ? "pulse"
+    // An existing building with no test takes HEMIE's estimate; a new build must state its test.
+    : existingBuilding && complianceSettings.AirPermeability_test_result === undefined ? "none" : "";
+  // With no result, the conversion estimates the leakage, whatever the pressure, and asks these inputs.
+  const leakageEstimated = existingBuilding && complianceSettings.AirPermeability_test_result === undefined;
+  const region = postcodeRegion(propertyPostcode, complianceSettings.hemieSettings?.[HEMIE_NATION]);
+  // A required row inside More that is unset opens it.
+  const siteMoreNeeded = (["Ventilation_cross_vent_possible", "Ventilation_shield_class"] as const)
+    .some((key) => requiredRows.has(key) && complianceSettings[key] === undefined)
+    || (requiredRows.has("AirPermeability_ventilation_zone_height") && complianceSettings.AirPermeability_ventilation_zone_height === undefined
+      && !(suggestedVentHeight > 0));
+  // A field's label, with its evidence pill where the host links evidence.
+  const epcLabel = (text: string, key: string) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span data-field-key={key}>{text}</span>
+      {renderEvidencePill(key, text)}
+    </span>
+  );
+  const epcGlobalValues = (
+    <>
+      {calculationTargetSection}
+
+      {/* The pathway, directly under the target: with it, it decides which inputs and defaults the model takes. */}
+      <div data-field-section="target" data-field-key="IsExistingBuilding" style={EPC_FIELD}>
+        <span className="standard-input-label">The dwelling is</span>
+        <CompactSegmentedControl
+          fullWidth
+          ariaLabel="The dwelling is"
+          value={complianceSettings.IsExistingBuilding === undefined ? "" : existingBuilding ? "existing" : "new"}
+          options={[{ value: "existing", label: "An existing building" }, { value: "new", label: "A new build" }]}
+          onChange={(value) => setComplianceSettings({ IsExistingBuilding: value === "existing" })}
+        />
+        <span style={EPC_HELP}>An existing building uses age bands and descriptions. A new build uses entered values and products.</span>
+      </div>
+
+      {evidenceSection}
+
+      <section style={EPC_GROUP}>
+        <h3 style={EPC_GROUP_TITLE}>Property</h3>
+        <div style={EPC_COLUMNS}>
+          {constructionBands ? (
+            <StandardInput
+              type="text"
+              label={<span data-field-key="Postcode">Postcode</span>}
+              value={propertyPostcode ?? ""}
+              onChange={(event) => setPropertyPostcode(event.target.value.toUpperCase() || undefined)}
+              placeholder="e.g. MK40 1AA"
+              helperText={borderArea ? undefined : region}
+              autoComplete="postal-code"
+              error={postcodeUnrecognised(propertyPostcode) ? "Postcode not recognised" : undefined}
+              variant="ghost"
+              size="md"
+            />
+          ) : null}
+          <div style={EPC_FIELD}>
+            <StandardDropdown
+              label={<span data-field-key="General_build_type">Built form</span>}
+              value={shownBuildType || ""}
+              onChange={setBuildType}
+              options={[
+                // Unset, the conversion's built form is the party walls' (once set, it echoes the pick).
+                { value: "", label: convertedBuiltForm && !shownBuildType ? buildTypeLabel(convertedBuiltForm) : "From the party walls" },
+                ...buildTypes.map((type) => ({ value: type, label: buildTypeLabel(type) })),
+                ...(fileBuildType && !complianceSettings.build_type && !buildTypes.includes(fileBuildType)
+                  ? [{ value: fileBuildType, label: fileBuildType }]
+                  : []),
+              ]}
+              variant="ghost"
+              size="md"
+            />
+            {isBuildTypeManual || fileBuildType ? (
+              <ResetFieldButton align="note" label={suggestedBuildType ? "Use the floors" : "Use the party walls"}
+                title={suggestedBuildType ? `Use the built form the floors give (${buildTypeLabel(suggestedBuildType)})` : "Use the built form the party walls give"}
+                ariaLabel={`Built form: ${suggestedBuildType ? "use the floors" : "use the party walls"}`} onClick={() => setBuildType("")} />
+            ) : (
+              // A dwelling with no floor on the ground is a flat, from the floors; else the party walls decide.
+              <SourceNote>{shownBuildType ? "from the floors" : "from the party walls"}</SourceNote>
+            )}
+          </div>
+        </div>
+        {nationField}
+        {storeyRowFields}
+        {constructionBands && convertedStoreysInDwelling !== undefined ? (
+          <div>
+            <FieldLabelRow
+              label={<span className="standard-input-label" data-field-key="General_storeys_in_dwelling">Storeys in dwelling</span>}
+              labelExtra={<SourceNote>from the drawing</SourceNote>}
+            />
+            <Readout value={convertedStoreysInDwelling} label="Storeys in dwelling" />
+          </div>
+        ) : null}
+      </section>
+
+      <section data-field-section="dwelling" style={EPC_GROUP}>
+        <h3 style={EPC_GROUP_TITLE}>Rooms and services</h3>
+        <div style={EPC_FIELD}>
+          <div style={EPC_ROOMS}>
+            {roomCountRows.map((row) => (
+              <StandardInput
+                key={row.field}
+                type="number"
+                label={epcLabel(ROOM_COUNT_SHORT_LABELS[row.field] ?? row.label, row.field)}
+                value={complianceSettings[row.field]?.toString() ?? ""}
+                onChange={(e) => setComplianceSettings({
+                  [row.field]: e.target.value === "" ? undefined : Math.max(0, Math.floor(parseFloat(e.target.value) || 0)),
+                })}
+                // Unset, the save writes the space-label count: show it.
+                placeholder={dwellingRoomCounts ? String(Math.max(0, Math.round(dwellingRoomCounts[row.field]))) : undefined}
+                min="0"
+                step="1"
+                variant="ghost"
+                size="md"
+              />
+            ))}
+          </div>
+          {dwellingCountSpaceLabelMismatchState.mismatches.length > 0 ? (
+            <ResetFieldButton align="note" label="Use the space labels" title="Set every room count from the space labels"
+              ariaLabel="Room counts: use the space labels" onClick={applyAllRoomCountsFromSpaceLabels} />
+          ) : dwellingRoomCounts && primaryZoneForSpaceLabels ? (
+            <SourceNote link="Show on the plan" title="Open the space labels on the plan" onGo={() => {
+              openSpaceLabeller(primaryZoneForSpaceLabels);
+              onClose();
+            }}>from the space labels.</SourceNote>
+          ) : null}
+        </div>
+        <div style={EPC_COLUMNS}>
+          <StandardDropdown
+            label={epcLabel("Heating controls", "HeatingControlType")}
+            value={complianceSettings.HeatingControlType || ""}
+            onChange={(value) => setComplianceSettings({
+              HeatingControlType: (value || undefined) as "SeparateTempControl" | "SeparateTimeAndTempControl" | undefined,
+            })}
+            options={[
+              { value: "SeparateTempControl", label: "Separate temperature control" },
+              { value: "SeparateTimeAndTempControl", label: "Separate time and temperature control" },
+            ]}
+            placeholder="Choose"
+            variant="ghost"
+            size="md"
+          />
+          <StandardDropdown
+            label={epcLabel("Cold water from", "ColdWaterSource")}
+            value={complianceSettings.ColdWaterSource || ""}
+            onChange={(value) => setComplianceSettings({ ColdWaterSource: (value || undefined) as "mains water" | "header tank" | undefined })}
+            options={[
+              { value: "mains water", label: "Mains" },
+              { value: "header tank", label: "Header tank" },
+            ]}
+            placeholder="Choose"
+            variant="ghost"
+            size="md"
+          />
+          <YesNoField label="Smart electricity meter" fieldKey="HasElectricitySmartMeter"
+            value={complianceSettings.HasElectricitySmartMeter}
+            onChange={(value) => setComplianceSettings({ HasElectricitySmartMeter: value })} />
+          <YesNoField label="Water use meets Part G" fieldKey="PartGcompliance"
+            value={complianceSettings.PartGcompliance}
+            onChange={(value) => setComplianceSettings({ PartGcompliance: value })} />
+        </div>
+        {complianceSettings.HasElectricitySmartMeter === true || complianceSettings.ElectricitySmartMeterGUID ? (
+          <StandardInput
+            type="text"
+            label={<span data-field-key="ElectricitySmartMeterGUID">Smart meter GUID</span>}
+            value={complianceSettings.ElectricitySmartMeterGUID ?? ""}
+            onChange={(event) => setComplianceSettings({ ElectricitySmartMeterGUID: event.target.value.trim() || undefined })}
+            placeholder="e.g. 0A1B2C3D4E5F6071"
+            error={complianceSettings.ElectricitySmartMeterGUID ? smartMeterGuidIssue(complianceSettings, requiredRows)?.replace(/^Global Settings: /, "").replace(" Enter it in Global Settings.", "") : undefined}
+            variant="ghost"
+            size="md"
+          />
+        ) : null}
+        <div style={EPC_APPLIANCES}>
+          {APPLIANCE_ROWS.map((key) => (
+            <YesNoField key={key} label={APPLIANCE_LABELS[key]} fieldKey={key}
+              value={complianceSettings[key]}
+              given={derivedApplianceValue(appliances, key, targetRoot)}
+              source="from the drawing"
+              useLabel="Use the drawing"
+              onChange={(value) => setComplianceSettings({ [key]: value })} />
+          ))}
+        </div>
+      </section>
+
+      <section data-field-section="airTightness" style={EPC_GROUP}>
+        <h3 style={EPC_GROUP_TITLE}>Air test</h3>
+        <div data-field-key="AirPermeability_test_pressure" style={EPC_FIELD}>
+          <CompactSegmentedControl
+            fullWidth
+            ariaLabel="Air test"
+            value={airTest}
+            options={[
+              // An existing building needs no air test; a new build states its test.
+              ...(existingBuilding ? [{ value: "none" as const, label: "Not tested" }] : []),
+              { value: "blower" as const, label: "Blower door (50 Pa)" },
+              { value: "pulse" as const, label: "Pulse (4 Pa)" },
+            ]}
+            onChange={(value) => setComplianceSettings(value === "none"
+              // One step: no dormant result is kept for a later test.
+              ? { AirPermeability_test_pressure: undefined, AirPermeability_test_result: undefined, AirPermeability_env_area: undefined }
+              : { AirPermeability_test_pressure: value === "blower" ? "Standard" : "Pulse test only" })}
+          />
+          {leakageEstimated ? (
+            <span style={EPC_HELP}>HEM:EPC estimates the air leakage from the age band and construction.</span>
+          ) : null}
+        </div>
+        {leakageEstimated ? (
+          <div style={EPC_COLUMNS}>
+            <StandardInput
+              type="number"
+              label={<span data-field-key={HEMIE_OPEN_FIREPLACES}>Open fireplaces</span>}
+              helperText="Open to the outside, for example through a chimney."
+              value={complianceSettings.hemieSettings?.[HEMIE_OPEN_FIREPLACES] ?? ""}
+              onChange={(e) => setHemieSetting(HEMIE_OPEN_FIREPLACES, e.target.value)}
+              min="0"
+              step="1"
+              variant="ghost"
+              size="md"
+            />
+            {doubleGlazed ? (
+              <StandardDropdown
+                label={<span data-field-key={HEMIE_DOUBLE_GLAZING_PERIOD}>Double glazing installed</span>}
+                value={complianceSettings.hemieSettings?.[HEMIE_DOUBLE_GLAZING_PERIOD] ?? ""}
+                onChange={(value) => setHemieSetting(HEMIE_DOUBLE_GLAZING_PERIOD, value)}
+                options={[
+                  { value: "double_glazing_post_2002", label: "2002 or later" },
+                  { value: "double_glazing_pre_2002", label: "Before 2002" },
+                  { value: "double_glazing_unknown_install_date", label: "Unknown" },
+                ]}
+                placeholder="Choose"
+                variant="ghost"
+                size="md"
+              />
+            ) : null}
+            {shownBuildType === "flat" || shownBuildType === "maisonette" ? (
+              <StandardDropdown
+                label={<span data-field-key={HEMIE_HEAT_LOSS_CORRIDOR}>Heat loss corridor</span>}
+                value={complianceSettings.hemieSettings?.[HEMIE_HEAT_LOSS_CORRIDOR] ?? ""}
+                onChange={(value) => setHemieSetting(HEMIE_HEAT_LOSS_CORRIDOR, value)}
+                options={[
+                  { value: "no_corridor", label: "No corridor" },
+                  { value: "heated_corridor", label: "Heated corridor" },
+                  { value: "unheated_corridor", label: "Unheated corridor" },
+                ]}
+                placeholder="Choose"
+                variant="ghost"
+                size="md"
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {airTest === "blower" || airTest === "pulse" || complianceSettings.AirPermeability_test_result !== undefined ? (
+          <div style={EPC_COLUMNS}>
+            <StandardInput
+              type="number"
+              unit={complianceFieldUnit("AirPermeability_test_result", "Test result")}
+              label={epcLabel("Test result", "AirPermeability_test_result")}
+              value={complianceSettings.AirPermeability_test_result?.toString() ?? ""}
+              onChange={(e) => {
+                const value = e.target.value === "" ? undefined : parseFloat(e.target.value);
+                setComplianceSettings({ AirPermeability_test_result: value === undefined || isNaN(value) ? undefined : value });
+              }}
+              placeholder="From the test report"
+              min="0"
+              step="0.1"
+              variant="ghost"
+              size="md"
+            />
+            {hemDatabaseProducts ? (
+              <DerivedNumberField
+                label={<span data-field-key="AirPermeability_env_area">Envelope area</span>}
+                unit="m²"
+                derivedValue={drawnEnvelopeArea}
+                manualValue={complianceSettings.AirPermeability_env_area}
+                onChange={(next) => setComplianceSettings({ AirPermeability_env_area: next })}
+                step="0.1"
+                resetTitle={`Use the drawn envelope area (${drawnEnvelopeArea} m²)`}
+                resetAriaLabel="Envelope area: use the drawing"
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section data-field-section="ventilation" style={EPC_GROUP}>
+        <h3 style={EPC_GROUP_TITLE}>Site</h3>
+        <div style={EPC_COLUMNS}>
+          <StandardDropdown
+            label={<span data-field-key="Ventilation_terrain_class">Terrain</span>}
+            value={complianceSettings.Ventilation_terrain_class || ""}
+            onChange={(value) => setComplianceSettings({
+              Ventilation_terrain_class: (value || undefined) as "OpenWater" | "OpenField" | "Suburban" | "Urban" | undefined,
+            })}
+            options={[
+              { value: "OpenWater", label: "Open water" },
+              { value: "OpenField", label: "Open field" },
+              { value: "Suburban", label: "Suburban" },
+              { value: "Urban", label: "Urban" },
+            ]}
+            placeholder="Choose"
+            variant="ghost"
+            size="md"
+          />
+          <StandardInput
+            type="number"
+            unit="m"
+            label={<span data-field-key="Ventilation_altitude">Altitude</span>}
+            value={complianceSettings.Ventilation_altitude?.toString() ?? ""}
+            onChange={(e) => {
+              const value = e.target.value === "" ? undefined : parseFloat(e.target.value);
+              setComplianceSettings({ Ventilation_altitude: value === undefined || isNaN(value) ? undefined : value });
+            }}
+            placeholder="Above sea level"
+            min="0"
+            step="1"
+            variant="ghost"
+            size="md"
+          />
+        </div>
+        {distantShadingSection}
+        <details
+          open={ventilationEnvExpanded || siteMoreNeeded}
+          onToggle={(event) => setVentilationEnvExpanded(event.currentTarget.open)}
+          style={EPC_MORE}
+        >
+          <summary style={EPC_MORE_SUMMARY}>
+            <span aria-hidden style={{ fontSize: 10 }}>{ventilationEnvExpanded || siteMoreNeeded ? "▼" : "▶"}</span>
+            <span style={{ fontWeight: 600 }}>More</span>
+            <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 12 }}>shelter, noise, cross ventilation, zone height</span>
+          </summary>
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", paddingTop: "var(--spacing-md)" }}>
+            <StandardDropdown
+              label={<span data-field-key="Ventilation_shield_class">Shelter</span>}
+              value={complianceSettings.Ventilation_shield_class || ""}
+              onChange={(value) => setComplianceSettings({ Ventilation_shield_class: (value || undefined) as "Open" | "Normal" | "Shielded" | undefined })}
+              options={[
+                ...(derivedRows.has("Ventilation_shield_class") ? [{ value: "", label: "From the terrain" }] : []),
+                { value: "Open", label: "Open" },
+                { value: "Normal", label: "Normal" },
+                { value: "Shielded", label: "Shielded" },
+              ]}
+              placeholder="Choose"
+              variant="ghost"
+              size="md"
+            />
+            <div style={EPC_COLUMNS}>
+              <YesNoField label="Noise nuisance" fieldKey="Ventilation_noise_nuisance"
+                value={complianceSettings.Ventilation_noise_nuisance}
+                given={desnzDefaultRows.Ventilation_noise_nuisance === undefined ? undefined : desnzDefaultRows.Ventilation_noise_nuisance === "Yes"}
+                source="default"
+                useLabel="Use the default"
+                onChange={(value) => setComplianceSettings({ Ventilation_noise_nuisance: value })} />
+              <YesNoField label="Cross ventilation" fieldKey="Ventilation_cross_vent_possible"
+                value={complianceSettings.Ventilation_cross_vent_possible}
+                onChange={(value) => setComplianceSettings({ Ventilation_cross_vent_possible: value })} />
+            </div>
+            <div style={EPC_COLUMNS}>
+              <DerivedNumberField
+                label={<span data-field-key="AirPermeability_ventilation_zone_height">Zone height</span>}
+                unit="m"
+                derivedValue={shownVentHeight}
+                manualValue={complianceSettings.AirPermeability_ventilation_zone_height}
+                onChange={(next) => setComplianceSettings({ AirPermeability_ventilation_zone_height: next })}
+                step="0.1"
+                // A typed height takes the converter's place; clearing the field returns to the drawing.
+                helperTextWhenUnavailable={ventHeightFromConverter && complianceSettings.AirPermeability_ventilation_zone_height === undefined
+                  ? "From the drawing, once the model converts" : undefined}
+                resetTitle={`Use the drawn zone height (${shownVentHeight} m)`}
+                resetAriaLabel="Zone height: use the drawing"
+              />
+              <div style={EPC_FIELD}>
+                <StandardInput
+                  type="number"
+                  unit="m"
+                  label={<FieldLabelRow
+                    label={<span data-field-key="Ventilation_ventilation_zone_base_height">Zone base height</span>}
+                    labelExtra={isVentBaseHeightManualOverride ? (
+                      <ResetFieldButton align="note" label={`Use the drawing: ${suggestedVentBaseHeight} m`}
+                        title={`Use the drawn base height (${suggestedVentBaseHeight} m)`} ariaLabel="Zone base height: use the drawing"
+                        onClick={() => setComplianceSettings({ Ventilation_ventilation_zone_base_height: undefined })} />
+                    ) : <SourceNote>from the drawing</SourceNote>}
+                  />}
+                  value={complianceSettings.Ventilation_ventilation_zone_base_height?.toString() ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value === "" ? undefined : parseFloat(e.target.value);
+                    setComplianceSettings({
+                      Ventilation_ventilation_zone_base_height:
+                        value === undefined || isNaN(value) || Math.abs(value - suggestedVentBaseHeight) < 1e-9 ? undefined : value,
+                    });
+                  }}
+                  placeholder={suggestedVentBaseHeight.toString()}
+                  min="-150"
+                  max="750"
+                  step="0.1"
+                  variant="ghost"
+                  size="md"
+                />
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
+      {thermalBridgingSection}
     </>
   );
 
@@ -1695,18 +2482,11 @@ export function GlobalSettingsModal({
             </FabricTabCloseContext>
           )}
 
-          {/* Global Settings Tab */}
-          {activeTab === "settings" && (
+          {/* Global values: on HEM:EPC the pathway and the survey groups; on any other target the sections below. */}
+          {activeTab === "settings" && epcTarget && epcGlobalValues}
+          {activeTab === "settings" && !epcTarget && (
             <>
               {calculationTargetSection}
-
-              {/* With the target: it decides which inputs and defaults the model takes. */}
-              {surveyFirst ? <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", marginBottom: "var(--spacing-md)" }}>{surveyFields}</div> : null}
-              {requiredRows.has("IsExistingBuilding") && (
-                <div data-field-section="target" style={{ marginBottom: "var(--spacing-md)" }}>
-                  <RequiredYesNo {...requiredYesNoProps("IsExistingBuilding")} />
-                </div>
-              )}
 
               {/* Evidence linking for global settings */}
               {evidenceSection}
@@ -1741,18 +2521,6 @@ export function GlobalSettingsModal({
                   >
                     <div
                       style={{
-                        fontSize: 12,
-                        color: "var(--text-secondary)",
-                        marginBottom: "var(--spacing-sm)",
-                      }}
-                    >
-                      Configure dwelling-level details used by the
-                      calculation. Some values can be suggested from geometry,
-                      but you can override them where needed.
-                    </div>
-
-                    <div
-                      style={{
                         display: "flex",
                         flexDirection: "column",
                         gap: "var(--spacing-sm)",
@@ -1765,7 +2533,7 @@ export function GlobalSettingsModal({
                           gap: "var(--spacing-md)",
                         }}
                       >
-                        {surveyFirst ? null : surveyFields}
+                        {surveyFields}
 
                         {!epcTarget && (
                         <StandardDropdown
@@ -1892,133 +2660,7 @@ export function GlobalSettingsModal({
                             )}
                         </div>
 
-                        {buildTypeHasStoreyRows(targetRoot, shownBuildType, storeyBuildTypes) && (
-                          <>
-                            {showStoreyOfDwelling && (
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "var(--spacing-xs)",
-                              }}
-                            >
-                              <StandardInput
-                                type="number"
-                                unit={complianceFieldUnit("General_storey_of_dwelling", "Storey of dwelling")}
-                                label={
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "6px",
-                                      flexWrap: "wrap",
-                                    }}
-                                  >
-                                    {complianceFieldLabel(
-                                      "Storey of dwelling",
-                                      "General_storey_of_dwelling",
-                                      dwellingDetailsSuggestion.explanation
-                                    )}
-                                    {effectiveStoreyOfDwelling !==
-                                      undefined && (
-                                      <span
-                                        style={{
-                                          fontSize: 11,
-                                          fontWeight: 400,
-                                          color: isStoreyOfDwellingManual
-                                            ? "var(--text-warning)"
-                                            : "var(--text-muted)",
-                                        }}
-                                      >
-                                        {isStoreyOfDwellingManual
-                                          ? "(set by you)"
-                                          : "(auto)"}
-                                      </span>
-                                    )}
-                                  </div>
-                                }
-                                value={
-                                  effectiveStoreyOfDwelling?.toString() || ""
-                                }
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  if (raw === "") {
-                                    setComplianceSettings({
-                                      storey_of_dwelling: undefined,
-                                    });
-                                    return;
-                                  }
-                                  const val = Math.floor(parseFloat(raw) || 0);
-                                  setComplianceSettings({
-                                    storey_of_dwelling:
-                                      val ===
-                                      dwellingDetailsSuggestion.storeyOfDwelling
-                                        ? undefined
-                                        : val,
-                                  });
-                                }}
-                                placeholder={
-                                  dwellingDetailsSuggestion.storeyOfDwelling?.toString() ||
-                                  "Lowest occupied storey"
-                                }
-                                helperText={epcTarget ? "The ground floor is 1." : undefined}
-                                min="-50"
-                                max="199"
-                                step="1"
-                                variant="ghost"
-                                size="md"
-                              />
-                              {isStoreyOfDwellingManual &&
-                                dwellingDetailsSuggestion.storeyOfDwelling !==
-                                  undefined && (
-                                  <ResetFieldButton
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setComplianceSettings({
-                                        storey_of_dwelling: undefined,
-                                      });
-                                    }}
-                                    title={`Reset to suggested storey of dwelling (${dwellingDetailsSuggestion.storeyOfDwelling})`}
-                                    ariaLabel="Reset storey of dwelling to suggested value"
-                                    align="input-row"
-                                  />
-                                )}
-                            </div>
-                            )}
-
-                            <StandardInput
-                              type="number"
-                              unit={complianceFieldUnit("General_storeys_in_building", "Storeys in building")}
-                              label={complianceFieldLabel(
-                                "Storeys in building",
-                                "General_storeys_in_building"
-                              )}
-                              value={
-                                complianceSettings.storeys_in_building?.toString() ||
-                                ""
-                              }
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const val =
-                                  raw === ""
-                                    ? undefined
-                                    : Math.max(
-                                        1,
-                                        Math.floor(parseFloat(raw) || 1)
-                                      );
-                                setComplianceSettings({
-                                  storeys_in_building: val,
-                                });
-                              }}
-                              placeholder="Required for flats"
-                              min="1"
-                              step="1"
-                              variant="ghost"
-                              size="md"
-                            />
-                          </>
-                        )}
+                        {storeyRowFields}
                       </div>
 
                       {showPartOCooling && (
@@ -2402,20 +3044,6 @@ export function GlobalSettingsModal({
                         size="md"
                       />
 
-                      {requiredRows.has("HasElectricitySmartMeter") && <RequiredYesNo {...requiredYesNoProps("HasElectricitySmartMeter")} />}
-                      {requiredRows.has("HasElectricitySmartMeter") && (complianceSettings.HasElectricitySmartMeter === true || complianceSettings.ElectricitySmartMeterGUID) ? (
-                        <StandardInput
-                          type="text"
-                          label={complianceFieldLabel("Smart meter GUID", "ElectricitySmartMeterGUID")}
-                          value={complianceSettings.ElectricitySmartMeterGUID ?? ""}
-                          onChange={(event) => setComplianceSettings({ ElectricitySmartMeterGUID: event.target.value.trim() || undefined })}
-                          placeholder="e.g. 0A1B2C3D4E5F6071"
-                          error={complianceSettings.ElectricitySmartMeterGUID ? smartMeterGuidIssue(complianceSettings, requiredRows)?.replace(/^Global Settings: /, "").replace(" Enter it in Global Settings.", "") : undefined}
-                          variant="ghost"
-                          size="md"
-                        />
-                      ) : null}
-                      {requiredRows.has("PartGcompliance") ? <RequiredYesNo {...requiredYesNoProps("PartGcompliance", "Part G compliance")} /> : (
                       <label
                         style={{
                           display: "flex",
@@ -2443,8 +3071,6 @@ export function GlobalSettingsModal({
                           "Part G compliance"
                         )}
                       </label>
-                      )}
-                      {APPLIANCE_ROWS.flatMap((key) => (requiredRows.has(key) ? [<RequiredYesNo key={key} {...requiredYesNoProps(key)} />] : []))}
                       {showKitchenHood && (
                       <label
                         style={{
@@ -2513,17 +3139,6 @@ export function GlobalSettingsModal({
                       gap: "var(--spacing-md)",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                        marginBottom: "var(--spacing-sm)",
-                      }}
-                    >
-                      The air test of the dwelling. The envelope area comes from
-                      the element areas{hemDatabaseProducts ? " unless the report states it" : ""}.
-                    </div>
-
                     <StandardDropdown
                       label={
                         <div
@@ -2609,68 +3224,6 @@ export function GlobalSettingsModal({
                       variant="ghost"
                       size="md"
                     />
-                    {estimatedAirtightness && (
-                      <>
-                        <SourceNote>Estimated (no air test). HEM:EPC estimates the airtightness from the dwelling and these inputs.</SourceNote>
-                        <StandardInput
-                          type="number"
-                          label={<span data-field-key={HEMIE_OPEN_FIREPLACES}>Open fireplaces</span>}
-                          helperText="Fireplaces open to the outside, for example through a chimney."
-                          value={complianceSettings.hemieSettings?.[HEMIE_OPEN_FIREPLACES] ?? ""}
-                          onChange={(e) => setHemieSetting(HEMIE_OPEN_FIREPLACES, e.target.value)}
-                          min="0"
-                          step="1"
-                          variant="ghost"
-                          size="md"
-                        />
-                        <StandardDropdown
-                          label={<span data-field-key={HEMIE_DOUBLE_GLAZING_PERIOD}>Double glazing installed</span>}
-                          value={complianceSettings.hemieSettings?.[HEMIE_DOUBLE_GLAZING_PERIOD] ?? ""}
-                          onChange={(value) => setHemieSetting(HEMIE_DOUBLE_GLAZING_PERIOD, value)}
-                          options={[
-                            { value: "double_glazing_post_2002", label: "2002 or later" },
-                            { value: "double_glazing_pre_2002", label: "Before 2002" },
-                            { value: "double_glazing_unknown_install_date", label: "Unknown" },
-                          ]}
-                          placeholder="Only if the windows are double glazed"
-                          variant="ghost"
-                          size="md"
-                        />
-                        {(shownBuildType === "flat" || shownBuildType === "maisonette") && (
-                          <StandardDropdown
-                            label={<span data-field-key={HEMIE_HEAT_LOSS_CORRIDOR}>Heat loss corridor</span>}
-                            value={complianceSettings.hemieSettings?.[HEMIE_HEAT_LOSS_CORRIDOR] ?? ""}
-                            onChange={(value) => setHemieSetting(HEMIE_HEAT_LOSS_CORRIDOR, value)}
-                            options={[
-                              { value: "no_corridor", label: "No corridor" },
-                              { value: "heated_corridor", label: "Heated corridor" },
-                              { value: "unheated_corridor", label: "Unheated corridor" },
-                            ]}
-                            placeholder="Select corridor..."
-                            variant="ghost"
-                            size="md"
-                          />
-                        )}
-                      </>
-                    )}
-                    {hemDatabaseProducts && (
-                      <StandardInput
-                        type="number"
-                        unit="m²"
-                        label={<span data-field-key="AirPermeability_env_area">Envelope area</span>}
-                        helperText="From the air test report. Blank uses the drawn area."
-                        placeholder={`Drawn: ${drawnEnvelopeArea}`}
-                        value={complianceSettings.AirPermeability_env_area?.toString() ?? ""}
-                        onChange={(e) => {
-                          const val = e.target.value === "" ? undefined : parseFloat(e.target.value);
-                          setComplianceSettings({ AirPermeability_env_area: val === undefined || isNaN(val) ? undefined : val });
-                        }}
-                        min="0"
-                        step="0.1"
-                        variant="ghost"
-                        size="md"
-                      />
-                    )}
                   </div>
                 )}
               </div>
@@ -2708,18 +3261,6 @@ export function GlobalSettingsModal({
                       gap: "var(--spacing-md)",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-secondary)",
-                        marginBottom: "var(--spacing-sm)",
-                      }}
-                    >
-                      Site exposure, terrain, and ventilation zone dimensions
-                      that affect wind pressure and infiltration calculations.
-                      These override the defaults template values.
-                    </div>
-
                     <div>
                       <div
                         style={{
@@ -2737,7 +3278,7 @@ export function GlobalSettingsModal({
                                 "Ventilation Zone Height (m)",
                                 "AirPermeability_ventilation_zone_height"
                               )}
-                              {suggestedVentHeight > 0 && (
+                              {shownVentHeight > 0 && (
                                 <span
                                   style={{
                                     fontSize: 11,
@@ -2762,8 +3303,8 @@ export function GlobalSettingsModal({
                           value={
                             isVentHeightManualOverride
                               ? complianceSettings.AirPermeability_ventilation_zone_height!.toString()
-                              : suggestedVentHeight > 0
-                              ? suggestedVentHeight.toString()
+                              : shownVentHeight > 0
+                              ? shownVentHeight.toString()
                               : ""
                           }
                           onChange={(e) => {
@@ -2784,30 +3325,32 @@ export function GlobalSettingsModal({
                             } else {
                               setComplianceSettings({
                                 AirPermeability_ventilation_zone_height:
-                                  suggestedVentHeight > 0 &&
-                                  Math.abs(val - suggestedVentHeight) < 1e-9
+                                  shownVentHeight > 0 &&
+                                  Math.abs(val - shownVentHeight) < 1e-9
                                     ? undefined
                                     : val,
                               });
                             }
                           }}
                           placeholder={
-                            suggestedVentHeight > 0
-                              ? suggestedVentHeight.toString()
-                              : "No zone heights set"
+                            shownVentHeight > 0
+                              ? shownVentHeight.toString()
+                              : ventHeightFromConverter ? "" : "No zone heights set"
                           }
                           min="0"
                           step="0.1"
                           variant="ghost"
                           size="md"
                           helperText={
-                            suggestedVentHeight > 0
-                              ? `Total building height (sum of floor heights): ${suggestedVentHeight} m`
+                            ventHeightFromConverter
+                              ? shownVentHeight > 0 ? "From the drawing" : "From the drawing, once the model converts"
+                              : shownVentHeight > 0
+                              ? `Total building height (sum of floor heights): ${shownVentHeight} m`
                               : "Draw wall elements to auto-derive"
                           }
                         />
                         {isVentHeightManualOverride &&
-                          suggestedVentHeight > 0 && (
+                          (ventHeightFromConverter || shownVentHeight > 0) && (
                             <ResetFieldButton
                               onClick={() =>
                                 setComplianceSettings({
@@ -2815,17 +3358,18 @@ export function GlobalSettingsModal({
                                     undefined,
                                 })
                               }
-                              title={`Reset to suggested ventilation zone height (${suggestedVentHeight} m)`}
+                              title={ventHeightFromConverter ? "Use the height from the drawing" : `Reset to suggested ventilation zone height (${shownVentHeight} m)`}
                               ariaLabel="Reset ventilation zone height to suggested value"
                               align="input-row"
                             />
                           )}
                       </div>
                       {isVentHeightManualOverride &&
-                        suggestedVentHeight > 0 &&
+                        !ventHeightFromConverter &&
+                        shownVentHeight > 0 &&
                         Math.abs(
                           complianceSettings.AirPermeability_ventilation_zone_height! -
-                            suggestedVentHeight
+                            shownVentHeight
                         ) > 0.1 && (
                           <div
                             style={{
@@ -2845,7 +3389,7 @@ export function GlobalSettingsModal({
                               complianceSettings.AirPermeability_ventilation_zone_height
                             }{" "}
                             m) differs from total building height (
-                            {suggestedVentHeight} m). Check this is intentional.
+                            {shownVentHeight} m). Check this is intentional.
                           </div>
                         )}
                     </div>
@@ -2873,7 +3417,6 @@ export function GlobalSettingsModal({
                       ]}
                       variant="ghost"
                       size="md"
-                      helperText="Wind exposure of the building facade"
                     />
 
                     </div>
@@ -2895,7 +3438,7 @@ export function GlobalSettingsModal({
                         });
                       }}
                       options={[
-                        { value: "", label: requiredRows.has("Ventilation_terrain_class") ? "Select terrain class..." : "Open Field (default)" },
+                        { value: "", label: requiredRows.has("Ventilation_terrain_class") ? "Select terrain class..." : "Suburban (default)" },
                         { value: "OpenWater", label: "Open Water" },
                         { value: "OpenField", label: "Open Field" },
                         { value: "Suburban", label: "Suburban" },
@@ -2903,7 +3446,6 @@ export function GlobalSettingsModal({
                       ]}
                       variant="ghost"
                       size="md"
-                      helperText="Surrounding terrain affecting wind speed profile"
                     />
 
                     </div>
@@ -3028,10 +3570,6 @@ export function GlobalSettingsModal({
                       )}
                     </div>
 
-                    {requiredRows.has("Ventilation_noise_nuisance") || desnzDefaultRows.Ventilation_noise_nuisance ? (
-                      <RequiredYesNo {...requiredYesNoProps("Ventilation_noise_nuisance", "Noise nuisance")}
-                        placeholder={desnzDefaultRows.Ventilation_noise_nuisance && `${desnzDefaultRows.Ventilation_noise_nuisance} (default)`} />
-                    ) : (
                     <>
                     <div
                       style={{
@@ -3083,204 +3621,11 @@ export function GlobalSettingsModal({
                       Whether external noise limits window opening for cooling
                     </div>
                     </>
-                    )}
-                    {requiredRows.has("Ventilation_cross_vent_possible") && <RequiredYesNo {...requiredYesNoProps("Ventilation_cross_vent_possible")} />}
                   </div>
                 )}
               </div>
 
-              {/* Thermal Bridging Settings Section */}
-              {!constructionBands && (
-              <div
-                data-field-section="thermalBridging"
-                style={{
-                  marginTop: "var(--spacing-md)",
-                  borderTop: "1px solid var(--border-subtle)",
-                  paddingTop: "var(--spacing-md)",
-                }}
-              >
-                <div
-                  onClick={() =>
-                    setThermalBridgingExpanded(!thermalBridgingExpanded)
-                  }
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    cursor: "pointer",
-                    padding: "var(--spacing-sm)",
-                    borderRadius: "var(--radius-md)",
-                    background: thermalBridgingExpanded
-                      ? "var(--bg-secondary)"
-                      : "transparent",
-                    transition: "var(--transition-colors)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontWeight: "var(--font-weight-semibold)",
-                      fontSize: "var(--font-size-md)",
-                      flex: "1 1 auto",
-                      minWidth: 0,
-                    }}
-                  >
-                    Thermal bridging
-                  </span>
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    style={{
-                      transform: thermalBridgingExpanded
-                        ? "rotate(180deg)"
-                        : "rotate(0deg)",
-                      transition: "transform var(--transition-normal) ease",
-                      flexShrink: 0,
-                    }}
-                  >
-                    <path
-                      d="M6 9l6 6 6-6"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-
-                {thermalBridgingExpanded && (
-                  <div
-                    style={{
-                      padding: "var(--spacing-md)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "var(--spacing-md)",
-                    }}
-                  >
-                    {externalDetailProfileSection}
-
-                    <details
-                      open={junctionPsiFallbackExpanded}
-                      onToggle={(event) =>
-                        setJunctionPsiFallbackExpanded(event.currentTarget.open)
-                      }
-                      style={{
-                        borderTop: "1px solid var(--border-subtle)",
-                        paddingTop: 10,
-                      }}
-                    >
-                      <summary
-                        style={{
-                          cursor: "pointer",
-                          color: "var(--text-secondary)",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        Advanced fallback ψ source · {junctionPsiFallbackLabel}
-                      </summary>
-                      <div
-                        style={{
-                          marginTop: 10,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 8,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "var(--text-secondary)",
-                          }}
-                        >
-                          Optional CSV under{" "}
-                          <code style={{ fontSize: 10 }}>
-                            {JUNCTION_PSI_DEFAULTS_DIR}/
-                          </code>
-                          . Omitted rows use Table 3.7. Reference:{" "}
-                          <code style={{ fontSize: 10 }}>
-                            {DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH}
-                          </code>
-                          .
-                        </div>
-                        {defaultsCheckReady ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 8,
-                              alignItems: "stretch",
-                            }}
-                          >
-                            <StandardDropdown
-                              value={junctionPsiDefaultsPath || ""}
-                              onChange={(v) =>
-                                setJunctionPsiDefaultsPath(v || undefined)
-                              }
-                              options={junctionPsiDropdownOptions}
-                              variant="ghost"
-                              size="md"
-                            />
-                            <div
-                              style={{
-                                display: "flex",
-                                flexWrap: "wrap",
-                                gap: 8,
-                                alignItems: "center",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                className="btn btn-ghost btn-small"
-                                disabled={
-                                  !(junctionPsiDefaultsPath || "").trim() ||
-                                  junctionPsiDefaultsLoading
-                                }
-                                onClick={() =>
-                                  void openJunctionPsiDefaultsCsv()
-                                }
-                              >
-                                Open CSV
-                              </button>
-                              {junctionPsiDefaultsLoading && (
-                                <span
-                                  style={{
-                                    fontSize: 11,
-                                    color: "var(--text-muted)",
-                                  }}
-                                >
-                                  Loading…
-                                </span>
-                              )}
-                            </div>
-                            {junctionPsiDefaultsError ? (
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  color: "var(--text-danger, #f87171)",
-                                }}
-                              >
-                                {junctionPsiDefaultsError}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div
-                            style={{ fontSize: 11, color: "var(--text-muted)" }}
-                          >
-                            Open a workspace folder first to use a junction ψ
-                            table.
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  </div>
-                )}
-              </div>
-              )}
+              {thermalBridgingSection}
             </>
           )}
         </div>

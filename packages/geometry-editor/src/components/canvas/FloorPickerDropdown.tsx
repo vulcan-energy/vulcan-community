@@ -15,9 +15,13 @@ import {
 } from '../../geometry/validation/validateElement';
 import {
   getCumulativeBaseHeightsByFloorId,
+  getStoreyHeight,
+  getStrictStoreyHeight,
 } from '../../lib/zoneDerivation';
+import { isStoreyCopyElement, isUnderRoof } from '../../lib/storeyCopy';
 import {
   canvasFloorToFhsStorey,
+  fhsFloorCodeForCanvasFloor,
   fhsFloorLabelForCanvasFloor,
   fhsStoreyToCanvasFloor,
 } from '../../lib/storeySemantics';
@@ -30,9 +34,12 @@ interface FloorPickerDropdownProps {
   elementsById: Record<string, Element>;
   onSelectFloor: (z: number) => void;
   onAddFloor: (z: number) => void;
+  /** "Copy of F2": copy storey `fromZ` onto the new storey `toZ`. */
+  onCopyFloor?: (fromZ: number, toZ: number) => void;
   onDeleteFloor: (id: string) => void;
   /**
-   * Apply a floor patch (`baseHeight` + `baseHeightUserOverride`) when the user edits a floor base.
+   * Apply a floor patch when the user edits a floor's base (`baseHeight` + `baseHeightUserOverride`)
+   * or height (`height` + `heightUserOverride`).
    */
   onUpdateFloor?: (floorId: string, updates: Partial<Floor>) => void;
   /** Create the internal floor record when the picker is used before any element exists. */
@@ -73,6 +80,7 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   elementsById,
   onSelectFloor,
   onAddFloor,
+  onCopyFloor,
   onDeleteFloor,
   onUpdateFloor,
   onEnsureFloorForZ,
@@ -84,8 +92,8 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [position, setPosition] = useState({ x: 0, bottom: 0, width: 0 });
   const [pendingDeleteFloor, setPendingDeleteFloor] = useState<FloorRow | null>(null);
-  // Per-row base-height drafts so users can type freely; commit to store on blur/Enter.
-  const [baseDrafts, setBaseDrafts] = useState<Record<string, string>>({});
+  // Per-row drafts (keyed `base:<id>` / `height:<id>`) so users can type freely; commit to store on blur/Enter.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const addInputRef = useRef<HTMLInputElement>(null);
@@ -99,7 +107,6 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
   }, [newFloorZInput, suggestedNextFloorZ]);
   const pendingAddLabel = floorLabel(pendingAddTargetZ);
   const pendingAddExists = sortedFloors.some((floor) => floor.zIndex === pendingAddTargetZ);
-  const pendingAddPreview = pendingAddExists ? `${pendingAddLabel} exists` : `Adds ${pendingAddLabel}`;
   const currentFloor = sortedFloors.find((floor) => floor.zIndex === currentFloorZ) ?? null;
 
   // Ground is the default drawing floor even before the first element has been created. Keep a
@@ -168,32 +175,42 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
     return warningFloorIds;
   }, [elementsById, floorRows, getElementValidation]);
 
-  /** Commit a typed base elevation directly to the edited floor. */
-  const commitBaseHeight = useCallback(
-    (rowFloor: Floor) => {
-      const rowKey = rowFloor.id;
-      const draft = baseDrafts[rowKey];
-      setBaseDrafts((prev) => {
+  /**
+   * Commit a typed base or height to the edited floor. A number is the floor's own; an emptied
+   * field goes back to the derived value (the placeholder).
+   */
+  const commitFloorValue = useCallback(
+    (rowFloor: Floor, field: 'base' | 'height') => {
+      const key = `${field}:${rowFloor.id}`;
+      const draft = drafts[key];
+      setDrafts((prev) => {
         const next = { ...prev };
-        delete next[rowKey];
+        delete next[key];
         return next;
       });
       if (draft === undefined) return;
-      const parsed = Number.parseFloat(draft);
-      if (!Number.isFinite(parsed)) return;
-      const roundedBase = Math.round(parsed * 100) / 100;
-      const targetFloorId = sortedFloors.find((floor) => floor.zIndex === rowFloor.zIndex)?.id
-        ?? onEnsureFloorForZ?.(rowFloor.zIndex);
-      if (!targetFloorId) {
-        setToastMessage('Base height cannot be saved until this floor exists');
+      const existing = sortedFloors.find((floor) => floor.zIndex === rowFloor.zIndex);
+      if (draft.trim() === '') {
+        if (!existing) return;
+        onUpdateFloor?.(existing.id, field === 'base' ? { baseHeightUserOverride: false } : { heightUserOverride: false });
         return;
       }
-      onUpdateFloor?.(targetFloorId, {
-        baseHeight: roundedBase,
-        baseHeightUserOverride: true,
-      });
+      const parsed = Number.parseFloat(draft);
+      if (!Number.isFinite(parsed) || (field === 'height' && parsed <= 0)) return;
+      const rounded = Math.round(parsed * 100) / 100;
+      const targetFloorId = existing?.id ?? onEnsureFloorForZ?.(rowFloor.zIndex);
+      if (!targetFloorId) {
+        setToastMessage(`${field === 'base' ? 'Base' : 'Height'} cannot be saved until this floor exists`);
+        return;
+      }
+      onUpdateFloor?.(
+        targetFloorId,
+        field === 'base'
+          ? { baseHeight: rounded, baseHeightUserOverride: true }
+          : { height: rounded, heightUserOverride: true },
+      );
     },
-    [baseDrafts, sortedFloors, onEnsureFloorForZ, onUpdateFloor],
+    [drafts, sortedFloors, onEnsureFloorForZ, onUpdateFloor],
   );
 
   const updatePosition = useCallback(() => {
@@ -224,6 +241,13 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
     return () => window.clearTimeout(timer);
   }, [isOpen]);
 
+  // "from the storey · F1" in a wall's Height opens the picker.
+  useEffect(() => {
+    const open = () => setIsOpen(true);
+    window.addEventListener('open-floor-picker', open);
+    return () => window.removeEventListener('open-floor-picker', open);
+  }, []);
+
   useEffect(() => {
     if (!toastMessage) return;
     const timer = window.setTimeout(() => setToastMessage(null), TOAST_DURATION_MS);
@@ -251,12 +275,29 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen]);
 
-  const handleAddFloor = () => {
+  // "Copy of F2" is offered for the storey above an existing one with something to copy, unless a
+  // roof rises through the new storey's floor (it is the roof space).
+  const copySourceZ = pendingAddTargetZ - 1;
+  const copySourceFloor = sortedFloors.find((floor) => floor.zIndex === copySourceZ);
+  const canCopy = useMemo(() => {
+    if (!onCopyFloor || pendingAddExists || pendingAddTargetZ <= 0 || !copySourceFloor) return false;
+    const copyable = allElements.filter((element) =>
+      isStoreyCopyElement(element) && getElementCanvasFloorZValue(element, floors) === copySourceZ);
+    if (copyable.length === 0) return false;
+    // The new storey's base as the floor stack places it.
+    const sourceBase = baseHeightsByFloorId.get(copySourceFloor.id);
+    const sourceHeight = getStrictStoreyHeight(copySourceFloor, allElements);
+    const targetBase = typeof sourceBase === 'number' && sourceHeight > 0 ? sourceBase + sourceHeight : null;
+    return targetBase === null || !isUnderRoof(targetBase, allElements, copyable);
+  }, [onCopyFloor, pendingAddExists, pendingAddTargetZ, copySourceFloor, allElements, floors, copySourceZ, baseHeightsByFloorId]);
+
+  const handleAddFloor = (copy: boolean) => {
     if (pendingAddExists) {
       setToastMessage(`${pendingAddLabel} already exists`);
       return;
     }
-    onAddFloor(pendingAddTargetZ);
+    if (copy) onCopyFloor?.(copySourceZ, pendingAddTargetZ);
+    else onAddFloor(pendingAddTargetZ);
     setNewFloorZInput('');
     setIsOpen(false);
   };
@@ -275,7 +316,7 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
       style={{
         left: position.x,
         bottom: position.bottom,
-        minWidth: Math.max(position.width, 260),
+        width: Math.max(position.width, 440),
       }}
     >
       <div className="floor-picker-list" role="listbox" aria-label="Floors">
@@ -283,9 +324,42 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
             const isActive = row.floor.zIndex === currentFloorZ;
             const isPlaceholderFloor = !sortedFloors.some((floor) => floor.id === row.floor.id);
             const baseElevation = baseHeightsByFloorId.get(row.floor.id) ?? null;
-            const baseDraft = baseDrafts[row.floor.id];
-            const baseValueDisplay = baseDraft ?? (baseElevation === null ? '' : formatMetres(baseElevation));
+            // A typed value shows as the value; a derived one as the placeholder. Ground's 0 is the datum.
+            const baseTyped = row.floor.baseHeightUserOverride === true && Number.isFinite(row.floor.baseHeight)
+              ? formatMetres(row.floor.baseHeight!)
+              : row.floor.zIndex === 0 && baseElevation === 0 ? '0' : '';
+            const storeyHeight = getStoreyHeight(row.floor.zIndex, floors, allElements);
+            const heightTyped = row.floor.heightUserOverride === true && row.floor.height > 0 ? formatMetres(row.floor.height) : '';
             const hasFloorStackWarning = floorStackWarningsByFloorId.has(row.floor.id);
+            const metric = (field: 'base' | 'height', typed: string, derived: number | null) => {
+              const name = field === 'base' ? 'Base' : 'Height';
+              const key = `${field}:${row.floor.id}`;
+              return (
+                <label
+                  className="floor-picker-height-shell"
+                  title={`${name} of ${floorLabel(row.floor.zIndex)}, in metres`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span className="floor-picker-metric-label">{name}</span>
+                  <DraftSafeNumberInput
+                    step="0.05"
+                    className="floor-picker-height-input"
+                    aria-label={`${field === 'base' ? 'Base height' : 'Storey height'} for ${floorLabel(row.floor.zIndex)} in metres`}
+                    value={drafts[key] ?? typed}
+                    placeholder={derived === null || (field === 'height' && derived <= 0) ? '—' : formatMetres(derived)}
+                    onChange={(event) => setDrafts((prev) => ({ ...prev, [key]: event.target.value }))}
+                    onBlur={() => commitFloorValue(row.floor, field)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        (event.currentTarget as HTMLInputElement).blur();
+                      }
+                    }}
+                  />
+                  <span className="floor-picker-height-unit">m</span>
+                </label>
+              );
+            };
 
             return (
               <div key={row.floor.id} className="floor-picker-row-shell">
@@ -316,31 +390,10 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
                   </div>
                 </button>
                 {onUpdateFloor ? (
-                  <label
-                    className="floor-picker-height-shell"
-                    title={`Base height of ${floorLabel(row.floor.zIndex)}, in metres`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <span className="floor-picker-metric-label">Base</span>
-                    <DraftSafeNumberInput
-                      step="0.05"
-                      className="floor-picker-height-input"
-                      aria-label={`Base height for ${floorLabel(row.floor.zIndex)} in metres`}
-                      value={baseValueDisplay}
-                      placeholder="—"
-                      onChange={(event) =>
-                        setBaseDrafts((prev) => ({ ...prev, [row.floor.id]: event.target.value }))
-                      }
-                      onBlur={() => commitBaseHeight(row.floor)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          (event.currentTarget as HTMLInputElement).blur();
-                        }
-                      }}
-                    />
-                    <span className="floor-picker-height-unit">m</span>
-                  </label>
+                  <>
+                    {metric('base', baseTyped, baseElevation)}
+                    {metric('height', heightTyped, storeyHeight)}
+                  </>
                 ) : null}
                 {!isPlaceholderFloor && <button
                   type="button"
@@ -371,7 +424,11 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
 
       <div className="floor-picker-footer">
         <div className="floor-picker-add-row">
-          <div className={`floor-picker-input-shell ${addDisabled ? 'floor-picker-input-shell-disabled' : ''}`}>
+          <label
+            className={`floor-picker-add-label ${addDisabled ? 'floor-picker-input-shell-disabled' : ''}`}
+            title="FHS floor number: F1 is ground, F0 is basement 1"
+          >
+            Add F
             <DraftSafeNumberInput
               ref={addInputRef}
               inputMode="numeric"
@@ -380,32 +437,45 @@ export const FloorPickerDropdown: React.FC<FloorPickerDropdownProps> = ({
               onChange={(event) => setNewFloorZInput(event.target.value)}
               placeholder={String(suggestedNextStorey)}
               aria-label="FHS floor number to add"
-              title="FHS floor number: F1 is ground, F0 is basement 1"
               disabled={addDisabled}
+              style={{ width: `${Math.max(1, (newFloorZInput || String(suggestedNextStorey)).length) + 0.5}ch` }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !addDisabled) {
                   event.preventDefault();
-                  handleAddFloor();
+                  handleAddFloor(false);
                 }
               }}
             />
-          </div>
-          <span
-            className={`floor-picker-add-preview ${pendingAddExists ? 'floor-picker-add-preview-existing' : ''}`}
-            title={pendingAddPreview}
-          >
-            {pendingAddPreview}
+          </label>
+          <span className="floor-picker-add-preview floor-picker-add-preview-existing">
+            {pendingAddExists ? `${pendingAddLabel} exists` : null}
           </span>
           <button
             type="button"
-            className="draw-button floor-picker-add-button"
-            onClick={handleAddFloor}
+            className="btn btn-secondary btn-sm floor-picker-add-button"
+            onClick={() => handleAddFloor(false)}
             disabled={addDisabled}
-            title={addDisabled ? 'Add floor is unavailable in 3D view' : pendingAddPreview}
+            title={addDisabled ? 'Add floor is unavailable in 3D view' : `Add ${pendingAddLabel}, empty`}
           >
-            Add
+            Empty
           </button>
+          {canCopy ? (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm floor-picker-add-button"
+              onClick={() => handleAddFloor(true)}
+              disabled={addDisabled}
+              title={addDisabled ? 'Add floor is unavailable in 3D view' : `Add ${pendingAddLabel} as a copy of ${fhsFloorCodeForCanvasFloor(copySourceZ)}`}
+            >
+              {`Copy of ${fhsFloorCodeForCanvasFloor(copySourceZ)}`}
+            </button>
+          ) : null}
         </div>
+        {canCopy ? (
+          <div className="floor-picker-note">
+            The copy takes the walls, windows and doors in place. Floors, ceilings and roofs are not copied.
+          </div>
+        ) : null}
         {toastMessage && (
           <div className="floor-picker-toast" role="status" aria-live="polite">
             {toastMessage}

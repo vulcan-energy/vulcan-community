@@ -428,8 +428,10 @@ describe('CSV-side validation matches the editor', () => {
         { type: 'MechanicalVentilationDuctwork', name: 'B', duct_type: 'supply', parent_element: 'MV', length: 3, floorId: f1,
           coordinates: [{ x: 0, y: 0, z: 2.5 }, { x: 3, y: 0, z: 2.5 }] },
       ] as never);
-      // The ground storey is 2.7 m by override, not the 2.5 m its walls give; the ducts follow to 2.7.
+      // The ground storey is 2.7 m by override, not the 2.5 m its wall is typed at; the ducts follow to 2.7.
       source.getState().updateFloor(f0, { height: 2.7, heightUserOverride: true });
+      const w0 = Object.values(source.getState().elementsById).find((el) => el.name === 'W0')!;
+      source.getState().updateElement(w0.id, { height: 2.5 } as Partial<Element>);
       vi.runAllTimers();
       expect(Object.values(source.getState().elementsById)
         .filter((el) => el.type === 'MechanicalVentilationDuctwork')

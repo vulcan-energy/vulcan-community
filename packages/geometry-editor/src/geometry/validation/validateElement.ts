@@ -1652,10 +1652,10 @@ export const validateElementCore = (
       if (!groundElement.area || groundElement.area === 0) {
         issues.push(geo('Area cannot be 0', 'area'));
       }
-      if (!groundElement.total_area || groundElement.total_area === 0) {
+      if ((!groundElement.total_area || groundElement.total_area === 0) && !leftToTarget(element.type, 'total_area')) {
         issues.push(geo('Total Area cannot be 0', 'total_area'));
       }
-      if (!groundElement.perimeter || groundElement.perimeter === 0) {
+      if ((!groundElement.perimeter || groundElement.perimeter === 0) && !leftToTarget(element.type, 'perimeter')) {
         issues.push(geo('Perimeter cannot be 0', 'perimeter'));
       }
       if (!groundElement.floor_type) {
@@ -2880,7 +2880,7 @@ export const validateElementCore = (
       const hasReliableExposedPerimeter =
         details.valueM > 0 ||
         (details.shapePerimeterM > 0 && details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05));
-      if (hasReliableExposedPerimeter && perimeter != null && Math.abs(perimeter - details.valueM) > 0.05) {
+      if (hasReliableExposedPerimeter && perimeter != null && Math.abs(perimeter - details.valueM) > 0.05 && !leftToTarget(element.type, 'perimeter')) {
         warnings.push(
           geo(
             `Perimeter ${formatNumberForIssue(perimeter)} m differs from exposed wall-linked perimeter ${formatNumberForIssue(details.valueM)} m`,
@@ -3261,6 +3261,7 @@ export const collectGeometryValidation = (
         complianceValidationEnabled,
         complianceSettings: options.complianceSettings,
         globalOrientationOffset: options.globalOrientationOffset,
+        storeysFromConversion: targetRules(options.schemaPort, options.complianceSettings).constructionBands,
       }),
     );
   }

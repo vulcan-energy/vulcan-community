@@ -209,7 +209,8 @@ fn tank_descriptors(
         // The buffer tank's pump power and its install year are alternatives (HEMIE code).
         errors.push(error("SYSTEM", path.into(), "The buffer tank states its pump power but no standing loss, efficiency class or install year, and the existing-building EPC takes the install year only in place of the pump power. State its standing loss or efficiency class.".into()));
     }
-    if !applied.is_empty() {
+    // A storage tank's fields show these defaults (`systemFieldDefaults`); a buffer tank's do not.
+    if buffer && !applied.is_empty() {
         notices.push(notice(
             path,
             format!(
@@ -249,7 +250,7 @@ pub(super) fn map_systems(
             hemie.as_object_mut().expect("system").remove("Zone");
             hemie["model_type"] = json!("hemie");
             if hemie["type"] == "DirectElectricBoiler"
-                && !direct_electric_boiler(&mut hemie, name, &path, errors, notices)
+                && !direct_electric_boiler(&mut hemie, name, &path, errors)
             {
                 continue;
             }
@@ -327,16 +328,15 @@ fn direct_electric_boiler(
     name: &str,
     path: &str,
     errors: &mut Vec<ValidationError>,
-    notices: &mut Vec<SchemaOmission>,
 ) -> bool {
     let has = |key: &str| boiler.get(key).is_some_and(|v| !v.is_null());
     if !has("rated_power") && !has("size_category") {
         errors.push(error("SYSTEM", format!("{path}/size_category"), format!("Direct electric boiler '{name}': choose its size category, or state its rated power. There is no default.")));
         return false;
     }
+    // The editor's manufacture year field shows "unknown" as its default.
     if !has("electricity_circ_pump") && !has("manufacture_year") {
         boiler["manufacture_year"] = json!("unknown");
-        notices.push(notice(path, format!("Direct electric boiler '{name}' states no manufacture year or circulation pump power, so it uses the default: manufacture year unknown.")));
     }
     true
 }
@@ -601,9 +601,10 @@ mod tests {
         }));
         assert!(errors.is_empty(), "{errors:#?}");
         assert_eq!(model["HeatSourceWet"]["e"]["manufacture_year"], "unknown");
-        assert!(notices
+        // The editor's manufacture year field shows "unknown" as its default: no notice repeats it.
+        assert!(!notices
             .iter()
-            .any(|n| n.message.contains("manufacture year unknown")));
+            .any(|n| n.message.contains("manufacture year")));
         let panel = |name: &str| model["OnSiteGeneration"][name]["panels"][0].clone();
         assert_eq!(model["OnSiteGeneration"]["drawn"]["model_type"], "hemie");
         assert_eq!(
@@ -643,9 +644,8 @@ mod tests {
         let hw = &model["HotWaterSource"]["hw"];
         assert_eq!(hw["tank_volume_category"], "Inaccessible");
         assert_eq!(hw["installation_year"], "unknown");
-        assert!(notices
-            .iter()
-            .any(|n| n.path == "/HotWaterSource/hw" && n.message.contains("uses the default")));
+        // The editor's tank fields show these defaults: no notice repeats them.
+        assert!(!notices.iter().any(|n| n.path == "/HotWaterSource/hw"));
         // A stated descriptor is kept, and no default is added.
         let (model, _, _) = run(
             json!({"HotWaterSource": {"hw": tank(json!({"tank_volume_category": "Large", "energy_efficiency_class": "C"}))}}),

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
+
 export type GroundFloorType =
   | 'Heated_basement'
   | 'Slab_no_edge_insulation'
@@ -82,10 +84,26 @@ export function defaultSuspendedAreaPerPerimeterVent(totalArea: number, perimete
 /**
  * The floor calculation (BS EN ISO 13370 as BR 443 directs) lives once, in Rust
  * (`vulcan-model-transform` `ground_floor_u_value`). A host whose WASM carries it registers it here;
- * the arguments are the HEM ground element's fields as JSON and the row's wind speed. It returns
- * the U-value (W/m²K, four decimals) or undefined when an input it needs is missing.
+ * the arguments are the HEM ground element's fields as JSON, the row's wind speed, and whether the
+ * target takes a heated basement's U-value as the floor and its walls below ground
+ * ({@link groundUWholeBasement}). It returns the U-value (W/m²K, four decimals) or undefined when
+ * an input it needs is missing.
  */
-export type GroundUValueCalculator = (elementJson: string, windSpeedMps: number | undefined) => number | undefined;
+export type GroundUValueCalculator = (
+  elementJson: string,
+  windSpeedMps: number | undefined,
+  wholeBasement: boolean,
+) => number | undefined;
+
+/**
+ * True when the target takes a heated basement's U-value as the floor and its walls below ground,
+ * weighted by area (DESNZ-defined for HEM:EPC; the converter's
+ * `ModelProfile::weights_basement_walls_into_floor_u`). Other targets take the floor alone. A
+ * HEM:EPC target is the one that requires `IsExistingBuilding`.
+ */
+export function groundUWholeBasement(rules: Pick<TargetRules, 'requiredMetadataRows'>): boolean {
+  return rules.requiredMetadataRows.includes('IsExistingBuilding');
+}
 
 let calculator: GroundUValueCalculator | null = null;
 
@@ -99,9 +117,13 @@ export function hasGroundUValueCalculator(): boolean {
 }
 
 /** The floor calculation for a HEM ground element's fields; null with no calculator registered or a missing input. */
-export function calculateGroundUValue(element: Readonly<Record<string, unknown>>, windSpeedMps?: number): number | null {
+export function calculateGroundUValue(
+  element: Readonly<Record<string, unknown>>,
+  windSpeedMps: number | undefined,
+  wholeBasement: boolean,
+): number | null {
   if (!calculator) return null;
-  return calculator(JSON.stringify(element), windSpeedMps) ?? null;
+  return calculator(JSON.stringify(element), windSpeedMps, wholeBasement) ?? null;
 }
 
 function readFinite(value: unknown): number | null {
@@ -121,6 +143,8 @@ export function isStatedNumber(value: unknown): boolean {
 }
 
 export type ComputeGroundUFromElementModelOptions = {
+  /** The target takes a heated basement's U-value as the whole basement ({@link groundUWholeBasement}). */
+  wholeBasement: boolean;
   /** Modal live wind field; when omitted, uses `extra_json.wind_speed_mps` (suspended floors). */
   windInput?: string | null;
   /** Effective ground area override (m²), auto-derived or manually authored, used before `currentData.total_area`. */
@@ -143,7 +167,7 @@ export function computeGroundUValueFromElementModel(
   currentData: unknown,
   advancedFieldsData: unknown,
   subtype: string | undefined,
-  options?: ComputeGroundUFromElementModelOptions,
+  options: ComputeGroundUFromElementModelOptions,
 ): number | null {
   const record = (value: unknown): Record<string, unknown> =>
     value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -152,10 +176,10 @@ export function computeGroundUValueFromElementModel(
   const element: Record<string, unknown> = { ...cur, ...adv };
   delete element.extra_json;
   element.floor_type = cur.floor_type ?? subtype ?? 'Slab_no_edge_insulation';
-  element.total_area = readFinite(options?.totalArea) ?? readFinite(cur.total_area);
-  element.perimeter = readFinite(options?.perimeter) ?? readFinite(cur.perimeter);
-  element.thickness_walls = readFinite(options?.thicknessWalls) ?? readFinite(cur.thickness_walls);
-  element.depth_basement_floor = readFinite(options?.depthBasementFloorM) ?? readFinite(cur.depth_basement_floor);
-  const wind = options?.windInput != null ? readFinite(options.windInput) : readFinite(adv.wind_speed_mps);
-  return calculateGroundUValue(element, wind ?? undefined);
+  element.total_area = readFinite(options.totalArea) ?? readFinite(cur.total_area);
+  element.perimeter = readFinite(options.perimeter) ?? readFinite(cur.perimeter);
+  element.thickness_walls = readFinite(options.thicknessWalls) ?? readFinite(cur.thickness_walls);
+  element.depth_basement_floor = readFinite(options.depthBasementFloorM) ?? readFinite(cur.depth_basement_floor);
+  const wind = options.windInput != null ? readFinite(options.windInput) : readFinite(adv.wind_speed_mps);
+  return calculateGroundUValue(element, wind ?? undefined, options.wholeBasement);
 }

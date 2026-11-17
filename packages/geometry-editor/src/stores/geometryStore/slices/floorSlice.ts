@@ -8,6 +8,8 @@ import {
   cascadeFloorStackChange,
   deriveZoneProperties,
   getCumulativeBaseHeightsByFloorId,
+  getStoreyHeight,
+  storeyWallHeightPatches,
   withEffectiveStoreyHeights,
 } from '../../../lib/zoneDerivation';
 import {
@@ -82,31 +84,44 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
       //   - a Floor.height edit (user override flow), or
       //   - a heightUserOverride flip (snap to walls vs decouple from walls).
       // Renames and isRoofSpace toggles do not affect effective heights, so they skip the cascade.
-      const elements = Object.values(state.elementsById);
-      const oldEff = withEffectiveStoreyHeights(state.floors, elements);
-      const newEff = withEffectiveStoreyHeights(nextFloors, elements);
-      const effectiveChanged = oldEff.some((f, i) => f.height !== newEff[i]?.height);
-      const oldBases = getCumulativeBaseHeightsByFloorId(state.floors, elements);
-      const newBases = getCumulativeBaseHeightsByFloorId(nextFloors, elements);
-      const baseChanged = state.floors.some((floor) => oldBases.get(floor.id) !== newBases.get(floor.id));
+      const oldElements = Object.values(state.elementsById);
+      const nextElementsById = { ...state.elementsById };
+      const applyPatch = (elementId: string, patch: object) => {
+        const el = nextElementsById[elementId];
+        if (el) nextElementsById[elementId] = { ...el, ...patch, _v: (el._v ?? 0) + 1 } as typeof el;
+      };
       // Zone heights use each zone's own walls, so a storey height edit can change a zone even
       // when the storey's effective height (over every zone) does not.
       const storeyHeightEdited = 'height' in updates || 'heightUserOverride' in updates;
+      // The walls standing at the storey's height follow it.
+      const wallPatches = storeyHeightEdited
+        ? storeyWallHeightPatches(
+          prevFloor.zIndex,
+          getStoreyHeight(prevFloor.zIndex, state.floors, oldElements),
+          getStoreyHeight(prevFloor.zIndex, nextFloors, oldElements),
+          oldElements,
+        )
+        : [];
+      for (const { elementId, patch } of wallPatches) applyPatch(elementId, patch);
+      const elements = Object.values(nextElementsById);
+      const oldEff = withEffectiveStoreyHeights(state.floors, oldElements);
+      const newEff = withEffectiveStoreyHeights(nextFloors, elements);
+      const effectiveChanged = oldEff.some((f, i) => f.height !== newEff[i]?.height);
+      const oldBases = getCumulativeBaseHeightsByFloorId(state.floors, oldElements);
+      const newBases = getCumulativeBaseHeightsByFloorId(nextFloors, elements);
+      const baseChanged = state.floors.some((floor) => oldBases.get(floor.id) !== newBases.get(floor.id));
       const deriveZones = (els: typeof elements) => (storeyHeightEdited
         ? state.zones.map((zone) => ({ ...zone, ...deriveZoneProperties(zone, els, nextFloors) }))
         : state.zones);
-      if (!effectiveChanged && !baseChanged) return { floors: nextFloors, zones: deriveZones(elements) };
+      if (!effectiveChanged && !baseChanged) {
+        return wallPatches.length > 0
+          ? { floors: nextFloors, elementsById: nextElementsById, zones: deriveZones(elements) }
+          : { floors: nextFloors, zones: deriveZones(elements) };
+      }
 
       const patches = cascadeFloorStackChange(oldEff, newEff, elements);
-      const nextElementsById = { ...state.elementsById };
       for (const { elementId, patch } of patches) {
-        const el = nextElementsById[elementId];
-        if (!el) continue;
-        nextElementsById[elementId] = {
-          ...el,
-          ...patch,
-          _v: (el._v ?? 0) + 1,
-        } as typeof el;
+        applyPatch(elementId, patch);
       }
       return { floors: nextFloors, elementsById: nextElementsById, zones: deriveZones(Object.values(nextElementsById)) };
     });

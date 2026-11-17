@@ -45,6 +45,7 @@ import { buildingElementGroundFormModule } from './elementForms/buildingElementG
 import { adjacentLikeElementFormModule } from './elementForms/adjacentLikeElement';
 import { buildingElementTransparentFormModule } from './elementForms/buildingElementTransparent';
 import { WindowWallLink } from './WindowWallLink';
+import { carryChangeLabel, carryChanges, carryPatch, matchingOpenings, openingKind } from '../lib/windowCarry';
 import { buildingElementOpaqueFormModule } from './elementForms/buildingElementOpaque';
 import { useWallFamilyFormState } from './elementForms/wallFamily';
 import { useDormerBundleEditor } from './DormerBundleEditor';
@@ -99,6 +100,7 @@ import {
 } from '../lib/groundSuspendedFabricSync';
 import {
   computeGroundUValueFromElementModel,
+  groundUWholeBasement,
 } from '../lib/groundFloor';
 import type {
   BuildingElementOpaque,
@@ -147,6 +149,8 @@ import {
   getParentByName,
   getParentOrientation360,
   buildHostedLinearParentPatch,
+  openingTooWide,
+  wallUnderOpening,
 } from '../lib/parentOrientation';
 import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrRoles';
 import { useMvhrDuctTerminalManager } from './MvhrDuctTerminalManager';
@@ -511,6 +515,7 @@ import {
 import { groundFloorTypeSupportsViewerElevation } from '../lib/groundFloorSubtype';
 import { ColleagueDiscs } from './canvas/ColleagueDiscs';
 import type { GeometryCanvasRemoteSelection } from './canvas/RemotePresenceLayer';
+import type { Selection } from '../stores/geometryStore/slices/selectionSlice';
 
 const loadAdvancedFieldsEditor = () => import('./AdvancedFieldsEditor');
 const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
@@ -571,13 +576,6 @@ type AdvancedFieldsElementPatch = Partial<Element> & {
 // buildingElementOpaque.tsx (slice-6 brief STAGE 4) — its only consumer was
 // Opaque's own render.
 
-// Define Selection type locally
-type Selection = {
-  type: 'zone' | 'element' | 'global' | 'dormer';
-  id: string;
-  isPlaceholder?: boolean;
-  focusFieldKey?: string;
-} | null;
 
 const ELEMENT_TYPES = ELEMENT_TYPE_ORDER;
 const PRESET_ELEMENT_TYPES = ['BuildingElementOpaque', 'BuildingElementTransparent', 'OnSiteGeneration'];
@@ -899,7 +897,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const evidenceBridge = useContext(GeometryInspectorEvidenceContext);
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
-  const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = useTargetRules();
+  const targetRulesNow = useTargetRules();
+  const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = targetRulesNow;
+  const wholeBasement = groundUWholeBasement(targetRulesNow);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
@@ -941,6 +941,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const removeElement = useGeometryStore((s) => s.removeElement);
   const duplicateElement = useGeometryStore((s) => s.duplicateElement);
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
+  const detachedFrom = useGeometryStore((s) => (selection?.type === 'element' ? s.detachedOpenings[selection.id] : undefined));
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
   const validateElement = useGeometryStore((s) => s.validateElement);
   const hostValidationFindings = useGeometryStore((s) => s.hostValidationFindings);
@@ -3140,8 +3141,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const thermalElement = selection?.type === 'element' && !selectedIsDormerAnchor
     && selectedElement && thermalMethodElementType(selectedElement.type) ? selectedElement : null;
   const thermalGroundU = useMemo(() => (thermalElement?.type === 'BuildingElementGround'
-    ? computeGroundUValueFromElementModel(thermalElement as unknown as Record<string, unknown>, readExtraJsonRecord(thermalElement.extra_json), thermalElement.floor_type)
-    : null), [thermalElement]);
+    ? computeGroundUValueFromElementModel(thermalElement as unknown as Record<string, unknown>, readExtraJsonRecord(thermalElement.extra_json), thermalElement.floor_type, { wholeBasement })
+    : null), [thermalElement, wholeBasement]);
   // An existing building's floor offers its calculation only when the drawing gives one (or an assembly already does).
   const thermalMethodOptions = thermalElement
     ? thermalMethods(thermalElement.type, constructionBands,
@@ -4021,10 +4022,22 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     </div>
   ) : null;
 
+  const windowParent = selectedElement?.type === 'BuildingElementTransparent' && wallShared.parentElement
+    ? getParentByName(elementsById, elementIds, wallShared.parentElement, elementZoneId)
+    : undefined;
+  // "Was on Wall (S)" while that wall is gone: an undone delete brings it back, and the line goes.
+  const wasOn = !wallShared.parentElement && detachedFrom && !getParentByName(elementsById, elementIds, detachedFrom, elementZoneId)
+    ? detachedFrom
+    : undefined;
   const windowWallLink = (
     selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent' ? (
       <WindowWallLink
         parentName={wallShared.parentElement}
+        orientation={Number.isFinite(wallShared.orientation360) ? wallShared.orientation360 : 0}
+        pitch={typeof selectedElement.pitch === 'number' ? selectedElement.pitch : undefined}
+        wasOn={wasOn}
+        reattachTo={wasOn ? wallUnderOpening(selectedElement, allElements)?.name : undefined}
+        tooWide={openingTooWide(selectedElement, windowParent)}
         zoneId={elementZoneId}
         selfId={selection.id}
         onChange={(value) => applyHostedParentElement(value, '')}
@@ -4035,6 +4048,56 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       />
     ) : null
   );
+  // After an edit to a window that matched others ("like this one": same width, outline and
+  // carried values before the edit), one line offers to apply the changed values to them. The
+  // baseline is the window as selected; Apply moves it to now. Undoing the edit, selecting
+  // something else or applying clears the line; a deleted match drops out of the count.
+  const applySource = selection?.type === 'element' && selectedElement && openingKind(selectedElement) ? selectedElement : undefined;
+  const [applyBase, setApplyBase] = useKeyedState<Element | undefined>(applySource?.id ?? '', applySource);
+  const applyKeys = applyBase && selectedElement && applyBase.id === selectedElement.id ? carryChanges(applyBase, selectedElement) : [];
+  const applyTargets = applyKeys.length ? matchingOpenings(applyBase, allElements) : [];
+  const applyLine = applyTargets.length && selectedElement ? (() => {
+    const noun = openingKind(selectedElement) === 'rooflight' ? 'rooflight' : 'window';
+    const count = applyTargets.length;
+    const label = carryChangeLabel(applyKeys, selectedElement);
+    const others = label.includes(' and ')
+      ? `Apply to ${count} other ${noun}${count === 1 ? '' : 's'}`
+      : count === 1 ? `Apply to the other ${noun} like this one` : `Apply to the ${count} other ${noun}s like this one`;
+    const apply = () => {
+      const store = geometryStore.getState();
+      // The edit is its own undo step; the copies are one more.
+      store.saveToHistory('window edit');
+      for (const target of applyTargets) store.updateElement(target.id, carryPatch(target, selectedElement, applyKeys), true);
+      store.saveToHistory('apply to windows like this one');
+      setApplyBase(selectedElement);
+    };
+    return (
+      <div className="window-apply-line" data-window-apply>
+        <span>{`${label} · ${others}`}</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={apply}>Apply</button>
+      </div>
+    );
+  })() : null;
+
+  // "Edit all 5 windows": every window of this one's kind (rooflights apart, never doors) on
+  // any storey, in the multi-select bulk edit, so shared details are filled once.
+  const editAllKind = selection?.type === 'element' ? openingKind(selectedElement ?? undefined) : null;
+  const editAllIds = editAllKind ? allElements.flatMap((el) => (openingKind(el) === editAllKind ? [el.id] : [])) : [];
+  const windowEditAll = editAllIds.length > 1 && selectedElement ? (
+    <div className="window-edit-all">
+      <button
+        type="button"
+        className="field-source-note__link"
+        onClick={() => {
+          geometryStore.getState().setSelectedElementIds([selectedElement.id, ...editAllIds.filter((id) => id !== selectedElement.id)]);
+          // The canvas's own selection (a host may keep it outside the store).
+          setSelection({ type: 'element', id: selectedElement.id, editAll: true });
+        }}
+      >
+        Edit all {editAllIds.length} {editAllKind === 'rooflight' ? 'rooflights' : 'windows'}
+      </button>
+    </div>
+  ) : null;
 
   const renderAttributePanel = () => {
     const formRenderCtx: ElementFormRenderCtx = {
@@ -4076,6 +4139,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         />
       ) : null,
       thermalValues: windowThermalValues,
+      windowHost: windowWallLink,
+      windowEditAll,
       renderOpeningPartFields: OpeningPartFieldsRenderer && selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent'
         ? (partIndex: number) => (
           <OpeningPartFieldsRenderer
@@ -5187,7 +5252,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                         />
                       </React.Suspense>
                     )}
-                    {windowWallLink}
                   </div>
                 ) : null}
               </div>
@@ -5198,6 +5262,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         {/* Sticky Form Actions */}
         {(selection.type === 'zone' || selection.type === 'element' || selection.type === 'global') && (
           <div className="element-creator-sticky-footer">
+            {selection.type === 'element' ? applyLine : null}
             <div
               className={`form-actions ${
                 selection.type !== 'zone'
@@ -5331,6 +5396,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   const needsBasementDepth =
                     floorTypeForApply === 'Heated_basement' || floorTypeForApply === 'Unheated_basement';
                   const uComputed = computeGroundUValueFromElementModel(el, nextExtra, floorTypeForApply, {
+                    wholeBasement,
                     totalArea: buildingElementGroundFormState.groundTotalAreaManual
                       ? readFiniteNumber(buildingElementGroundFormState.totalAreaInput.value)
                         ?? buildingElementGroundFormState.autoDerivedTotalArea

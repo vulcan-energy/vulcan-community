@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element, Floor, Zone } from '../../geometry/types';
-import { collectGlobalSettingsWarnings, unsetMetadataInputIssues } from '../globalSettingsValidation';
+import { collectGlobalSettingsWarnings, drawnApplianceValue, metadataRowValues, unsetMetadataInputIssues } from '../globalSettingsValidation';
 
 const groundFloorElement = {
   id: 'ground',
@@ -387,5 +387,40 @@ describe('smart meter GUID issues', () => {
       expect(guid({ HasElectricitySmartMeter: false }, root)).toEqual([]);
       expect(guid({ HasElectricitySmartMeter: true }, root)).toEqual(['Global Settings: Smart meter GUID is not set. Enter it in Global Settings.']);
     }
+  });
+});
+
+describe('appliance rows from the drawing', () => {
+  const appliance = (appliancekey: string) => ({ id: appliancekey, type: 'Appliance', appliancekey }) as unknown as Element;
+  const state = (elements: Element[], settings: Record<string, unknown> = {}) => ({
+    zones: [], elementsById: Object.fromEntries(elements.map((e) => [e.id, e])), spaceLabelsById: {}, spaceLabelIds: [], floors: [], elements, complianceSettings: settings,
+  }) as unknown as Parameters<typeof unsetMetadataInputIssues>[0];
+  const rules = { requiredMetadataRows: ['Appliances_has_dryer', 'Appliances_has_dishwasher', 'Appliances_has_separate_fridge_or_freezer'], storeyBuildTypes: [] };
+  const epcRoot = { properties: { General: {}, Appliances: { properties: { has_dryer: {}, has_dishwasher: {}, has_separate_fridge_or_freezer: {} } } } };
+  const row = (s: ReturnType<typeof state>, key: string, root: unknown = epcRoot) => new Map(metadataRowValues(s, root, { storeyBuildTypes: [] })).get(key);
+
+  it('gives Yes for a row whose appliance is drawn, any number of times, and nothing when none is', () => {
+    const drawn = [appliance('Dishwasher'), appliance('Dishwasher'), appliance('Clothes_drying'), appliance('Freezer')];
+    expect(drawnApplianceValue(drawn, 'Appliances_has_dishwasher')).toBe(true);
+    expect(drawnApplianceValue(drawn, 'Appliances_has_dryer')).toBe(true);
+    expect(drawnApplianceValue(drawn, 'Appliances_has_separate_fridge_or_freezer')).toBe(true);
+    // A fridge-freezer is not a separate fridge or freezer: the user states it.
+    expect(drawnApplianceValue([appliance('Fridge-Freezer'), appliance('Oven')], 'Appliances_has_separate_fridge_or_freezer')).toBeUndefined();
+    expect(drawnApplianceValue([], 'Appliances_has_dishwasher')).toBeUndefined();
+  });
+
+  it('saves the drawing\'s Yes for an unset row and raises no issue; the user\'s pick wins', () => {
+    const drawn = state([appliance('Dishwasher')]);
+    expect(row(drawn, 'Appliances_has_dishwasher')).toBe('TRUE');
+    expect(unsetMetadataInputIssues(drawn, epcRoot, {}, rules).filter((issue) => issue.includes('dishwasher'))).toEqual([]);
+    expect(unsetMetadataInputIssues(drawn, epcRoot, {}, rules).filter((issue) => issue.includes('dryer'))).toHaveLength(1);
+    // A target without the row (FHS) or with no schema saves no appliance row.
+    expect(row(drawn, 'Appliances_has_dishwasher', { properties: { General: {} } })).toBeUndefined();
+    expect(row(drawn, 'Appliances_has_dishwasher', null)).toBeUndefined();
+    expect(row(state([appliance('Dishwasher')], { Appliances_has_dishwasher: false }), 'Appliances_has_dishwasher')).toBe('FALSE');
+    // A blank row in the file is answered by the drawing too, as the form shows it.
+    const blank = state([appliance('Dishwasher')], { unreadMetadataRows: { Appliances_has_dishwasher: '' } });
+    expect(row(blank, 'Appliances_has_dishwasher')).toBe('TRUE');
+    expect(unsetMetadataInputIssues(blank, epcRoot, {}, rules).filter((issue) => issue.includes('dishwasher'))).toEqual([]);
   });
 });

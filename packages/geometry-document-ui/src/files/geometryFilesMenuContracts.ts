@@ -143,7 +143,10 @@ export type GeometryFilesMenuProps = Readonly<{
   /** `'host'` lets a host keep its own established confirmation modal. */
   projectDeleteConfirmation?: 'shared' | 'host';
 
-  onNewDocument?: () => void;
+  /** `start` is one of `newDocumentStarts`' ids; undefined when the host offers none. */
+  onNewDocument?: (start?: string) => void;
+  /** The host's starting points for New Model. With them, New Model asks which one first. */
+  newDocumentStarts?: readonly Readonly<{ id: string; label: string }>[];
   onImportCsv?: (files: ArrayLike<File>) => void;
   onOpenPortable?: (files: ArrayLike<File>) => void;
   onDownloadCsv?: () => void;

@@ -6,7 +6,8 @@
 //! type when the element states no fabric value of its own; the merged model holds them as
 //! ordinary element values. A preset is for FHS or for HEM:EPC new build (`family`); a preset for
 //! the other family is not used. An existing building takes its fabric from the age band and
-//! constructions, so a preset there is an error. The rules match the editor's
+//! constructions, so a preset there is not used either; it stays in the file for a switch back
+//! to new build, and the Fabric tab lists it as not used. The rules match the editor's
 //! `lib/fabricPreset.ts`.
 
 use crate::builder::BuildError;
@@ -184,12 +185,9 @@ pub(crate) fn read(
         )));
     }
     let values = parse_values(&name, json.get("values"))?;
-    if existing_building && profile.converts_existing_buildings_to_hemie() {
-        return Err(invalid(format!(
-            "The model has the fabric preset \"{name}\", but an existing building takes its fabric from the age band and constructions. Remove the preset in Global Settings > Fabric."
-        )));
-    }
-    if family != Some(profile.fabric_preset_family()) {
+    if family != Some(profile.fabric_preset_family())
+        || (existing_building && profile.converts_existing_buildings_to_hemie())
+    {
         return Ok(None);
     }
     Ok(Some(FabricPreset { name, values }))
@@ -315,8 +313,10 @@ mod tests {
         assert!(read(&csv(preset("epc"), false), ModelProfile::Epc, false)
             .unwrap()
             .is_some());
-        let error = read(&csv(preset("epc"), true), ModelProfile::Epc, true).unwrap_err();
-        assert_eq!(error.code, "E068");
+        // An existing building does not use it; the row stays for a switch back to new build.
+        assert!(read(&csv(preset("epc"), true), ModelProfile::Epc, true)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

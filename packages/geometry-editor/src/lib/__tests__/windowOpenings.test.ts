@@ -11,6 +11,7 @@ import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/
 import {
   closeShadingKindOf,
   closeShadingOptions,
+  commonCloseShadingOptions,
   buildAddWindowOpeningPatch,
   windowOpeningBulkEditBlocked,
   windowPartsCopyBlocked,
@@ -394,6 +395,14 @@ describe('window close shading', () => {
     expect(values(0.6)).toEqual(['common roof', 'common open porch', 'small fixed canopy', 'balcony']);
     expect(values(2)).toEqual(['common roof', 'common open porch', 'large canopy', 'balcony']);
     expect(values()).toEqual(['common roof', 'common open porch', 'small fixed canopy', 'large canopy', 'balcony']);
+  });
+
+  it('bulk edit offers only the canopy bands every selected window allows', () => {
+    const overhang = (parent: string, depth: number) => ({ id: parent + 'o', name: parent + 'o', type: 'WindowShading', shading_type: 'overhang', parent_element: parent, depth }) as unknown as Element;
+    const elements = [overhang('A', 0.6), overhang('B', 2)];
+    const values = (names: string[]) => commonCloseShadingOptions(elements, names, 'overhang').map((option) => option.value);
+    expect(values(['A', 'C'])).toEqual(['common roof', 'common open porch', 'small fixed canopy', 'balcony']);
+    expect(values(['A', 'B'])).toEqual(['common roof', 'common open porch', 'balcony']);
   });
 
   it('maps drawn Window Shading types to the window field beside them', () => {

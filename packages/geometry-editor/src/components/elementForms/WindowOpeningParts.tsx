@@ -7,6 +7,7 @@ import {
   buildAddWindowOpeningPatch,
   buildRemainingOpeningPatch,
   classifyWindowOpenings,
+  SECURITY_RISK_OPTIONS,
   windowOpeningsUseTable,
   type WindowOpeningField,
   type WindowOpeningPatch,
@@ -101,10 +102,6 @@ export function WindowOpeningParts({ source, commit, renderPartFields, openingKe
   </>;
 }
 
-const SECURITY_RISK_OPTIONS = [
-  { value: 'true', label: 'Yes · cannot be left open at night' },
-  { value: 'false', label: 'No · can be left open at night' },
-];
 
 /**
  * The window's `security_risk`, as stored: the store keeps the storey default until the user picks one.

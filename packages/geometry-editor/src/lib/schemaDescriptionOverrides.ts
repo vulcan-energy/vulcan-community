@@ -1581,7 +1581,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'm²·K/W',
   },
   'thermal_resist_walls_base': {
-    description: 'Thermal resistance of basement walls below ground, excluding surface resistances (unit: m²·K/W). Required by HEM for basement floor types; Vulcan also uses it in the unheated-basement steady u_value helper.',
+    description: 'Thermal resistance of basement walls below ground, excluding surface resistances (unit: m²·K/W). Required by HEM for basement floor types; Vulcan also uses it in the floor calculation of the u_value of an unheated basement, and of a heated basement on HEM:EPC.',
     type: 'number',
     units: 'm²·K/W',
   },

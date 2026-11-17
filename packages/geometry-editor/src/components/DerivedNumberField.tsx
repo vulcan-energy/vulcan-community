@@ -52,9 +52,8 @@ export type DerivedNumberFieldProps = {
  * into a draft-safe `type="text"` with `inputmode="decimal"`, and both attributes are inert on a
  * text input. Do not rely on them to reject anything.
  *
- * The two ventilation-zone heights are deliberately not built on this. They carry an extra
- * mismatch warning block and different parse/tolerance rules, so they want their own follow-up
- * rather than more props here.
+ * Only the HEM:EPC layout's zone height is built on this. The other layout's two ventilation-zone
+ * heights carry an extra mismatch warning block and different parse/tolerance rules.
  */
 export function DerivedNumberField({
   label,

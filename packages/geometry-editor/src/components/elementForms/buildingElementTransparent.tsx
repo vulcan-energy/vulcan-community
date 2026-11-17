@@ -158,12 +158,12 @@ import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import { calculateDerivedWindowMidHeight } from '../../lib/zoneDerivation';
-import { lineFaceEnvelope } from '../../lib/profileLineFace';
+import { areaRepeatsSize, lineFaceEnvelope } from '../../lib/profileLineFace';
 import {
   buildSlopedPolygonRectangleDimensionPatch,
   slopedPolygonNeedsRectangleRebuild,
 } from '../../lib/slopedElementDimensions';
-import { DerivedSource, ParentSourceNote, Readout, SourceNote } from '../FieldSource';
+import { DerivedSource, Readout, SourceNote } from '../FieldSource';
 import { isOverridden } from '../../lib/fieldSource';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
@@ -183,7 +183,7 @@ import { renderWallPitchField } from './wallPitchField';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import { CloseShadingFields } from './CloseShadingFields';
 import { SecurityRiskField, WindowOpeningParts } from './WindowOpeningParts';
-import { isExistingBuilding } from '../../lib/windowOpenings';
+import { isExistingBuilding, windowTargetInputs, type CloseShadingKind, type WindowTargetInput } from '../../lib/windowOpenings';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import {
@@ -211,8 +211,8 @@ import type {
 // see that file's own comment.
 
 export interface BuildingElementTransparentFormState {
-  /** An existing-building model: the window's close-shading categories show. */
-  closeShadingExisting: boolean;
+  /** The per-window inputs the target takes (windowTargetInputs), as multi-select offers them. */
+  windowInputs: readonly WindowTargetInput[];
   /** The target takes an existing building's description: opening type is stated, FHS opening inputs are not. */
   constructionBands: boolean;
   /** The active schema's window parts are physical openings (a8/a9). */
@@ -277,6 +277,7 @@ function displayedOpeningValues(
 }
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormState {
+  const { constructionBands } = useTargetRules();
   const windowPartsPhysical = windowPartsArePhysical(ctx.schemaPort, ctx.schemaMode) === true;
   const isExistingElementSelection = (): boolean =>
     !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
@@ -466,8 +467,8 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementTransparentFormS
   ]);
 
   return {
-    closeShadingExisting: useGeometryStore(isExistingBuilding),
-    constructionBands: useTargetRules().constructionBands,
+    windowInputs: windowTargetInputs(constructionBands, useGeometryStore(isExistingBuilding)),
+    constructionBands,
     windowPartsPhysical,
     commitOpeningField,
     widthInput: ctx.shared.widthInput,
@@ -635,15 +636,37 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
       ? `${windowOpeningRepairMessages(openings).join('. ')}${openings.reason === 'conflicting_heights' ? ' Entering a mid height replaces the parts with one opening.' : ''}`
       : null;
 
+    // A window in a wall: width, height and sill in one row. A hosted window's pitch and
+    // orientation are its wall's ("On Wall (S) · faces S"), so only a free one shows them.
+    const lineWindow = selectedElement?.type === 'BuildingElementTransparent' && selectedElement.coordinates?.length === 2;
+    const hosted = !!state.parentElement;
+    const baseHeightInput = (
+      <StandardInput
+        {...decimalInputProps(state.baseHeightInput)}
+        unit={fieldUnit('base_height')}
+        step="0.01"
+        min="0"
+        variant="ghost"
+        size="md"
+        className={lineWindow ? 'flex-1' : undefined}
+        aria-label={lineWindow ? 'Sill' : undefined}
+      />
+    );
     return (
       <>
+        {ctx.windowHost}
         {selectedShape !== 'polygon' && (
           renderLinearDimensionsFields(registerBaseFieldRef, {
             widthStep: '0.01',
             heightStep: '0.01',
             includeWallShape: true,
+            sill: lineWindow ? {
+              label: renderFieldLabel('Sill (m):', elementType, 'base_height'),
+              field: baseHeightInput,
+            } : undefined,
           })
         )}
+        {ctx.windowEditAll}
         {showSlopedTransparentRebuildOpening ? (
           <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <button
@@ -655,14 +678,16 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             </button>
           </div>
         ) : null}
-        {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
-        <div className="element-input" ref={registerBaseFieldRef('area')}>
-          <Readout
-            value={formatToTwoDecimals(selectedShape === 'polygon' ? derivedPolygonArea : liveRectArea)}
-            unit={fieldUnit('area')}
-            label="Area"
-          />
-        </div>
+        {!areaRepeatsSize(selectedElement, selectedShape) && <>
+          {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}
+          <div className="element-input" ref={registerBaseFieldRef('area')}>
+            <Readout
+              value={formatToTwoDecimals(selectedShape === 'polygon' ? derivedPolygonArea : liveRectArea)}
+              unit={fieldUnit('area')}
+              label="Area"
+            />
+          </div>
+        </>}
         {!openingsInTable && !state.constructionBands && <>
         {state.openingPart ? <>
           <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Part that opens</div>
@@ -770,7 +795,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           <WindowOpeningParts source={windowSource} commit={(patch) => commitExistingElementDraft(patch as Partial<Element>)}
             renderPartFields={renderOpeningPartFields} openingKeys={openingPartKeys} />
         )}
-        {selectedElement?.type === 'BuildingElementTransparent' && (state.constructionBands || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
+        {selectedElement?.type === 'BuildingElementTransparent' && (state.windowInputs.includes('opening_type') || isConservatoryGlazing(selectedElement, ctx.elementsById)) ? (
           <>
             <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Opening type</div>
             {isConservatoryGlazing(selectedElement, ctx.elementsById) ? (
@@ -782,7 +807,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
                   })}
                   options={[
                     { value: '', label: 'Closed (default)' },
-                    { value: 'closed', label: 'Closed' },
+                    // The converter takes blank as closed; an older file's stated "closed" still shows.
+                    ...(conservatoryGlazingOpeningType(selectedElement) === 'closed' ? [{ value: 'closed', label: 'Closed' }] : []),
                     { value: 'half opening top', label: 'Half opening (top)' },
                     { value: 'top third opening', label: 'Third opening (top)' },
                   ]}
@@ -907,7 +933,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             size="md"
           />
         </div>
-        {renderWallPitchField(
+        {!hosted && renderWallPitchField(
           {
             pitch: state.pitch,
             setPitch: state.setPitch,
@@ -940,21 +966,10 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             </div>
           </>
         ) : null}
-        {renderFieldLabel(
-          'Orientation (degrees):',
-          elementType,
-          'orientation360',
-          state.parentElement ? <ParentSourceNote parentName={state.parentElement} zoneId={ctx.selectedElement?.zoneId} ctx={ctx} /> : undefined,
-        )}
+        {!hosted && renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
+        {!hosted && (
         <div className="element-input" ref={registerBaseFieldRef('orientation360')}>
-          {state.parentElement ? (
-            // A window faces the way its wall does: HEM takes no other value.
-            <Readout
-              value={Number.isFinite(state.orientation360) ? state.orientation360 : state.getCurrentOrientation(currentElementForOrientationFallback() as Element)}
-              unit={fieldUnit('orientation360')}
-              label="Orientation"
-            />
-          ) : (
+          {(
             <StandardInput
               type="text"
               inputMode="numeric"
@@ -974,19 +989,15 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             />
           )}
         </div>
-        {renderFieldLabel(`${resolveFieldLabelContent('base_height')} (m):`, elementType, 'base_height')}
-        <div className="element-input" ref={registerBaseFieldRef('base_height')}>
-          <StandardInput
-            {...decimalInputProps(state.baseHeightInput)}
-            unit={fieldUnit('base_height')}
-            step="0.01"
-            min="0"
-            variant="ghost"
-            size="md"
-          />
-        </div>
-        {selectedElement?.name && state.closeShadingExisting && (
-          <CloseShadingFields windowName={selectedElement.name} elementsById={ctx.elementsById} updateElement={ctx.updateElement} />
+        )}
+        {!(lineWindow && selectedShape !== 'polygon') && <>
+          {renderFieldLabel(`${resolveFieldLabelContent('base_height')} (m):`, elementType, 'base_height')}
+          <div className="element-input" ref={registerBaseFieldRef('base_height')}>
+            {baseHeightInput}
+          </div>
+        </>}
+        {selectedElement?.name && state.windowInputs.some((input) => input !== 'opening_type') && (
+          <CloseShadingFields windowName={selectedElement.name} kinds={state.windowInputs.filter((input): input is CloseShadingKind => input !== 'opening_type')} elementsById={ctx.elementsById} updateElement={ctx.updateElement} />
         )}
       </>
     );

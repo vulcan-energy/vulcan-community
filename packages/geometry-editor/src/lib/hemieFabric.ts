@@ -573,6 +573,17 @@ export function parseHemieConstruction(cell: string | undefined): Record<string,
   }
 }
 
+/**
+ * Whether a window is double glazed, as the converter asks before it needs the double glazing
+ * installation period (`double_glazed` in hemie.rs): a window's own glazing type, else the window
+ * construction's.
+ */
+export function hasDoubleGlazedWindow(elements: readonly Element[], settings: Readonly<Record<string, string>> | undefined): boolean {
+  const construction = parseHemieConstruction(settings?.[hemieConstructionSetting('window')]);
+  return elements.some((element) => !element.isPlaceholder && hemieConstructionType(element, elements) === 'window'
+    && (hemieElementValue(element, 'glazing_type') ?? construction?.glazing_type) === 'double');
+}
+
 export type HemieFabric = Readonly<{
   constructionType: string;
   /** The element's age band: its own, its host wall's (an opening), else the Defaults'. */

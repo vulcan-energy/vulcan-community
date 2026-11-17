@@ -795,8 +795,6 @@ struct Ctx<'a> {
     errors: Vec<ValidationError>,
     notices: Vec<SchemaOmission>,
     model: &'a Value,
-    /// Windows that state no close-shading category and have no drawn shading.
-    unshaded_windows: Vec<String>,
 }
 
 impl Ctx<'_> {
@@ -1134,7 +1132,7 @@ impl Ctx<'_> {
                 ));
             } else {
                 // The half-stated pair is the fabric default's.
-                self.errors.push(error("CONSTRUCTION", format!("/Metadata/{SETTING}construction_{construction_type}"), format!("The {} fabric default states only part of the outside surface: {fix}, in Global Settings > Defaults > Fabric.", construction_type.replace('_', " "))));
+                self.errors.push(error("CONSTRUCTION", format!("/Metadata/{SETTING}construction_{construction_type}"), format!("The {} fabric default states only part of the outside surface: {fix}, in Global Settings > Fabric.", construction_type.replace('_', " "))));
             }
         }
         self.require(construction_type, &mut c);
@@ -1539,7 +1537,6 @@ fn convert_existing_building(
         errors: Vec::new(),
         notices: Vec::new(),
         model: &snapshot,
-        unshaded_windows: Vec::new(),
     };
     systems::check_vents(&mut ctx);
     let converted = convert(&mut ctx, csv);
@@ -1622,10 +1619,6 @@ fn convert_existing_building(
                 needs_evidence.into_iter().collect::<Vec<_>>().join(", ")
             ),
         ));
-    }
-    let unshaded = std::mem::take(&mut ctx.unshaded_windows);
-    if !unshaded.is_empty() {
-        notices.push(notice("/Zone", format!("These windows state no close shading, so they have none: {}. To add it, choose the overhang, side fins or balcony front on the window.", unshaded.join(", "))));
     }
     let set_aside = std::mem::take(&mut ctx.constructions.heat_capacity_set_aside);
     if !set_aside.is_empty() {
@@ -2372,7 +2365,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 json!(storey as f64 * STOREY_BELOW),
             );
         }
-        (None, None) => ctx.errors.push(error("STOREYS", "/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or storey of dwelling, which the existing-building EPC needs. Give the ventilation zone base height in Global Settings > Ventilation Environment, or the storey of dwelling in Dwelling Details.".into())),
+        (None, None) => ctx.errors.push(error("STOREYS", "/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or storey of dwelling, which the existing-building EPC needs. Give the ventilation zone base height in Global Settings > Ventilation environment, or the storey of dwelling in Dwelling details.".into())),
     }
     // DESNZ-defined: a part's base height defaults to the dwelling's; a part that starts higher
     // states its own. With no dwelling base the error is already reported, so 0 stands in.
@@ -2529,7 +2522,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
 /// One missing model setting in the words of the editor's fabric defaults (Global Settings,
 /// Defaults, Fabric); a row with no editor field yet is named.
 fn missing_setting_message(row: &str, fields: &BTreeSet<String>) -> String {
-    const WHERE: &str = "Global Settings > Defaults > Fabric";
+    const WHERE: &str = "Global Settings > Fabric";
     let words = |s: &str| s.replace('_', " ");
     if let Some(t) = row.strip_prefix(&format!("{SETTING}construction_")) {
         let t = words(t);
@@ -2555,7 +2548,7 @@ fn front_door<'e>(ctx: &mut Ctx, doors: &[&'e El<'e>]) -> Option<&'e El<'e>> {
     let names = |doors: &[&El]| quoted(&doors.iter().map(|d| d.name).collect::<Vec<_>>());
     match (marked.as_slice(), doors) {
         ([front], _) => Some(front),
-        // The editor shows the only door as the front door.
+        // The only door needs no mark.
         ([], [only]) => Some(only),
         ([], []) => {
             ctx.errors.push(error("FRONT_DOOR", "/Zone".into(), "The model has no door. The reference building part is the one with the front door; draw the front door.".into()));
@@ -2632,9 +2625,6 @@ fn window(ctx: &mut Ctx, e: &El, in_external_element: bool) -> Option<Value> {
         w["is_security_risk"] = json!(risk);
     }
     shading::close(ctx, e, &mut w);
-    if shading::states_no_close_shading(ctx, e, &w) {
-        ctx.unshaded_windows.push(e.name.to_string());
-    }
     Some(w)
 }
 
@@ -3455,18 +3445,11 @@ fn infiltration(
             Some(v) => {
                 iv.insert(key.into(), v.clone());
             }
-            None if required => {}
+            // The noise nuisance field shows "No (default)".
+            None if required || key == "noise_nuisance" => {}
             None => ctx.notices.push(notice(
                 &format!("/InfiltrationVentilation/{key}"),
-                format!(
-                    "No {} is given, so it uses the default: {}.",
-                    key.replace('_', " "),
-                    if key == "shield_class" {
-                        "from the terrain class"
-                    } else {
-                        "No"
-                    }
-                ),
+                "No shield class is given, so it uses the default: from the terrain class.".into(),
             )),
         }
     }
@@ -3489,7 +3472,7 @@ fn infiltration(
                     "AIR_TEST",
                     format!("/InfiltrationVentilation/Leaks/{key}"),
                     format!(
-                        "The air test states no {}. Enter it in Global Settings > Air Tightness.",
+                        "The air test states no {}. Enter it in Global Settings > Air tightness.",
                         key.replace('_', " ")
                     ),
                 )),
@@ -3504,10 +3487,10 @@ fn infiltration(
         Some(v) => {
             out.insert("ventilation_zone_height".into(), v.clone());
         }
+        // The editor shows the derived height in the field.
         None => {
             let height = (drawn_height * 1000.0).round() / 1000.0;
             out.insert("ventilation_zone_height".into(), json!(height));
-            ctx.notices.push(notice("/InfiltrationVentilation/Leaks/ventilation_zone_height", format!("No ventilation zone height is given, so the existing-building EPC uses the drawn height of the dwelling's storeys, {height} m; a room in the roof is not counted. Give it in Global Settings > Ventilation Environment to state it.")));
         }
     }
     // Derived from the model: the envelope area of the drawn elements. The schema requires it
@@ -3726,7 +3709,6 @@ fn leakage_estimate_inputs(ctx: &mut Ctx, double_glazed: bool) -> Value {
             None => ctx.errors.push(error("AIR_TEST", path(HEAT_LOSS_CORRIDOR), "No air test is stated. For a flat or maisonette, enter the heat loss corridor in Global Settings > Air tightness.".into())),
         }
     }
-    ctx.notices.push(notice("/InfiltrationVentilation/Leaks", "Airtightness: estimated (no air test). HEM:EPC estimates it from the dwelling's construction, age, glazing and open fireplaces.".into()));
     Value::Object(properties)
 }
 
@@ -3983,7 +3965,8 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             model["InfiltrationVentilation"]["Leaks"]["ventilation_zone_height"],
             5.35
         );
-        assert!(notices
+        // The editor shows the derived height in the field: no notice repeats it.
+        assert!(!notices
             .iter()
             .any(|n| n.path.ends_with("ventilation_zone_height")));
         // Each storey's ceiling is its wall height less the floor zone, reported.
@@ -4519,9 +4502,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert!(tested["InfiltrationVentilation"]
             .get("shield_class")
             .is_none());
-        for key in ["shield_class", "noise_nuisance"] {
-            assert!(notices.iter().any(|n| n.path.ends_with(key)), "{key}");
-        }
+        // Noise nuisance shows "No (default)" on its field; the shield class is reported.
+        assert!(notices.iter().any(|n| n.path.ends_with("shield_class")));
+        assert!(!notices.iter().any(|n| n.path.ends_with("noise_nuisance")));
         // No air test: HEMIE estimates the leakage from the assessor's open fireplaces (E17);
         // without them, one error names the row.
         model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
@@ -4542,9 +4525,10 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             json!({"number_of_open_fireplaces": 1})
         );
         assert!(leaks.get("test_result").is_none() && leaks["ventilation_zone_height"].is_number());
-        assert!(notices.iter().any(|n| n
-            .message
-            .starts_with("Airtightness: estimated (no air test).")));
+        // Air tightness says it is estimated, with the estimate inputs: no notice repeats it.
+        assert!(!notices
+            .iter()
+            .any(|n| n.message.starts_with("Airtightness:")));
     }
 
     #[test]
@@ -4590,7 +4574,6 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             errors: Vec::new(),
             notices: Vec::new(),
             model: &snapshot,
-            unshaded_windows: Vec::new(),
         };
         leakage_estimate_inputs(&mut ctx, true);
         assert!(ctx
@@ -4775,7 +4758,6 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 errors: Vec::new(),
                 notices: Vec::new(),
                 model: &model,
-                unshaded_windows: Vec::new(),
             };
             let keys: Vec<(&str, String)> = order
                 .into_iter()

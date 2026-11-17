@@ -11,9 +11,11 @@ import {
   DEFAULT_BASEMENT_VENTILATION_RATE_ACH,
   DEFAULT_WIND_SPEED_MPS_GROUND_U,
   GROUND_FLOOR_TYPE_LABELS,
+  groundUWholeBasement,
   parseWindShieldLocation,
 } from '../lib/groundFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
+import { useTargetRules } from '../hooks/useTargetRules';
 
 export interface GroundUValueCalculatorApplyPatch {
   u_value: number;
@@ -54,6 +56,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
   const initialWindInput = String(
     readFinite(advancedFieldsData?.wind_speed_mps) ?? DEFAULT_WIND_SPEED_MPS_GROUND_U,
   );
+  const wholeBasement = groundUWholeBasement(useTargetRules());
   const [windInput, setWindInput] = useKeyedState(
     `${isOpen ? 'open' : 'closed'}\0${initialWindInput}`,
     initialWindInput,
@@ -101,6 +104,17 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
           }
         : undefined;
 
+    const edgeEntries = advancedFieldsData?.edge_insulation ?? currentData?.edge_insulation;
+    // Each entry's thickness: stated, or 'from conductivity' when a conductivity gives it; null when the calculation cannot read the entry.
+    const edgeThicknesses = (Array.isArray(edgeEntries) ? edgeEntries : []).map((entry: unknown): string | null => {
+      const e = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+      // As the floor calculation reads it: a resistance with a thickness or conductivity, or a
+      // thickness with a conductivity.
+      const positive = (key: string) => { const n = readFinite(e[key]); return n != null && n > 0 ? n : null; };
+      const [r, thickness, conductivity] = [positive('edge_thermal_resistance'), positive('thickness'), positive('thermal_conductivity')];
+      if (thickness != null && (r != null || conductivity != null)) return `${thickness.toFixed(3)} m`;
+      return r != null && conductivity != null ? 'from conductivity' : null;
+    });
     const isBasementFloor =
       floorType === 'Heated_basement' || floorType === 'Unheated_basement';
     const isUnheatedBasementFloor = floorType === 'Unheated_basement';
@@ -124,7 +138,20 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
               label: 'Basement floor depth below ground',
               ok: depthBasementFloorM != null && depthBasementFloorM > 0,
             },
+            // The heated basement's walls below ground count only where the target weights them in.
+            ...(isUnheatedBasementFloor || wholeBasement
+              ? [{
+                  key: 'thermal_resist_walls_base',
+                  label: 'Basement wall R below ground',
+                  ok: thermalResistanceBasementWalls != null && thermalResistanceBasementWalls >= 0,
+                }]
+              : []),
           ]
+        : []),
+      // Annex D takes off the ground each edge insulation replaces, so it needs its thickness
+      // (or its conductivity, which gives the thickness from the resistance).
+      ...(floorType === 'Slab_edge_insulation'
+        ? [{ key: 'edge_insulation_thickness', label: 'Edge insulation thickness', ok: edgeThicknesses.every((t) => t != null) }]
         : []),
       ...(isUnheatedBasementFloor
         ? [
@@ -142,11 +169,6 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
               key: 'height_basement_walls',
               label: 'Basement wall height above ground',
               ok: heightBasementWalls != null && heightBasementWalls > 0,
-            },
-            {
-              key: 'thermal_resist_walls_base',
-              label: 'Basement wall R below ground',
-              ok: thermalResistanceBasementWalls != null && thermalResistanceBasementWalls >= 0,
             },
           ]
         : []),
@@ -176,6 +198,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
     const canCalculate = required.every((item) => item.ok);
     const computedU = computeGroundUValueFromElementModel(currentData, advancedFieldsData, subtype, {
       windInput,
+      wholeBasement,
     });
 
     const fmt = (n: number | null | undefined, decimals: number, suffix: string): string =>
@@ -213,6 +236,9 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
           break;
         case 'thermal_resist_walls_base':
           value = fmt(thermalResistanceBasementWalls, 3, ' m²K/W');
+          break;
+        case 'edge_insulation_thickness':
+          value = edgeThicknesses.length ? edgeThicknesses.map((t) => t ?? '—').join(', ') : '—';
           break;
         case 'height_upper_surface':
           value = fmt(suspendedInputs?.heightUpperSurface, 3, ' m');
@@ -292,7 +318,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
       windParsed,
       rgParsed,
     };
-  }, [currentData, advancedFieldsData, subtype, windInput]);
+  }, [currentData, advancedFieldsData, subtype, windInput, wholeBasement]);
 
   if (!isOpen || typeof document === 'undefined') return null;
 
@@ -315,11 +341,16 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
                 (and <code style={{ fontSize: 11 }}>wind_speed_mps</code> below). Thermal resistance insulation (under
                 void) is read from Advanced Fields — including when set by the assembly calculator.
               </>
+            ) : model.floorType === 'Heated_basement' && wholeBasement ? (
+              <>
+                {' '}
+                The basement floor (BS EN ISO 13370 §7.3.2) and the basement walls below ground (§7.3.3), weighted by
+                their areas. The walls below ground are part of this U-value.
+              </>
             ) : model.floorType === 'Heated_basement' ? (
               <>
                 {' '}
-                The basement floor by BS EN ISO 13370 §7.3.2, with half the{' '}
-                <code style={{ fontSize: 11 }}>depth_basement_floor</code> added to its equivalent thickness (BR 443 §10.1).
+                The basement floor (BS EN ISO 13370 §7.3.2). The basement walls are entered as walls.
               </>
             ) : model.floorType === 'Unheated_basement' ? (
               <>

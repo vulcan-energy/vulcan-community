@@ -101,6 +101,26 @@ describe('shared Geometry Files menu', () => {
     expect(onDeleteDocument).not.toHaveBeenCalledWith(documents[0]);
   });
 
+  it('New Model with host starts asks which start, then creates it', () => {
+    const onNewDocument = vi.fn();
+    render(<GeometryFilesMenu {...defaultProps} onNewDocument={onNewDocument}
+      newDocumentStarts={[{ id: 'a', label: 'Start A' }, { id: 'b', label: 'Start B' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Files menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Model' }));
+    expect(onNewDocument).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Start B' }));
+    expect(onNewDocument).toHaveBeenCalledWith('b');
+    expect(screen.queryByRole('button', { name: 'Start A' })).not.toBeInTheDocument();
+  });
+
+  it('New Model with no host starts creates the model at once', () => {
+    const onNewDocument = vi.fn();
+    render(<GeometryFilesMenu {...defaultProps} onNewDocument={onNewDocument} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Files menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Model' }));
+    expect(onNewDocument).toHaveBeenCalledOnce();
+  });
+
   it('searches case-insensitively and distinguishes a filtered empty result', () => {
     renderMenu();
     const search = screen.getByRole('textbox', { name: 'Search models' });

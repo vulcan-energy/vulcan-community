@@ -529,20 +529,6 @@ pub(super) fn close(ctx: &mut Ctx, e: &El, w: &mut Value) {
     }
 }
 
-/// The window states no close-shading category and has no drawn Window Shading: it has none.
-pub(super) fn states_no_close_shading(ctx: &Ctx, e: &El, w: &Value) -> bool {
-    ["overhang", "side_fin_left", "side_fin_right", "obstacle"]
-        .iter()
-        .all(|field| w.get(*field).is_none())
-        && !ctx
-            .settings
-            .csv
-            .get("Window Shading")
-            .into_iter()
-            .flatten()
-            .any(|r| text(r, &["linked_window"]) == Some(e.name))
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::tests::{box_walls, csv, gable_roof, ground, house, run, BOX, SETTINGS};

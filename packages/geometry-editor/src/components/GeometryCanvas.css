@@ -870,6 +870,22 @@
   font-size: var(--font-size-xs);
 }
 
+/* "Next window: …" under the draw toolbar: what the next window takes, with Clear. */
+.draw-carry-chip.overlay-drawtoolbar {
+  padding: 6px 8px 6px 12px;
+  gap: 10px;
+  white-space: normal;
+  max-width: 460px;
+}
+
+.draw-carry-chip__text {
+  padding: 4px 8px;
+  border: 1px solid var(--accent-primary);
+  border-radius: 6px;
+  background: var(--accent-primary-alpha, transparent);
+  line-height: 1.4;
+}
+
 .view-mode-segment {
   display: inline-flex;
   flex-shrink: 0;
@@ -3163,13 +3179,11 @@
   justify-content: flex-start;
 }
 
+/* The operations wrap onto a second line rather than scroll: no button is cut at the edge. */
 .multi-select-geometry-row {
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
   margin-bottom: 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--surface-control-active);
@@ -3178,10 +3192,10 @@
 
 .multi-select-geometry-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -3201,7 +3215,7 @@
 }
 
 .element-creator-sticky-footer .form-actions .multi-select-geometry-action {
-  flex: 0 0 118px;
+  flex: 0 0 auto;
 }
 
 .multi-select-operation-group {
@@ -3549,4 +3563,9 @@
 .canvas-decoration-accessibility__list button:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
+}
+
+/* A long "Mixed: …" placeholder ends in an ellipsis rather than a cut character. */
+.multi-select-row__control input {
+  text-overflow: ellipsis;
 }

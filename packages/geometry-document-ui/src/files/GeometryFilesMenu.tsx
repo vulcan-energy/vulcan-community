@@ -64,6 +64,7 @@ export function GeometryFilesMenu({
   onDeleteProject,
   projectDeleteConfirmation = 'shared',
   onNewDocument,
+  newDocumentStarts,
   onImportCsv,
   onOpenPortable,
   onDownloadCsv,
@@ -80,6 +81,7 @@ export function GeometryFilesMenu({
   const [isOpen, setIsOpen] = useState(false);
   const [isPositioned, setIsPositioned] = useState(false);
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+  const [startsShown, setStartsShown] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -100,6 +102,7 @@ export function GeometryFilesMenu({
   const closeMenuWithoutFocus = useCallback(() => {
     setIsOpen(false);
     setIsProjectMenuOpen(false);
+    setStartsShown(false);
     if (search === undefined) setSearchQuery('');
     else onSearchChange?.('');
     setEditingProjectId(null);
@@ -834,14 +837,38 @@ export function GeometryFilesMenu({
       onDownloadPortable || onImportCad ? (
         <>
           <div className="files-dropdown-divider" />
+          {onNewDocument && startsShown && newDocumentStarts ? (
+            <div className="files-dropdown-footer" style={{ gridTemplateColumns: `repeat(${newDocumentStarts.length}, minmax(0, 1fr))` }}>
+              {newDocumentStarts.map((start) => (
+                <button
+                  key={start.id}
+                  type="button"
+                  className="files-dropdown-new-btn"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (isBusy) return;
+                    onNewDocument(start.id);
+                    closeMenu();
+                  }}
+                >
+                  {start.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="files-dropdown-footer">
             {onNewDocument ? (
               <button
                 type="button"
                 className="files-dropdown-new-btn files-dropdown-new-btn--primary"
                 disabled={isBusy}
+                aria-expanded={newDocumentStarts?.length ? startsShown : undefined}
                 onClick={() => {
                   if (isBusy) return;
+                  if (newDocumentStarts?.length) {
+                    setStartsShown((shown) => !shown);
+                    return;
+                  }
                   onNewDocument();
                   closeMenu();
                 }}

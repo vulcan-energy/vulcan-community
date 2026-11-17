@@ -11,6 +11,11 @@ export function openFabricTab(field: string = FABRIC_TAB_FIELD): void {
   window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
 }
 
+/** Opens the floor picker, where a storey's base and height are typed. */
+export function openFloorPicker(): void {
+  window.dispatchEvent(new CustomEvent('open-floor-picker'));
+}
+
 /** Rounds for display only: at most three decimals, no trailing zeros. */
 export function formatSourceValue(value: number): string {
   return String(Number(value.toFixed(3)));

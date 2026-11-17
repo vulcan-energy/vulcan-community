@@ -16,7 +16,7 @@ it('offers the methods each target takes', () => {
   expect(thermalMethods('BuildingElementOpaque', true).map((m) => m.label)).toEqual(['Age band', 'Calculation', 'U-value']);
   expect(thermalMethods('BuildingElementOpaque', false).map((m) => m.label)).toEqual(['U-value', 'Layers']);
   expect(thermalMethods('BuildingElementGround', false).map((m) => m.label)).toEqual(['U-value', 'Calculation']);
-  expect(thermalMethods('BuildingElementTransparent', true).map((m) => m.label)).toEqual(['Age band', 'U-value']);
+  expect(thermalMethods('BuildingElementTransparent', true).map((m) => m.label)).toEqual(['Glazing description', 'U and g']);
   expect(thermalMethods('BuildingElementTransparent', false)).toEqual([]);
   expect(thermalMethods('BuildingElementPartyWall', true)).toEqual([]);
   // No calculated U-value (incomplete drawing): an existing building's floor offers no calculation.

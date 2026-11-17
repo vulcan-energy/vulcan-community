@@ -48,6 +48,8 @@ export type GeometryDocumentHostResult =
 export type GeometryDocumentHostNewRequest = Readonly<{
   contents?: GeometryDocumentInput;
   dirtyDecision?: GeometryDocumentDirtyDecision;
+  /** A host-defined starting point for an empty document (the Files menu's `newDocumentStarts` id). */
+  start?: string;
 }>;
 
 export type GeometryDocumentHostOpenRequest = Readonly<{
@@ -169,11 +171,16 @@ function captureNewRequest(value: unknown): GeometryDocumentHostNewRequest {
   const candidate = value as GeometryDocumentHostNewRequest;
   const contents = candidate.contents;
   const dirtyDecision = captureDirtyDecision(candidate.dirtyDecision);
+  const start = candidate.start;
+  if (start !== undefined && typeof start !== 'string') {
+    throw new TypeError('Geometry document new start must be a string');
+  }
   return Object.freeze({
     ...(contents === undefined
       ? {}
       : { contents: captureGeometryDocumentContents(contents) }),
     ...(dirtyDecision === undefined ? {} : { dirtyDecision }),
+    ...(start === undefined ? {} : { start }),
   });
 }
 

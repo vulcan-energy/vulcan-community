@@ -1,0 +1,39 @@
+diff --git a/src/EnergyPlus/AirflowNetwork/src/Elements.cpp b/src/EnergyPlus/AirflowNetwork/src/Elements.cpp
+index b838093..34946c4 100644
+--- a/src/EnergyPlus/AirflowNetwork/src/Elements.cpp
++++ b/src/EnergyPlus/AirflowNetwork/src/Elements.cpp
+@@ -3229,11 +3229,29 @@ namespace AirflowNetwork {
+             }
+         }
+ 
+-        if (PDROP == 0.0) {
+-            fma12 = BuoFlow;
+-            fma21 = BuoFlow;
+-            dp1fma12 = 0.0;
+-            dp1fma21 = 0.0;
++        // Forced flow: laminar (linear) regime at small pressure differences, as generic_crack has. The orifice
++        // law below has an infinite derivative at zero pressure difference, which stops Newton's method from
++        // converging when the net flow through the opening is near zero. Use the laminar relation wherever it
++        // gives less flow than the orifice law, and during linear initialization. Its coefficient is
++        // generic_crack's for this turbulent coefficient (coefficient * sqrt(upwind density) / mean viscosity);
++        // the orifice law has no reference-condition correction, so none is applied.
++        Real64 const upwindDensity = (PDROP >= 0.0) ? propN.density : propM.density;
++        Real64 const turbulentCoef = upwindDensity * OpenArea * Fact * DischCoeff * std::sqrt(2.0 / RhozAver);
++        Real64 const CDM = turbulentCoef * std::sqrt(upwindDensity) / (0.5 * (propN.viscosity + propM.viscosity));
++        Real64 const FL = CDM * PDROP;
++
++        if (LFLAG || std::abs(FL) <= turbulentCoef * std::sqrt(std::abs(PDROP))) {
++            if (FL >= 0.0) {
++                fma12 = FL + BuoFlow;
++                dp1fma12 = CDM + dPBuoFlow;
++                fma21 = BuoFlow;
++                dp1fma21 = dPBuoFlow;
++            } else {
++                fma21 = -FL + BuoFlow;
++                dp1fma21 = -CDM + dPBuoFlow;
++                fma12 = BuoFlow;
++                dp1fma12 = dPBuoFlow;
++            }
+         } else if (PDROP > 0.0) {
+             fma12 = propN.density * OpenArea * Fact * DischCoeff * std::sqrt(2.0 * PDROP / RhozAver) + BuoFlow;
+             dp1fma12 = propN.density * OpenArea * DischCoeff / std::sqrt(2.0 * PDROP * RhozAver) + dPBuoFlow;

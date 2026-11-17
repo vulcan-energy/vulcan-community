@@ -138,6 +138,7 @@
 // Preserved verbatim in reset() below; not fixed speculatively.
 
 import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
+import { areaRepeatsSize } from '../../lib/profileLineFace';
 import {
   decimalInputProps,
   formatConditionalDecimals,
@@ -474,6 +475,8 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
             selectedElement.type === 'BuildingElementAdjacentConditionedSpace' &&
             (selectedShape === 'line' || selectedShape === 'polygon' || selectedShape === 'sloped-polygon') &&
             !isVulcanUiPartyFloorElement(selectedElement);
+          // A plain rectangle's area repeats its width × height; a doubled one says something new.
+          if (areaRepeatsSize(selectedElement, selectedShape) && !showInternalSurfaceDoubling) return null;
           return (
             <>
               {renderFieldLabelWithComparisonIndicator('Area (m²):', elementType, comparisonFieldIndicators.area, 'area', <SourceNote>from the drawing</SourceNote>)}

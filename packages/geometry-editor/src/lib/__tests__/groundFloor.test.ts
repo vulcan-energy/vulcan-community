@@ -6,6 +6,7 @@ import {
   computeGroundUValueFromElementModel,
   defaultSuspendedAreaPerPerimeterVent,
   getSuspendedVentPartFBreakdown,
+  groundUWholeBasement,
   hasGroundUValueCalculator,
   parseWindShieldLocation,
   setGroundUValueCalculator,
@@ -18,19 +19,19 @@ afterEach(() => setGroundUValueCalculator(null));
 describe('ground floor port', () => {
   it('gives no number with no calculator registered', () => {
     expect(hasGroundUValueCalculator()).toBe(false);
-    expect(computeGroundUValueFromElementModel({ total_area: 20 }, { thermal_resistance_floor_construction: 1 }, 'Slab_no_edge_insulation')).toBeNull();
+    expect(computeGroundUValueFromElementModel({ total_area: 20 }, { thermal_resistance_floor_construction: 1 }, 'Slab_no_edge_insulation', { wholeBasement: false })).toBeNull();
   });
 
   it('sends the HEM element fields, with live overrides and the wind speed, and maps undefined to null', () => {
-    const calls: { element: Record<string, unknown>; wind: number | undefined }[] = [];
-    setGroundUValueCalculator((json, wind) => {
-      calls.push({ element: JSON.parse(json), wind });
+    const calls: { element: Record<string, unknown>; wind: number | undefined; wholeBasement: boolean }[] = [];
+    setGroundUValueCalculator((json, wind, wholeBasement) => {
+      calls.push({ element: JSON.parse(json), wind, wholeBasement });
       return calls.length === 1 ? 0.2345 : undefined;
     });
     expect(hasGroundUValueCalculator()).toBe(true);
     const current = { total_area: 30, perimeter: 22, thickness_walls: 0.3, floor_type: 'Suspended_floor', extra_json: { x: 1 } };
     const advanced = { thermal_resistance_floor_construction: 2, height_upper_surface: 0.3, wind_speed_mps: 4 };
-    expect(computeGroundUValueFromElementModel(current, advanced, undefined, { totalArea: 32, perimeter: 24 })).toBe(0.2345);
+    expect(computeGroundUValueFromElementModel(current, advanced, undefined, { totalArea: 32, perimeter: 24, wholeBasement: false })).toBe(0.2345);
     expect(calls[0]).toEqual({
       element: {
         floor_type: 'Suspended_floor',
@@ -43,10 +44,16 @@ describe('ground floor port', () => {
         wind_speed_mps: 4,
       },
       wind: 4,
+      wholeBasement: false,
     });
     // The modal's own wind field wins; the subtype stands in for a missing floor type.
-    expect(computeGroundUValueFromElementModel({ total_area: 30 }, {}, 'Heated_basement', { windInput: '6' })).toBeNull();
-    expect(calls[1]).toMatchObject({ element: { floor_type: 'Heated_basement' }, wind: 6 });
+    expect(computeGroundUValueFromElementModel({ total_area: 30 }, {}, 'Heated_basement', { windInput: '6', wholeBasement: true })).toBeNull();
+    expect(calls[1]).toMatchObject({ element: { floor_type: 'Heated_basement' }, wind: 6, wholeBasement: true });
+  });
+
+  it('weights a heated basement\'s walls into its U-value on HEM:EPC targets only', () => {
+    expect(groundUWholeBasement({ requiredMetadataRows: ['IsExistingBuilding', 'Postcode'] })).toBe(true);
+    expect(groundUWholeBasement({ requiredMetadataRows: [] })).toBe(false);
   });
 });
 

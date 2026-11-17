@@ -30,7 +30,7 @@ pub use target_mappings::map_target_unobstructed_shading;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -269,6 +269,19 @@ impl ModelProfile {
         }
     }
 
+    /// The terrain class an absent `Ventilation_terrain_class` row means: Suburban, the default.
+    /// It replaces the template's value before any row merges, so a Systems or Metadata row
+    /// still wins and the Metadata warning lists it as the value used. EPC differs: the row is
+    /// required (`required_metadata_rows`).
+    // ponytail: the pinned FHS template's OpenField is dead for FHS (this replaces it); drop it
+    // from defaults_template.json at the next FHS bundle rebuild, which re-pins the bytes.
+    pub(crate) fn default_terrain_class(self) -> Option<&'static str> {
+        match self {
+            Self::Core | Self::Fhs => Some("Suburban"),
+            Self::Epc => None,
+        }
+    }
+
     /// Required rows an existing building may leave out, DESNZ-defined: with no air test HEMIE
     /// estimates the leakage and shield class follows the terrain class. An absent row removes
     /// the template's value, so only a stated value reaches HEMIE.
@@ -319,6 +332,17 @@ impl ModelProfile {
     /// `ZoneUnconditioned` Systems rows and the `Positive input ventilation` vent type route
     /// only here: Vulcan converts them for no other schema.
     pub(crate) fn checks_system_catalogue(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
+    /// A derived heated-basement U-value is the whole basement: the floor and its walls below
+    /// ground weighted by area (`ground_u_value`), and the walls drawn below ground go to HEM from
+    /// ground level up (`builder.rs` `cut_basement_walls_at_ground`). EPC differs: the weighting is
+    /// DESNZ-defined for HEM:EPC; FHS and Core take the basement floor's U alone.
+    pub(crate) fn weights_basement_walls_into_floor_u(self) -> bool {
         match self {
             Self::Core | Self::Fhs => false,
             Self::Epc => true,
@@ -723,6 +747,13 @@ pub fn transform_geometry_csv(
         finalization::finalize_model(&model, &schema).map_err(TransformError::Schema)?;
     schema_omissions.extend(finalized.omissions);
     for notice in &mut schema_omissions {
+        name_authored_element_omission(
+            notice,
+            &csv_data,
+            &finalized.model,
+            &builder,
+            request.profile,
+        );
         notice.message = without_float_noise(&notice.message);
     }
     let model = finalized.model;
@@ -778,6 +809,122 @@ pub fn transform_geometry_csv(
         weather_curves: builder.weather_curves(),
         hidden_inputs,
     })
+}
+
+/// The editor's floor type labels (`GROUND_FLOOR_TYPE_LABELS` in geometry-editor `groundFloor.ts`).
+pub(crate) const GROUND_FLOOR_TYPE_LABELS: [(&str, &str); 5] = [
+    ("Heated_basement", "Heated basement"),
+    (
+        "Slab_no_edge_insulation",
+        "Ground floor, no edge insulation",
+    ),
+    ("Slab_edge_insulation", "Ground floor, edge insulated"),
+    ("Suspended_floor", "Suspended floor"),
+    ("Unheated_basement", "Unheated basement"),
+];
+
+/// The editor's labels of the ground floor fields (`FIELD_LABELS` in geometry-editor
+/// `schemaDescriptionOverrides.ts`).
+const GROUND_FIELD_LABELS: [(&str, &str); 11] = [
+    ("thickness_walls", "Wall thickness"),
+    ("edge_insulation", "Edge insulation"),
+    ("height_upper_surface", "Upper surface height"),
+    ("shield_fact_location", "Wind shielding"),
+    ("area_per_perimeter_vent", "Vent area per perimeter"),
+    (
+        "thermal_resist_insul",
+        "Void base insulation thermal resistance",
+    ),
+    ("thermal_transm_walls", "Wall thermal transmittance"),
+    ("depth_basement_floor", "Basement floor depth"),
+    (
+        "thermal_resist_walls_base",
+        "Basement wall thermal resistance",
+    ),
+    ("height_basement_walls", "Basement wall height above ground"),
+    (
+        "thermal_transm_envi_base",
+        "Floor above basement thermal transmittance",
+    ),
+];
+
+fn label<'a>(labels: &[(&str, &'a str)], key: &'a str) -> &'a str {
+    labels
+        .iter()
+        .find(|(k, _)| *k == key)
+        .map_or(key, |(_, label)| label)
+}
+
+/// A projection omission of a value the user entered on an element becomes a target warning that
+/// names the element, the field and the fix, so the editor shows it before the run. A value counts
+/// as entered when the element's row has it as a filled cell or an `extra_json` key. Only drops
+/// with a known reason are named: the projection also strips editor-only keys (`geometry_face`,
+/// `hemie_bundle`, ...), which stay plain omissions and are named in the run note when entered.
+fn name_authored_element_omission(
+    notice: &mut finalization::SchemaOmission,
+    csv: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+    model: &Value,
+    builder: &builder::JSONBuilder,
+    profile: ModelProfile,
+) {
+    let segments: Vec<String> = notice
+        .path
+        .split('/')
+        .skip(1)
+        .map(|s| s.replace("~1", "/").replace("~0", "~"))
+        .collect();
+    let [root, zone, building_element, element, field] = segments.as_slice() else {
+        return;
+    };
+    if notice.code != "TARGET_FIELD_OMITTED"
+        || root != "Zone"
+        || building_element != "BuildingElement"
+    {
+        return;
+    }
+    let cell = |row: &BTreeMap<String, Value>, key: &str| {
+        row.get(key)
+            .filter(|v| !v.is_null() && *v != "")
+            .or_else(|| row.get("extra_json")?.get(key))
+            .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+    };
+    let Some(row) = [
+        "Exposed Elements",
+        "Window Elements",
+        "Ground Elements",
+        "Non-Exposed Elements",
+    ]
+    .iter()
+    .filter_map(|section| csv.get(*section))
+    .flatten()
+    .find(|row| row.get("Name").and_then(Value::as_str) == Some(element.as_str()))
+    .filter(|row| cell(row, field).is_some()) else {
+        return;
+    };
+    let built = &model["Zone"][zone]["BuildingElement"][element];
+    let message = if field == "solar_absorption_coeff" && profile == ModelProfile::Fhs {
+        // The FHS wrapper's opaque elements take `colour`; Core takes the coefficient, EPC both.
+        let outcome = match cell(row, "colour") {
+            Some(colour) => format!(" and uses the colour, {colour}."),
+            None => ". Set the colour.".into(),
+        };
+        format!("this HEM version takes the colour, not the solar absorption coefficient, so the run leaves the coefficient out{outcome}")
+    } else if let (Some("BuildingElementGround"), Some(floor_type)) =
+        (built["type"].as_str(), built["floor_type"].as_str())
+    {
+        if !builder.a_floor_type_takes(field) {
+            return;
+        }
+        format!(
+            "{} is not used by the floor type {}, so the run leaves it out. Remove it, or change the floor type.",
+            label(&GROUND_FIELD_LABELS, field),
+            label(&GROUND_FLOOR_TYPE_LABELS, floor_type)
+        )
+    } else {
+        return;
+    };
+    notice.code = target_mappings::TARGET_INPUT_WARNING.into();
+    notice.message = format!("Element '{element}': {message}");
 }
 
 /// A note's numbers as a person reads them: a sum of drawn areas prints as 226.51, not

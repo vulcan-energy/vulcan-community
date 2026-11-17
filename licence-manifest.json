@@ -657,7 +657,7 @@
       "source_revision": "6f2e40d10250a105b49966baa24d843711e61048",
       "provenance": "third_party/energyplus-patches/README.md",
       "license_notice": "third_party/energyplus-patches/LICENSE",
-      "modifications": "0006-afn-zero-leakage.patch lets AirflowNetwork leakage coefficients be 0 and fixes the pressure level of sealed zone groups; distributed under the EnergyPlus licence."
+      "modifications": "0006-afn-zero-leakage.patch lets AirflowNetwork leakage coefficients be 0 and fixes the pressure level of sealed zone groups; 0007-afn-horizontal-opening-laminar.patch gives the AirflowNetwork horizontal opening a laminar regime at small pressure differences; distributed under the EnergyPlus licence."
     },
     {
       "path": "docs/**",
@@ -2149,6 +2149,14 @@
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
       "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/__tests__/CloseShadingFields.test.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/__tests__/CloseShadingFields.test.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
     },
     {
       "path": "packages/geometry-editor/src/components/elementForms/adjacentLikeElement.tsx",
@@ -4672,6 +4680,22 @@
       "classification": "public_community_test_suite"
     },
     {
+      "path": "packages/geometry-editor/src/lib/__tests__/windowCarry.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/windowCarry.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/__tests__/windowHost.test.ts",
+      "source_path": "packages/geometry-editor/src/lib/__tests__/windowHost.test.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_community_test_suite"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/__tests__/windowOpeningPart.test.ts",
       "source_path": "packages/geometry-editor/src/lib/__tests__/windowOpeningPart.test.ts",
       "license": "AGPL-3.0-only",
@@ -5864,6 +5888,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/lib/storeyCopy.ts",
+      "source_path": "packages/geometry-editor/src/lib/storeyCopy.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/storeySemantics.ts",
       "source_path": "packages/geometry-editor/src/lib/storeySemantics.ts",
       "license": "AGPL-3.0-only",
@@ -6010,6 +6042,14 @@
     {
       "path": "packages/geometry-editor/src/lib/wallEdgeFromRoofs.ts",
       "source_path": "packages/geometry-editor/src/lib/wallEdgeFromRoofs.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/windowCarry.ts",
+      "source_path": "packages/geometry-editor/src/lib/windowCarry.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

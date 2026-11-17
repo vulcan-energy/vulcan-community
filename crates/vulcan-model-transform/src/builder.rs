@@ -1706,8 +1706,6 @@ pub struct JSONBuilder {
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
     /// mechanical ventilation rows) and the row's Name, so each product slot names its row.
     slot_rows: RefCell<Vec<(String, String)>>,
-    /// Element paths whose `solar_absorption_coeff` came from a colour.
-    colour_coefficients: RefCell<Vec<String>>,
 }
 
 impl JSONBuilder {
@@ -1790,7 +1788,6 @@ impl JSONBuilder {
             hem_core_version: hem_upstream::HEM_VERSION.to_string(),
             product_database: None,
             product_settings: RefCell::default(),
-            colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
@@ -1834,7 +1831,6 @@ impl JSONBuilder {
             hem_core_version: version_metadata.hem_core_version.clone(),
             product_database: None,
             product_settings: RefCell::default(),
-            colour_coefficients: RefCell::default(),
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
@@ -2200,6 +2196,9 @@ impl JSONBuilder {
         // covered, which no per-loop guard can reach. See `sanitize_csv_extra_json`.
         let mut sanitized_csv_data = sanitize_csv_extra_json(csv_data);
         let mut result = self.defaults.clone();
+        if let Some(terrain) = self.profile.default_terrain_class() {
+            result["InfiltrationVentilation"]["terrain_class"] = Value::from(terrain);
+        }
         // Window, vent and terminal heights are measured from the ventilation zone base the final
         // model carries, so the rows convert before any of them merges.
         let ventilation_base_height =
@@ -2439,21 +2438,11 @@ impl JSONBuilder {
             crate::epc_mappings::check_smart_meter_guid(result, &mut errors);
         }
         if self.profile.uses_solar_absorption_coeff() {
-            crate::epc_mappings::check_solar_absorption(
-                result,
-                &self.colour_coefficients.borrow(),
-                &mut errors,
-                &mut notices,
-            );
+            crate::epc_mappings::check_solar_absorption(result, &mut errors);
         }
         if self.profile.references_products() {
-            let env_area_stated = csv_data.get("Metadata").into_iter().flatten().any(|row| {
-                let (name, value) = extract_metadata_field(row);
-                name.as_deref() == Some("AirPermeability_env_area") && value.is_some()
-            });
             crate::epc_mappings::apply_desnz_defaults(
                 result,
-                env_area_stated,
                 &mut errors,
                 &mut notices,
                 &mut self.derived_defaults.borrow_mut(),
@@ -2821,6 +2810,8 @@ impl JSONBuilder {
         ];
 
         let valid_types = self.schema_building_element_type_values();
+        // Zones whose heated basement floor takes its U-value from the floor calculation.
+        let mut derived_basement_zones = BTreeSet::new();
 
         for section_name in &building_element_sections {
             if let Some(section_data) = csv_data.get(*section_name) {
@@ -3103,14 +3094,6 @@ impl JSONBuilder {
                                             "solar_absorption_coeff".to_string(),
                                             serde_json::json!(coeff),
                                         );
-                                        self.colour_coefficients.borrow_mut().push(
-                                            crate::json_pointer(&[
-                                                "Zone",
-                                                zone_name,
-                                                "BuildingElement",
-                                                element_name,
-                                            ]),
-                                        );
                                     }
                                     None => self.push_non_fatal(
                                         "E055",
@@ -3337,23 +3320,23 @@ impl JSONBuilder {
                                 let wind = row_extra
                                     .and_then(|extra| extra.get("wind_speed_mps"))
                                     .and_then(Value::as_f64);
+                                let whole_basement =
+                                    self.profile.weights_basement_walls_into_floor_u();
                                 match crate::ground_u_value::ground_floor_u_value(
                                     element_obj_map,
                                     wind,
+                                    whole_basement,
                                 ) {
                                     Some(u) => {
                                         element_obj_map.insert(
                                             "u_value".into(),
                                             json_number(u, &format!("{element_name} u_value"))?,
                                         );
-                                        if crate::ground_u_value::edge_thickness_missing(
-                                            element_obj_map,
-                                        ) {
-                                            self.schema_omissions.borrow_mut().push(crate::finalization::SchemaOmission {
-                                                code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
-                                                path: crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name, "edge_insulation"]),
-                                                message: format!("Ground floor '{element_name}': edge insulation with no thickness counts its whole resistance in the floor's U-value (BS EN ISO 13370 Annex D takes off the ground it replaces). Enter its thickness to include that."),
-                                            });
+                                        if whole_basement
+                                            && element_obj_map.get("floor_type")
+                                                == Some(&Value::from("Heated_basement"))
+                                        {
+                                            derived_basement_zones.insert(zone_name.to_string());
                                         }
                                     }
                                     None => {
@@ -3372,10 +3355,21 @@ impl JSONBuilder {
                                             &crate::json_pointer(&["Zone", zone_name, "BuildingElement", element_name, "u_value"]),
                                             &format!(
                                                 "Ground floor '{element_name}': the U-value cannot be worked out from the construction resistance {source} gives. The floor calculation needs {}. Draw the floor against its walls or enter them, or enter the floor's U-value.",
-                                                crate::ground_u_value::required_inputs(floor_type)
+                                                crate::ground_u_value::required_inputs(floor_type, whole_basement)
                                             ),
                                         );
                                     }
+                                }
+                            }
+                            // An edge insulation's thickness and conductivity are inputs to the
+                            // floor calculation above, not fields of HEM's `EdgeInsulation`.
+                            if let Some(edges) = element_obj_map
+                                .get_mut("edge_insulation")
+                                .and_then(Value::as_array_mut)
+                            {
+                                for edge in edges.iter_mut().filter_map(Value::as_object_mut) {
+                                    edge.remove("thickness");
+                                    edge.remove("thermal_conductivity");
                                 }
                             }
                         }
@@ -3465,7 +3459,129 @@ impl JSONBuilder {
             }
         }
 
+        for zone in &derived_basement_zones {
+            self.cut_basement_walls_at_ground(result, csv_data, zone);
+        }
         Ok(())
+    }
+
+    /// On a target whose derived heated-basement U-value carries the basement walls below ground
+    /// (`ModelProfile::weights_basement_walls_into_floor_u`, the DESNZ-defined area weighting). The editor draws those walls down to the
+    /// basement floor, so each wall of the zone that starts below ground goes to HEM from ground
+    /// level up only, and a wall wholly below ground is not sent. Openings and doors stay as drawn:
+    /// the wall's net area loses only its opaque part below ground.
+    fn cut_basement_walls_at_ground(
+        &self,
+        result: &mut Value,
+        csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
+        zone: &str,
+    ) {
+        let text = |row: &BTreeMap<String, Value>, key: &str| {
+            row.get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let rows: Vec<&BTreeMap<String, Value>> = ["Exposed Elements", "Window Elements"]
+            .iter()
+            .flat_map(|section| csv_data.get(*section).into_iter().flatten())
+            .filter(|row| text(row, "Zone") == zone)
+            .collect();
+        let exposed: HashSet<String> = csv_data
+            .get("Exposed Elements")
+            .into_iter()
+            .flatten()
+            .filter(|row| text(row, "Zone") == zone)
+            .map(|row| text(row, "Name"))
+            .collect();
+        // An opening names its wall as linked_wall (windows) or parent_element (doors).
+        let host = |row: &BTreeMap<String, Value>| {
+            Some(text(row, "linked_wall"))
+                .filter(|h| !h.is_empty())
+                .unwrap_or_else(|| text(row, "parent_element"))
+        };
+        let Some(elements) = result["Zone"][zone]["BuildingElement"].as_object_mut() else {
+            return;
+        };
+        let rect = |e: &Value| {
+            let num = |key: &str| e.get(key).and_then(Value::as_f64);
+            Some((num("base_height")?, num("height")?, num("width")?))
+        };
+        let mut cut = Vec::new();
+        for row in &rows {
+            let name = text(row, "Name");
+            // A door, or an opening in a wall, is not a wall.
+            let door = matches!(row.get("is_external_door"), Some(Value::Bool(true)))
+                || text(row, "is_external_door").eq_ignore_ascii_case("true");
+            if door || exposed.contains(&host(row)) {
+                continue;
+            }
+            let Some(wall) = elements.get(&name) else {
+                continue;
+            };
+            let vertical = wall
+                .get("pitch")
+                .and_then(Value::as_f64)
+                .is_some_and(|p| p > 60.0 && p < 120.0);
+            let (Some((base, height, width)), Some(area)) =
+                (rect(wall), wall.get("area").and_then(Value::as_f64))
+            else {
+                continue;
+            };
+            if wall.get("type") != Some(&Value::from("BuildingElementOpaque"))
+                || !vertical
+                || base >= 0.0
+            {
+                continue;
+            }
+            let below = (-base).min(height);
+            if below >= height {
+                elements.remove(&name);
+                cut.push(format!("'{name}'"));
+                continue;
+            }
+            let openings_below: f64 = rows
+                .iter()
+                .filter(|r| host(r) == name)
+                .filter_map(|r| elements.get(&text(r, "Name")).and_then(rect))
+                .map(|(b, h, w)| w * (-b).clamp(0.0, h))
+                .sum();
+            let round = |v: f64| serde_json::json!((v * 1e6).round() / 1e6);
+            let opaque_below = width * below - openings_below;
+            let above = area - opaque_below;
+            // Within rounding of 0, nothing opaque is left above ground (all glazing, say).
+            if above.abs() <= 1e-6 {
+                elements.remove(&name);
+                cut.push(format!("'{name}'"));
+                continue;
+            }
+            if above < 0.0 {
+                self.push_non_fatal(
+                    "E055",
+                    &crate::json_pointer(&["Zone", zone, "BuildingElement", &name, "area"]),
+                    &format!("Wall '{name}' has an area of {area} m², but {} m² of it is below ground, which the heated basement floor's U-value includes. Correct the wall's area, width or height.", (opaque_below * 100.0).round() / 100.0),
+                );
+                continue;
+            }
+            let wall = &mut elements[&name];
+            wall["base_height"] = serde_json::json!(0.0);
+            wall["height"] = round(height - below);
+            wall["area"] = round(above);
+            cut.push(format!("'{name}'"));
+        }
+        if !cut.is_empty() {
+            self.schema_omissions
+                .borrow_mut()
+                .push(crate::finalization::SchemaOmission {
+                    code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
+                    path: crate::json_pointer(&["Zone", zone, "BuildingElement"]),
+                    message: format!(
+                        "Walls {} are sent to HEM from ground level up only, and a wall wholly below ground is not sent: the heated basement floor's U-value includes the basement walls below ground.",
+                        cut.join(", ")
+                    ),
+                });
+        }
     }
 
     fn map_csv_type_to_schema_type(&self, csv_type: &str) -> String {
@@ -9627,6 +9743,24 @@ impl JSONBuilder {
         allowed_props
     }
 
+    /// Whether some ground floor type of this target takes `field`.
+    pub(crate) fn a_floor_type_takes(&self, field: &str) -> bool {
+        crate::GROUND_FLOOR_TYPE_LABELS
+            .iter()
+            .any(|(floor_type, _)| {
+                let context = serde_json::Map::from_iter([(
+                    "floor_type".to_string(),
+                    Value::String(floor_type.to_string()),
+                )]);
+                self.get_allowed_building_element_properties(
+                    "BuildingElementGround",
+                    Some(&context),
+                    Some(floor_type),
+                )
+                .contains(field)
+            })
+    }
+
     fn normalize_building_element_for_fhs(
         &self,
         element_obj: &mut serde_json::Map<String, Value>,
@@ -10602,8 +10736,9 @@ ground 1,Living,BuildingElementGround,31,,5,4,18,Slab_no_edge_insulation,,,{}
     }
 
     #[test]
-    fn derived_ground_u_with_edge_insulation_of_no_thickness_says_so() {
-        // Vulcan conversion rule: with no thickness, the edge insulation's whole resistance counts.
+    fn derived_ground_u_with_edge_insulation_needs_its_thickness() {
+        // Annex D takes off the ground the insulation replaces (R' = R_n − d_n/λ), so it needs the
+        // thickness d_n, or a conductivity to give d_n = R_n·λ_n. With neither: no U-value, E068.
         let csv = |edge: &str| {
             format!(
                 r#"Zone
@@ -10616,7 +10751,7 @@ ground 0,Living,BuildingElementGround,8,2,4,20,Slab_edge_insulation,,0.2,"{{""th
 "#
             )
         };
-        let notices = |edge: &str| {
+        let build = |edge: &str| {
             let mut parser = CSVParser::new();
             let data = parser.parse_csv(&csv(edge)).expect("CSV should parse");
             let mut builder =
@@ -10628,23 +10763,232 @@ ground 0,Living,BuildingElementGround,8,2,4,20,Slab_edge_insulation,,0.2,"{{""th
             builder
                 .process_root_level_sections(&mut result, &data)
                 .expect("Root sections should process");
-            assert!(result["Zone"]["Living"]["BuildingElement"]["ground 0"]["u_value"].is_number());
-            builder
-                .take_schema_omissions()
+            let floor = result["Zone"]["Living"]["BuildingElement"]["ground 0"].clone();
+            let e068 = builder
+                .take_non_fatal_errors()
                 .into_iter()
-                .filter(|o| o.path.ends_with("/edge_insulation"))
-                .count()
+                .filter(|e| e.code == "E068" && e.message.contains("'ground 0'"))
+                .count();
+            (floor, e068)
         };
-        assert_eq!(
-            notices(r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1}"#),
-            1
+        let (_, e068) =
+            build(r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1}"#);
+        assert_eq!(e068, 1);
+        for edge in [
+            r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1,""thickness"":0.06}"#,
+            r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1,""thermal_conductivity"":0.04}"#,
+        ] {
+            let (floor, e068) = build(edge);
+            assert!(floor["u_value"].is_number(), "{edge}");
+            assert_eq!(e068, 0, "{edge}");
+            // The calculation inputs do not reach HEM's edge insulation.
+            assert_eq!(
+                floor["edge_insulation"][0],
+                serde_json::json!({"edge_thermal_resistance": 1.5, "type": "horizontal", "width": 1})
+            );
+        }
+    }
+
+    /// A heated basement as the editor draws it: walls down to the basement floor (2 m deep).
+    /// W0 runs from the basement floor to 0.8 m above ground with a window above ground; W1 the
+    /// same with a window below ground (a lightwell); B0 is wholly below ground; A0 stands on
+    /// the ground; D0 is a door below ground in W1; D1 is a door standing on its own.
+    fn heated_basement_csv(floor_extra: &str) -> String {
+        format!(
+            r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Exposed Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+W0,Living,BuildingElementOpaque,21.4,90,8,2.8,0,-2,FALSE,FALSE,,,"{{""thermal_resistance_construction"":2}}"
+W1,Living,BuildingElementOpaque,13.8,90,6,2.8,90,-2,FALSE,FALSE,,,"{{""thermal_resistance_construction"":2}}"
+B0,Living,BuildingElementOpaque,16,90,8,2,180,-2,FALSE,FALSE,Basement floor,,"{{""thermal_resistance_construction"":2}}"
+A0,Living,BuildingElementOpaque,15,90,6,2.5,270,0,FALSE,FALSE,,,"{{""thermal_resistance_construction"":2}}"
+D0,Living,BuildingElementOpaque,2,90,1,2,90,-1.8,FALSE,TRUE,W1,,"{{""thermal_resistance_construction"":1}}"
+D1,Living,BuildingElementOpaque,2,90,1,2,270,-1,FALSE,TRUE,,,"{{""thermal_resistance_construction"":1}}"
+
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,extra_json
+Up,Living,BuildingElementTransparent,1,90,1,1,0,0.2,W0,"{{""g_value"":0.55}}"
+Low,Living,BuildingElementTransparent,1,90,1,1,90,-1.5,W1,"{{""g_value"":0.55}}"
+
+Ground Elements
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,extra_json
+Basement floor,Living,BuildingElementGround,48,,,28,Heated_basement,2,0.3,"{floor_extra}"
+"#
+        )
+    }
+
+    fn below_ground_notices(builder: &JSONBuilder) -> Vec<String> {
+        builder
+            .take_schema_omissions()
+            .into_iter()
+            .filter(|n| n.message.contains("below ground"))
+            .map(|n| n.message)
+            .collect()
+    }
+
+    type BasementBuild = (Value, Vec<String>, Vec<ValidationError>);
+
+    fn heated_basement_build_csv(schema: &str, csv: &str) -> BasementBuild {
+        let data = CSVParser::new().parse_csv(csv).expect("CSV should parse");
+        let mut builder = JSONBuilder::new(schema, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .build_zone_structure(&mut result, &data)
+            .expect("Zone structure should build");
+        let elements = result["Zone"]["Living"]["BuildingElement"].clone();
+        let notices = below_ground_notices(&builder);
+        (elements, notices, builder.take_non_fatal_errors())
+    }
+
+    /// HEM:EPC new build, the whole merge.
+    fn epc_heated_basement_build_csv(csv: &str) -> BasementBuild {
+        let mut builder = JSONBuilder::from_json_inputs(
+            include_str!("../../../data/schemas/hem_epc_orchestrator_input.schema.json"),
+            include_str!("../../../data/defaults/defaults_template_epc.json"),
+            ModelProfile::Epc,
+            &crate::VersionMetadata {
+                hem_core_version: "2.0.0a4".into(),
+                wrapper_version: Some("0.13.2".into()),
+            },
+        )
+        .expect("EPC builder");
+        builder.set_product_database(
+            crate::epc_products::ProductDatabase::parse(&crate::epc_products::tests::pinned())
+                .unwrap(),
         );
+        let data = CSVParser::new().parse_csv(csv).expect("CSV should parse");
+        let model = builder.build_json(&data).expect("EPC build");
+        let elements = model["Zone"]["Living"]["BuildingElement"].clone();
+        let notices = below_ground_notices(&builder);
+        (elements, notices, builder.take_non_fatal_errors())
+    }
+
+    const DERIVED_U: &str =
+        r#"{""thermal_resistance_floor_construction"":1,""thermal_resist_walls_base"":0.5}"#;
+
+    #[test]
+    fn fhs_and_core_take_the_basement_floor_alone_and_send_its_walls_as_drawn() {
+        for schema in [
+            SCHEMA_PATH,
+            crate::schema_paths::FHS_UPSTREAM_SCHEMA_REL_PATH,
+        ] {
+            let (elements, notices, _) =
+                heated_basement_build_csv(schema, &heated_basement_csv(DERIVED_U));
+            let floor = elements["Basement floor"].as_object().unwrap();
+            assert_eq!(
+                floor["u_value"].as_f64(),
+                crate::ground_u_value::ground_floor_u_value(floor, None, false),
+                "{schema}"
+            );
+            assert_ne!(
+                floor["u_value"].as_f64(),
+                crate::ground_u_value::ground_floor_u_value(floor, None, true),
+                "{schema}"
+            );
+            assert_eq!(elements["W0"]["base_height"], -2.0);
+            assert_eq!(elements["W0"]["area"], 21.4);
+            assert_eq!(elements["B0"]["area"], 16.0);
+            assert!(notices.is_empty(), "{notices:?}");
+        }
+    }
+
+    #[test]
+    fn epc_new_build_sends_the_walls_of_a_derived_heated_basement_from_ground_level() {
+        let (elements, notices, _) = epc_heated_basement_build_csv(&heated_basement_csv(DERIVED_U));
+        let floor = elements["Basement floor"].as_object().unwrap();
         assert_eq!(
-            notices(
-                r#"{""edge_thermal_resistance"":1.5,""type"":""horizontal"",""width"":1,""thickness"":0.06}"#
-            ),
-            0
+            floor["u_value"].as_f64(),
+            crate::ground_u_value::ground_floor_u_value(floor, None, true)
         );
+        let num = |name: &str, key: &str| elements[name][key].as_f64().unwrap();
+        // W0: 2 m of its 8 m width is below ground; its window is above ground.
+        assert_eq!(num("W0", "base_height"), 0.0);
+        assert!((num("W0", "height") - 0.8).abs() < 1e-9);
+        assert!((num("W0", "area") - (21.4 - 16.0)).abs() < 1e-9);
+        // W1: the opaque part below ground is 6·2 less the window's 1 m² and the door's
+        // 1·1.8 m², which stay as drawn.
+        assert!((num("W1", "height") - 0.8).abs() < 1e-9);
+        assert!((num("W1", "area") - (13.8 - (12.0 - 1.0 - 1.8))).abs() < 1e-9);
+        assert_eq!(num("Low", "base_height"), -1.5);
+        assert_eq!(num("Low", "height"), 1.0);
+        assert_eq!(num("Up", "base_height"), 0.2);
+        assert_eq!(num("D0", "base_height"), -1.8);
+        // A door on its own is an opening, not a wall.
+        assert_eq!(num("D1", "base_height"), -1.0);
+        assert_eq!(num("D1", "area"), 2.0);
+        // B0 is wholly below ground: not sent.
+        assert!(elements.get("B0").is_none());
+        // A wall on the ground is unchanged.
+        assert_eq!(num("A0", "area"), 15.0);
+        assert_eq!(num("A0", "height"), 2.5);
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        assert!(notices[0].contains("'W0', 'W1', 'B0'"), "{}", notices[0]);
+    }
+
+    #[test]
+    fn epc_basement_wall_whose_area_is_not_its_drawing_fails_naming_it() {
+        // W0 states 10 m², less than its 8 m × 2 m below ground: no area is left above ground.
+        let csv = heated_basement_csv(DERIVED_U).replace(
+            "W0,Living,BuildingElementOpaque,21.4,",
+            "W0,Living,BuildingElementOpaque,10,",
+        );
+        let (_, _, errors) = epc_heated_basement_build_csv(&csv);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.code == "E055" && e.message.contains("'W0'")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn epc_basement_wall_with_nothing_opaque_above_ground_is_not_sent() {
+        // W0's 0.8 m above ground is all glazing (8 m × 0.8 m), so its net area is its opaque
+        // 16 m² below ground.
+        let csv = heated_basement_csv(DERIVED_U)
+            .replace(
+                "W0,Living,BuildingElementOpaque,21.4,",
+                "W0,Living,BuildingElementOpaque,16,",
+            )
+            .replace(
+                "Up,Living,BuildingElementTransparent,1,90,1,1,0,0.2,",
+                "Up,Living,BuildingElementTransparent,6.4,90,8,0.8,0,0,",
+            );
+        let (elements, notices, errors) = epc_heated_basement_build_csv(&csv);
+        assert!(elements.get("W0").is_none());
+        assert!(!errors.iter().any(|e| e.code == "E055"), "{errors:#?}");
+        assert!(notices[0].contains("'W0'"), "{notices:?}");
+    }
+
+    #[test]
+    fn epc_existing_building_leaves_basement_walls_to_hemie() {
+        // HEMIE builds the existing building's zone from the CSV rows; the full-input zone's cut,
+        // notice and E055 do not reach the run.
+        let csv = format!(
+            "Metadata,,\nIsExistingBuilding,TRUE\n\n{}",
+            heated_basement_csv(DERIVED_U).replace(
+                "W0,Living,BuildingElementOpaque,21.4,",
+                "W0,Living,BuildingElementOpaque,10,",
+            )
+        );
+        let (_, notices, errors) = epc_heated_basement_build_csv(&csv);
+        assert!(notices.is_empty(), "{notices:?}");
+        assert!(!errors.iter().any(|e| e.code == "E055"), "{errors:#?}");
+    }
+
+    #[test]
+    fn epc_walls_of_a_heated_basement_with_a_stated_u_value_are_sent_as_drawn() {
+        // A stated U may be the basement floor's alone, so the walls below ground stay walls.
+        let stated = r#"{""u_value"":0.2,""thermal_resistance_floor_construction"":1,""thermal_resist_walls_base"":0.5}"#;
+        let (elements, notices, _) = epc_heated_basement_build_csv(&heated_basement_csv(stated));
+        assert_eq!(elements["Basement floor"]["u_value"], 0.2);
+        assert_eq!(elements["W0"]["base_height"], -2.0);
+        assert_eq!(elements["W0"]["area"], 21.4);
+        assert_eq!(elements["B0"]["area"], 16.0);
+        assert!(notices.is_empty(), "{notices:?}");
     }
 
     #[test]

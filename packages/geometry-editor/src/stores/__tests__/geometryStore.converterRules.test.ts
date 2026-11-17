@@ -577,3 +577,21 @@ it('writes the storey rows for each build type the target treats as a flat', () 
   expect(saves(fhs, 'house')).toBe(false);
   expect(saves(fhs, 'maisonette')).toBe(false);
 });
+
+// On an existing building HEM:EPC works out the ventilation zone height from the drawing itself
+// (`dwelling_height` in hemie.rs: ceiling heights, not the editor's sum of wall heights), so the
+// save writes the row only when the user types it. Other targets still save the editor's height.
+it('saves an existing building\'s ventilation zone height only when typed', () => {
+  const saved = (derivedMetadataRows: string[], typed?: number) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+      ...canonicalGeometrySchemaPort, targetSchemaMode: () => 'fhs' as const, targetRules: () => ({ derivedMetadataRows }),
+    } });
+    store.getState().loadFromCSV(sample.replace(/^AirPermeability_ventilation_zone_height,.*\n/m, ''));
+    // As a model made in the editor: the file does not decide the row.
+    store.getState().setComplianceSettings({ absentMetadataRows: [], AirPermeability_ventilation_zone_height: typed } as never);
+    return store.getState().generateCSV({ allowUnresolvedMigration: true }).match(/^AirPermeability_ventilation_zone_height,([^,]*)/m)?.[1];
+  };
+  expect(saved(['AirPermeability_ventilation_zone_height'])).toBeUndefined();
+  expect(saved(['AirPermeability_ventilation_zone_height'], 5.35)).toBe('5.35');
+  expect(Number(saved([]))).toBeGreaterThan(0);
+});

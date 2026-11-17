@@ -25,8 +25,14 @@ export type TargetValidation = {
   productSlots?: readonly GeometryProductSlot[];
   /** An existing building's distant shading as the target's conversion made it (EPC). */
   distantShading?: DistantShading;
+  /** An existing building's ventilation zone height as the target's conversion worked it out from the drawing (EPC); none when the model states it. */
+  ventilationZoneHeight?: number;
   /** The conversion's values for system fields, for pickers and placeholders (EPC). */
   systemDefaults?: TargetSystemDefaults;
+  /** The storeys in the dwelling as the conversion counts them (an existing building's own count). */
+  storeysInDwelling?: number;
+  /** The built form the conversion sends (an HEM:EPC `General.build_type`), worked out from the party walls. */
+  builtForm?: string;
 };
 
 /** What the target's conversion offers or derives for system fields. */

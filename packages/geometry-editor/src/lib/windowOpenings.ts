@@ -5,7 +5,7 @@ import type {
   GeometrySchemaMode,
   GeometrySchemaPort,
 } from '../../../geometry-editor-host/src/schemaPort';
-import type { WindowShading } from '../geometry/types';
+import type { Element, WindowShading } from '../geometry/types';
 import { roundFloatNoise } from '../geometry/constants';
 import { unwrapNullableSchema } from './schemaShape';
 import { dereferenceSchemaNodeInRoot } from './subschemaCache';
@@ -441,6 +441,21 @@ export const CLOSE_SHADING_KINDS: readonly { kind: CloseShadingKind; drawn: stri
   { kind: 'obstacle', drawn: 'object', label: 'Balcony front' },
 ];
 
+/** A window input the target takes on each window, beyond the drawing. */
+export type WindowTargetInput = 'opening_type' | CloseShadingKind;
+
+/**
+ * The window inputs the target takes, in form order: the window form and multi-select both offer
+ * exactly these, so a new per-window input is added here once. Under construction bands, the
+ * opening type; on an existing building, each close-shading category.
+ */
+export function windowTargetInputs(constructionBands: boolean, existingBuilding: boolean): readonly WindowTargetInput[] {
+  return [
+    ...(constructionBands ? ['opening_type' as const] : []),
+    ...(existingBuilding ? CLOSE_SHADING_KINDS.map(({ kind }) => kind) : []),
+  ];
+}
+
 /** Overhangs smaller than this are small canopies or verandas, larger ones large canopies. */
 const LARGE_CANOPY_M = 1.5;
 const FINS = [
@@ -448,6 +463,22 @@ const FINS = [
   { value: 'frosted glass', label: 'Frosted glass' },
   { value: 'bars', label: 'Bars' },
 ];
+
+/** The Window Shading feature drawn for a window's close-shading kind, and its depth. */
+export function drawnCloseShading(elements: readonly Element[], windowName: string, kind: CloseShadingKind): { feature?: Element; depth?: number } {
+  const drawn = CLOSE_SHADING_KINDS.find((k) => k.kind === kind)!.drawn;
+  const feature = elements.find((element) => element?.type === 'WindowShading'
+    && element.parent_element === windowName
+    && ((element as { shading_type?: string }).shading_type || 'object') === drawn);
+  const depth = (feature as { depth?: unknown } | undefined)?.depth;
+  return { feature, depth: typeof depth === 'number' ? depth : undefined };
+}
+
+/** The options every one of these windows offers for a kind: bulk edit never sets one a window's own form would not. */
+export function commonCloseShadingOptions(elements: readonly Element[], windowNames: readonly string[], kind: CloseShadingKind) {
+  const allowed = windowNames.map((name) => new Set(closeShadingOptions(kind, drawnCloseShading(elements, name, kind).depth).map((o) => o.value)));
+  return closeShadingOptions(kind, undefined).filter((o) => allowed.every((values) => values.has(o.value)));
+}
 
 /** The categories a kind takes; a drawn overhang's size picks the canopy band. */
 export function closeShadingOptions(kind: CloseShadingKind, drawnDepth: number | undefined) {
@@ -484,3 +515,9 @@ export function isExistingBuilding(state: Readonly<{
   return (state.complianceSettings as { IsExistingBuilding?: boolean }).IsExistingBuilding === true
     || state.hostDocumentMetadata.IsExistingBuilding?.trim().toUpperCase() === 'TRUE';
 }
+
+/** A window's security risk in plain words, on the window panel and in multi-select. */
+export const SECURITY_RISK_OPTIONS = [
+  { value: 'true', label: 'Yes · cannot be left open at night' },
+  { value: 'false', label: 'No · can be left open at night' },
+];

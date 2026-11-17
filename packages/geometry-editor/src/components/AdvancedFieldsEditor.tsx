@@ -45,6 +45,7 @@ import {
 } from '../lib/unheatedSpaceRu';
 import {
   computeGroundUValueFromElementModel,
+  groundUWholeBasement,
   GROUND_U_DERIVED_TEXT,
   hasGroundUValueCalculator,
   isStatedNumber,
@@ -1031,6 +1032,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   );
   const targetRulesNow = useTargetRules();
   const { hiddenFields, hemDatabaseProducts, constructionBands, arealHeatCapacity } = targetRulesNow;
+  const wholeBasement = groundUWholeBasement(targetRulesNow);
   // On a products target (EPC) the defaults file's supplies are the model's: a system picks one.
   const defaultsJson = useGeometryStore((state) => state.defaultsJson);
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
@@ -1878,9 +1880,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             currentData as Record<string, unknown>,
             { ...groundPresetValues, ...(advancedFieldsData as Record<string, unknown>) },
             subtype,
+            { wholeBasement },
           )
         : null,
-    [elementType, currentData, advancedFieldsData, subtype, groundPresetValues],
+    [elementType, currentData, advancedFieldsData, subtype, groundPresetValues, wholeBasement],
   );
   // With no calculator in this host, the converter still derives the U-value of a floor that states a
   // resistance and no U-value: the field says so, without the number.
@@ -2403,6 +2406,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           currentData as Record<string, unknown>,
           { ...groundPresetValues, ...ex },
           subtype,
+          { wholeBasement },
         );
         const nextNum =
           typeof ex.u_value === 'number' && Number.isFinite(ex.u_value)

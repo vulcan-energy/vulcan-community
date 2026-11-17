@@ -30,6 +30,7 @@ function renderToolbar(
       elementsById={{}}
       ensureFloorForZ={() => 'floor-0'}
       removeFloor={vi.fn()}
+      copyStorey={vi.fn()}
       updateFloor={vi.fn()}
       setDrawPoints={vi.fn()}
       setRoomWalls={vi.fn()}

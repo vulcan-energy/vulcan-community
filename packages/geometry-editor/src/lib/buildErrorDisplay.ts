@@ -11,7 +11,7 @@ const SECTION_LOCATIONS: Readonly<Record<GlobalSettingsFieldSection, string>> = 
   fabric: 'Global Settings > Fabric',
   target: 'Global Settings',
   dwelling: 'Global Settings > Dwelling details',
-  airTightness: 'Global Settings > Air Tightness',
+  airTightness: 'Global Settings > Air tightness',
   ventilation: 'Global Settings > Ventilation environment',
   thermalBridging: 'Global Settings > Thermal bridging',
 };
