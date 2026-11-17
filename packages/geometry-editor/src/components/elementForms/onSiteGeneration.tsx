@@ -45,7 +45,6 @@ import { readRecord } from '../../lib/jsonTypes';
 import {
   decimalInputProps,
   integerInputProps,
-  readExtraJsonRecord,
   useDecimalInput,
   useIntegerInput,
 } from './formPrimitives';
@@ -317,38 +316,6 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
 
   reset() {
     // Legacy resetFormFields never reset OnSiteGeneration state; preserved as-is.
-  },
-
-  buildElementData(state, ctx) {
-    // Build element data with main UI fields
-    const elementData: Record<string, unknown> = {
-      ...ctx.baseData,
-      generation_type: 'PhotovoltaicSystem',
-      peak_power: state.peakPowerInput.value === '' ? undefined : state.peakPowerInput.value,
-      pitch: state.onSitePitchInput.value === '' ? undefined : state.onSitePitchInput.value,
-      orientation360: state.onSiteOrientationInput.value === '' ? undefined : state.onSiteOrientationInput.value,
-      base_height: state.onSiteBaseHeightInput.value === '' ? undefined : state.onSiteBaseHeightInput.value,
-      width: state.onSiteWidthInput.value || undefined,
-      height: state.onSiteHeightInput.value || undefined,
-      zoneId: ctx.elementZoneId || undefined
-    };
-
-    // Auto-remove main UI fields from extra_json to avoid duplication; drop canvas-only _pv_* (not in HEM schema)
-    if (elementData.extra_json) {
-      const restExtraJson = { ...readExtraJsonRecord(elementData.extra_json) };
-      delete restExtraJson.peak_power;
-      delete restExtraJson.pitch;
-      delete restExtraJson.orientation360;
-      delete restExtraJson.base_height;
-      delete restExtraJson.width;
-      delete restExtraJson.height;
-      const withoutPv = Object.fromEntries(
-        Object.entries(restExtraJson).filter(([k]) => !k.startsWith('_pv_')),
-      );
-      elementData.extra_json = Object.keys(withoutPv).length > 0 ? withoutPv : undefined;
-    }
-
-    return elementData as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

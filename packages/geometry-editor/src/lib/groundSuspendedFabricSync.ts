@@ -19,7 +19,7 @@ import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from './overrideProvenance';
 import {
   defaultSuspendedAreaPerPerimeterVent,
   parseWindShieldLocation,
-} from './groundUValueCalculator';
+} from './groundFloor';
 
 /** When true, auto-sync must not overwrite `extra_json.thermal_transm_walls` (user owns the value). */
 export const THERMAL_TRANSM_WALLS_MANUAL_KEY = '_thermal_transm_walls_manual';

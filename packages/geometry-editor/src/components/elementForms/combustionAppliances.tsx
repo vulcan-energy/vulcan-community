@@ -64,17 +64,6 @@ export const combustionAppliancesFormModule: ElementFormModule<CombustionApplian
     state.setSupplySituation('');
   },
 
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      appliance_type: state.applianceType || undefined,
-      exhaust_situation: state.exhaustSituation || undefined,
-      fuel_type: state.fuelType || undefined,
-      supply_situation: state.supplySituation || undefined,
-      zoneId: undefined // Global object
-    } as Partial<Element>;
-  },
-
   renderPanel(state, ctx) {
     const { applianceType, setApplianceType, exhaustSituation, setExhaustSituation, fuelType, setFuelType, supplySituation, setSupplySituation } = state;
     const { elementType, renderFieldLabel, registerBaseFieldRefs, commitExistingElementDraft } = ctx;

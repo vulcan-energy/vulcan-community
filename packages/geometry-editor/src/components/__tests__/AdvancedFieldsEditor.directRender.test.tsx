@@ -44,7 +44,7 @@ import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometr
 import type { Element, SystemSubcategory } from '../../geometry/types';
 import { AdvancedFieldsEditor, applyEcodesignControlClassEnum } from '../AdvancedFieldsEditor';
 import { newBuildPickerOwnsProductId } from '../systemEditorUtils';
-import { systemFieldDefaults } from '../../lib/systemSchemaFlatten';
+import { derivedFieldDefaults, systemFieldDefaults } from '../../lib/systemSchemaFlatten';
 import {
   DirectAdvancedFields,
   DirectSpecFields,
@@ -2042,6 +2042,27 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(container.textContent).not.toContain('Required, no default');
   });
 
+  it("shows a derived value on its own coil only: a cylinder's heat pump coil, not its boiler coil (E54)", () => {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    const coil = { type: 'object', properties: { temp_flow_limit_upper: { type: 'number' } } };
+    const scope = (name: string) => `#/properties/HotWaterSource/properties/cyl/properties/HeatSource/properties/${name}/properties/temp_flow_limit_upper`;
+    const { container } = render(
+      <GeometryEditorServicePortsProvider schemaPort={canonicalGeometrySchemaPort} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+        <GeometryStoreProvider store={store}>
+          <DirectAdvancedFields
+            schema={{ type: 'object', properties: { HotWaterSource: { type: 'object', properties: { cyl: { type: 'object', properties: { HeatSource: { type: 'object', properties: { hp_coil: coil, boiler_coil: coil } } } } } } } }}
+            data={{ HotWaterSource: { cyl: { HeatSource: { hp_coil: {}, boiler_coil: {} } } } }}
+            layout={{ type: 'VerticalLayout', elements: [{ type: 'Control', scope: scope('hp_coil') }, { type: 'Control', scope: scope('boiler_coil') }] }}
+            config={{ advancedEditor: true, elementType: 'System', defaultProducts: derivedFieldDefaults([{ path: '/HotWaterSource/cyl/HeatSource/hp_coil', field: 'temp_flow_limit_upper', value: 60 }]) }}
+            onDataChange={vi.fn()}
+          />
+        </GeometryStoreProvider>
+      </GeometryEditorServicePortsProvider>,
+    );
+    const placeholders = Array.from(container.querySelectorAll<HTMLElement>('[data-field-key="temp_flow_limit_upper"] input')).map((input) => input.getAttribute('placeholder'));
+    expect(placeholders).toEqual(['60', null]);
+  });
+
   it('config 6 -- WetEmitter, radiator, FHS: per_metre and lumped thermal-mode pruning direct-render characterization', () => {
     assertDirectCharacterization(
       {
@@ -3388,11 +3409,11 @@ describe('EPC system pickers and defaults', () => {
     expect(out.properties.ColdWaterSource.oneOf).toEqual([{ const: 'mains water', title: 'Mains water' }]);
   });
 
-  it('gives a blank field the derived value of its system, and the existing-building defaults', () => {
+  it('keys derived values by their field path, and gives the existing-building defaults', () => {
     const extra = { SpaceHeatSystem: { 'Heating circuit': { type: 'WetDistribution' } }, HeatSourceWet: { feed: { type: 'DirectFeed' } } };
-    const derived = [{ path: '/SpaceHeatSystem/Heating circuit', field: 'design_flow_temp', value: 55 },
-      { path: '/SpaceHeatSystem/Other', field: 'temp_diff_emit_dsgn', value: 10 }];
-    expect(systemFieldDefaults(derived, extra, true)).toEqual({ design_flow_temp: 55, power_max: 15, bypass_fraction_recirculated: 0 });
-    expect(systemFieldDefaults(derived, extra, false)).toEqual({ design_flow_temp: 55, bypass_fraction_recirculated: 0 });
+    expect(derivedFieldDefaults([{ path: '/SpaceHeatSystem/Heating circuit', field: 'design_flow_temp', value: 55 }]))
+      .toEqual({ '/SpaceHeatSystem/Heating circuit/design_flow_temp': 55 });
+    expect(systemFieldDefaults(extra, true)).toEqual({ power_max: 15, bypass_fraction_recirculated: 0 });
+    expect(systemFieldDefaults(extra, false)).toEqual({ bypass_fraction_recirculated: 0 });
   });
 });

@@ -32,7 +32,7 @@ import {
 } from '../lib/simplifiedFabricMap';
 import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
 import type { TargetValidation } from '../types/buildErrors';
-import { systemFieldDefaults } from '../lib/systemSchemaFlatten';
+import { derivedFieldDefaults, systemFieldDefaults } from '../lib/systemSchemaFlatten';
 import { useTargetRules } from '../hooks/useTargetRules';
 import { useShallow } from 'zustand/react/shallow';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../lib/junctionPsiDefaultsCsv';
@@ -45,9 +45,12 @@ import {
 } from '../lib/unheatedSpaceRu';
 import {
   computeGroundUValueFromElementModel,
+  GROUND_U_DERIVED_TEXT,
+  hasGroundUValueCalculator,
+  isStatedNumber,
   parseWindShieldLocation,
   WIND_SHIELD_LOCATION_ENUM,
-} from '../lib/groundUValueCalculator';
+} from '../lib/groundFloor';
 import { EdgeInsulationFields } from './EdgeInsulationFields';
 import { WindowTreatmentFields } from './WindowTreatmentFields';
 import { FancoilTestDataFields } from './FancoilTestDataFields';
@@ -1879,6 +1882,11 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         : null,
     [elementType, currentData, advancedFieldsData, subtype, groundPresetValues],
   );
+  // With no calculator in this host, the converter still derives the U-value of a floor that states a
+  // resistance and no U-value: the field says so, without the number.
+  const groundUDerivedWithoutNumber = elementType === 'BuildingElementGround' && !constructionBands
+    && !hasGroundUValueCalculator()
+    && isStatedNumber(({ ...groundPresetValues, ...(advancedFieldsData as Record<string, unknown>) }).thermal_resistance_floor_construction);
   const resyncSuspendedThermalTransmWalls = useCallback(() => {
     if (
       elementType !== 'BuildingElementGround' ||
@@ -1907,17 +1915,21 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     return classifyOpaqueFabricVariantFromElement((currentData ?? {}) as Record<string, unknown>);
   }, [elementType, currentData]);
 
-  // A plant whose product the target chooses by default shows that product as its Product Id placeholder, by the field's own path.
+  // A plant whose product the target chooses by default shows that product as its Product Id placeholder, and a value the
+  // target derives shows as its field's placeholder, each by the field's own path.
   // Keyed on the element this form edits: the store's selection can be of another kind.
   const productSlots = useGeometryStore((state) => state.targetValidation?.productSlots);
   const selectedName = currentData.name;
-  const defaultProducts = useMemo(() => Object.fromEntries(
-    (productSlots ?? []).flatMap((slot) => (
-      slot.row === selectedName && slot.source === 'default' && slot.product_id != null
-        ? [[`${slot.path}/product_id`, slot.label ?? slot.product_id]]
-        : []
-    )),
-  ), [productSlots, selectedName]);
+  const defaultProducts = useMemo(() => ({
+    ...derivedFieldDefaults(systemDefaults?.derived),
+    ...Object.fromEntries(
+      (productSlots ?? []).flatMap((slot) => (
+        slot.row === selectedName && slot.source === 'default' && slot.product_id != null
+          ? [[`${slot.path}/product_id`, slot.label ?? slot.product_id]]
+          : []
+      )),
+    ),
+  }), [productSlots, selectedName, systemDefaults?.derived]);
 
   // A stated outside colour gives the solar absorption coefficient unless one is entered.
   const offersColour = elementType !== 'System' && (hemDatabaseProducts || !!getActiveElementSubschema(elementType, subtype)?.properties?.colour);
@@ -1938,12 +1950,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? openRuCalculator
             : undefined,
         openGroundUCalculator:
-          elementType === 'BuildingElementGround'
+          elementType === 'BuildingElementGround' && hasGroundUValueCalculator()
             ? openGroundUCalculator
             : undefined,
         groundUComputedWPerM2K:
           elementType === 'BuildingElementGround' ? groundUComputedWPerM2K : undefined,
         groundUFromCalculation: elementType === 'BuildingElementGround' && !constructionBands,
+        groundUDerivedWithoutNumber,
         resyncSuspendedThermalTransmWalls:
           shouldUseGroundThermalTransmWallsAutofill
             ? resyncSuspendedThermalTransmWalls
@@ -1979,10 +1992,11 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
               : thermalMethod === 'band' && elementType === 'BuildingElementTransparent' ? COLLAPSED_BAND_WINDOW_FIELDS : COLLAPSED_ENGINE_FIELDS)
             : colourAbsorption !== undefined ? COLLAPSED_COLOUR_FIELDS : undefined,
         derivedDefaults: elementType === 'System'
-          ? systemFieldDefaults(systemDefaults?.derived, advancedFieldsData, existingBuilding)
+          ? systemFieldDefaults(advancedFieldsData, existingBuilding)
           // The converter gives a blank ground U-value the floor calculation's (`ground_u_value.rs`).
           : elementType === 'BuildingElementGround' && !constructionBands && groundUComputedWPerM2K != null
             ? { u_value: Number(groundUComputedWPerM2K.toFixed(4)) }
+            : groundUDerivedWithoutNumber ? { u_value: GROUND_U_DERIVED_TEXT }
             : colourAbsorption !== undefined ? { solar_absorption_coeff: colourAbsorption } : undefined,
         // A combi's daily hot water comes from the occupancy (`combi_daily_hot_water`, DESNZ question E33).
         derivedSourceNotes: elementType === 'System' ? { daily_HW_usage: 'from occupancy' }
@@ -2010,6 +2024,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           ),
         } : undefined,
         defaultProducts: elementType === 'System' ? defaultProducts : undefined,
+        productRule: elementType === 'System' && hemDatabaseProducts,
       }),
     [
       flat,
@@ -2022,6 +2037,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       openRuCalculator,
       openGroundUCalculator,
       groundUComputedWPerM2K,
+      groundUDerivedWithoutNumber,
       resyncSuspendedThermalTransmWalls,
       suspendedThermalTransmWallsAutofillHasSources,
       suspendedThermalTransmWallsAutofill.value_W_m2K,
@@ -2035,7 +2051,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       subschema,
       systemSampleBaselineAvailable,
       systemSampleBaselineExtraJson,
-      systemDefaults,
       defaultProducts,
       hemDatabaseProducts,
       advancedFieldsData,
@@ -2843,6 +2858,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
               elementsById={elementsById}
               systemElement={currentElementData as System}
               flat={flat}
+              heatPumpFlowLimitDefaulted={hemDatabaseProducts}
               onPatchExtraJson={(fn) => {
                 const base = readExtraJsonRecord(currentData.extra_json);
                 onChange({ ...currentData, extra_json: fn(base) });
@@ -2897,6 +2913,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         onDataChange={(data) => handleAdvancedFieldsChange({ data, errors: [] })}
         beforeMore={hostFields}
         hostMore={hostMoreFields}
+        focusFieldKey={focusFieldKey}
+        focusFieldVersion={focusFieldVersion}
       />
       {elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple' && (
         <UnheatedSpaceRuCalculatorModal

@@ -9,7 +9,6 @@ import { deriveFloorsFromElements, editorFloorsAndElementsForParsedCsv } from '.
 import { validateElementCore } from '../../validation/validateElement';
 import { unavailableGeometrySchemaPort } from '../../../../../geometry-editor-host/src/schemaPort';
 import { GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR } from '../../../lib/overrideProvenance';
-import { computeGroundUValueFromElementModel } from '../../../lib/groundUValueCalculator';
 import { GROUND_U_VALUE_MANUAL_KEY } from '../../../lib/groundSuspendedFabricSync';
 import type { Element, Floor } from '../../types';
 
@@ -461,7 +460,7 @@ describe('CSV-side validation matches the editor', () => {
   });
 });
 
-describe('calculated floor U-value on an existing building', () => {
+describe('stored floor U-value on load', () => {
   const floorCsv = (extra: Record<string, unknown>) => `Metadata,,
 VulcanCsvVersion,3
 IsExistingBuilding,TRUE
@@ -474,7 +473,7 @@ Ground Elements,,
 Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,parent_element,coords,extra_json
 Floor,Zone 1,BuildingElementGround,20,0,0,18,Slab_no_edge_insulation,,0.3,,"0,0,0|5,0,0|5,4,0|0,4,0","${JSON.stringify({ thermal_resistance_floor_construction: 1.5, ...extra }).replace(/"/g, '""')}"
 `;
-  const calculated = Number(computeGroundUValueFromElementModel({ total_area: 20, perimeter: 18, thickness_walls: 0.3 }, { thermal_resistance_floor_construction: 1.5 }, 'Slab_no_edge_insulation')!.toFixed(4));
+  const calculated = 0.3019;
   // Construction bands come from the target: an EPC existing building has them, an FHS model with a stale flag does not.
   const load = (extra: Record<string, unknown>, constructionBands = true) => {
     const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: { ...unavailableGeometrySchemaPort, targetRules: () => ({ constructionBands }) } });
@@ -483,27 +482,20 @@ Floor,Zone 1,BuildingElementGround,20,0,0,18,Slab_no_edge_insulation,,0.3,,"0,0,
     return { result, extra: floor.extra_json ?? {} };
   };
 
-  it('removes a U-value the editor wrote on its own, with a load notice, so the age band applies', () => {
-    const { result, extra } = load({ u_value: calculated });
-    expect(extra.u_value).toBeUndefined();
-    expect(result.upgraded).toBe(true);
-    expect(result.warnings).toContain('Calculated floor U-value removed, so the age band applies: Floor. To use a calculated value, open Calculate U-value and apply it.');
+  it('keeps every stored U-value as the file states it: the editor computes none on load', () => {
+    for (const bands of [true, false]) {
+      expect(load({ u_value: calculated }, bands).extra.u_value).toBe(calculated);
+      expect(load({ u_value: 0.45 }, bands).extra.u_value).toBe(0.45);
+      expect(load({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true }, bands).extra.u_value).toBe(calculated);
+    }
   });
 
-  it('keeps a U-value the user applied, one that differs from the calculation, and one from an applied assembly (marking it stated)', () => {
-    expect(load({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true }).extra.u_value).toBe(calculated);
-    expect(load({ u_value: 0.45 }).extra.u_value).toBe(0.45);
+  it('marks an applied assembly\'s U-value stated under construction bands, and only there', () => {
     const assembly = load({ u_value: calculated, vulcan_assembly_v1: { schemaVersion: 1 } });
     expect(assembly.extra).toMatchObject({ u_value: calculated, [GROUND_U_VALUE_MANUAL_KEY]: true });
-    expect(assembly.result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
-  });
-
-  it('without construction bands removes it silently: the converter works the same value out', () => {
-    const { result, extra } = load({ u_value: calculated }, false);
-    expect(extra.u_value).toBeUndefined();
-    expect(result.warnings.some((w) => w.startsWith('Calculated floor U-value removed'))).toBe(false);
-    // The calculation's value from a build-up goes too; a stated one stays.
-    expect(load({ u_value: calculated, vulcan_assembly_v1: { schemaVersion: 1 } }, false).extra.u_value).toBeUndefined();
-    expect(load({ u_value: 0.45 }, false).extra.u_value).toBe(0.45);
+    expect(assembly.result.upgraded).toBe(true);
+    const fhs = load({ u_value: calculated, vulcan_assembly_v1: { schemaVersion: 1 } }, false);
+    expect(fhs.extra.u_value).toBe(calculated);
+    expect(fhs.extra[GROUND_U_VALUE_MANUAL_KEY]).toBeUndefined();
   });
 });

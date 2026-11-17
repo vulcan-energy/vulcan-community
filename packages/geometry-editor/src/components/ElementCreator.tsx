@@ -99,7 +99,7 @@ import {
 } from '../lib/groundSuspendedFabricSync';
 import {
   computeGroundUValueFromElementModel,
-} from '../lib/groundUValueCalculator';
+} from '../lib/groundFloor';
 import type {
   BuildingElementOpaque,
   BuildingElementTransparent,
@@ -900,7 +900,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const DetailedJunctionControl =
     inspectorContributions.detailedJunctionSolver?.Control;
   const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = useTargetRules();
-  const defaultsJson = useGeometryStore((s) => s.defaultsJson);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
@@ -1203,7 +1202,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, [selection]);
 
   const isExistingElementSelection = useCallback((target: Selection = selection): target is NonNullable<Selection> & { type: 'element' | 'global' } => {
-    return !!target && (target.type === 'element' || target.type === 'global') && !target.isPlaceholder;
+    return !!target && (target.type === 'element' || target.type === 'global');
   }, [selection]);
 
   const getZoneNameForElementZoneId = useCallback((zoneId: unknown): string | null => {
@@ -1590,12 +1589,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // applyOrientationToGeometry now live in elementForms/wallShared.tsx
   // (wallShared.orientation360 etc.).
 
-  // roundToInt moved with buildNewElementData's Opaque case to
-  // elementForms/buildingElementOpaque.tsx (slice-6 brief STAGE 4) — that
-  // was its only remaining caller; the module uses a plain
-  // `Math.round(state.orientation360 ?? 0)` inline instead, matching
-  // buildingElementTransparent.tsx's own orientation360 rounding.
-
   // NEW: CSV v3 element state variables
   // WindowShading's own exclusive state (linkedWindow/shadingType/depthInput/
   // transparencyInput) now lives in its module (elementForms/windowShading.tsx).
@@ -1703,7 +1696,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       // Transparent's first ctx.shared consumer (slice-6 brief STAGE 3) — see
       // ElementFormSharedCtx.baseHeightInput's doc comment in types.ts.
       baseHeightInput: wallShared.baseHeightInput,
-      spaceHeatSystem,
       setSpaceHeatSystem,
     },
     elementIds,
@@ -1921,7 +1913,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     renderDormerBundleEditor,
     regenerateDormerAnchor,
     commitDormerAnchorChanges,
-    handleSaveDormerAnchor,
     handleDuplicateDormerBundle,
     getDormerBundleNameIssue,
   } = dormerBundleEditor;
@@ -1984,11 +1975,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const selectedSystemElementFull = useMemo(() => {
     void selectedElementV;
     if (elementType !== 'System') return null;
-    if (!selection?.id || selection.isPlaceholder) return null;
+    if (!selection?.id) return null;
     if (selection.type !== 'element' && selection.type !== 'global') return null;
     const element = getElementById(selection.id);
     return element?.type === 'System' ? element : null;
-  }, [elementType, selection?.id, selection?.isPlaceholder, selection?.type, selectedElementV, getElementById]);
+  }, [elementType, selection?.id, selection?.type, selectedElementV, getElementById]);
   const heatSourceWetReferenceOptions = useMemo(() => {
     const seen = new Set<string>();
     const options: Array<{ value: string; label: string }> = [];
@@ -2061,9 +2052,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // and the "System UI mode follows persisted source-of-truth" store-sync
   // effect all moved into elementForms/system.tsx's useFormState (slice-5
   // brief decision (f).2) — see that module's header. withSystemSourceMeta
-  // below is the one small pure helper duplicated in both files (this copy
-  // for createSpaceHeatSystemForCurrentEmitter just below, which stays
-  // orchestrator-owned per decision (f).1's CONSERVATIVE six).
+  // serves createSpaceHeatSystemForCurrentEmitter just below, which stays
+  // orchestrator-owned per decision (f).1's CONSERVATIVE six.
   const withSystemSourceMeta = useCallback(
     (extraJson: Record<string, unknown> | null | undefined, source: SystemElementSource): Record<string, unknown> | null => {
       if (!extraJson || typeof extraJson !== 'object' || Array.isArray(extraJson)) return null;
@@ -2188,13 +2178,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         value,
       );
       nextExtraJson[SYSTEM_SOURCE_META_KEY] = 'custom';
-      systemFormState.setSystemExtraJson(nextExtraJson);
       updateElement(selectedSystemElementFull.id, {
         extra_json: nextExtraJson,
       } as Partial<Element>);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- systemFormState itself is a fresh object every render (elementForms/system.tsx's useFormState returns a plain object literal, not memoized); systemFormState.setSystemExtraJson is the stable useState setter within it, already listed.
-    [selectedSpaceHeatSystemUsesHeatSourceWet, selectedSystemElementFull, updateElement, systemFormState.setSystemExtraJson],
+    [selectedSpaceHeatSystemUsesHeatSourceWet, selectedSystemElementFull, updateElement],
   );
 
   const handleCreateHeatSourceForSelectedSpaceHeatSystem = useCallback(() => {
@@ -2308,7 +2296,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     void selectedElementV;
     const productCatalogue = inspectorContributions.productCatalogue;
     if (elementType !== 'System' || !productCatalogue) return false;
-    if (!selection?.id || selection.isPlaceholder) return false;
+    if (!selection?.id) return false;
     if (selection.type !== 'element' && selection.type !== 'global') return false;
     const el = getElementById(selection.id) as { type?: string; extra_json?: unknown } | undefined;
     if (!el || el.type !== 'System') return false;
@@ -2317,7 +2305,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     elementType,
     inspectorContributions.productCatalogue,
     selection?.id,
-    selection?.isPlaceholder,
     selection?.type,
     selectedElementV,
     getElementById,
@@ -2758,60 +2745,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // buildingElementGroundFormState's useFormState (elementForms/
   // buildingElementGround.tsx, slice-6 brief Stage 1).
 
-  // Add effect to handle placeholder discard/auto-save
-  useEffect(() => {
-    if (selection && selection.isPlaceholder) {
-      // Only run if selection is a placeholder
-      const currentSelection = geometryStore.getState().selection;
-      if (!currentSelection || currentSelection.id !== selection.id) {
-        // Check if the item is actually filled by looking at the store data, not form state
-        let filled = false;
-        if (selection.type === 'zone') {
-          const zone = getZoneById(selection.id);
-          filled = !!zone && !zone.isPlaceholder && (
-            !!zone.name || (typeof zone.volume === 'number' && zone.volume > 0) || (typeof zone.floorArea === 'number' && zone.floorArea > 0)
-          );
-        } else if (selection.type === 'element') {
-          const element = getElementById(selection.id);
-          filled = !!element && (!('isPlaceholder' in element && element.isPlaceholder)) && (
-            !!element.name ||
-            ('width' in element && typeof element.width === 'number' && element.width > 0) ||
-            ('height' in element && typeof element.height === 'number' && element.height > 0) ||
-            ('area' in element && typeof element.area === 'number' && element.area > 0)
-          );
-        } else if (selection.type === 'global') {
-          const element = getElementById(selection.id);
-          // For global objects, consider them filled if they exist and have their required properties
-          // Global objects are created with default values, so we check for the presence of type-specific properties
-          // Don't check isPlaceholder flag for global objects since they should stay visible until user fills them
-          filled = !!element && (
-            // WaterPipework: check for pipework-specific properties
-            (element.type === 'WaterPipework' && 'simplified_pipework' in element) ||
-            // Appliance: check for appliance-specific properties
-            (element.type === 'Appliance' && 'appliancekey' in element) ||
-            // HotWaterDemand: check for hot water-specific properties
-            (element.type === 'HotWaterDemand' && 'subcategory' in element) ||
-            // ContextShading: check for shading-specific properties
-            (element.type === 'ContextShading' && 'shading_type' in element) ||
-            // NEW: InfiltrationVentilation types
-            // Vents: check for vents-specific properties
-            (element.type === 'Vents' && 'mid_height_air_flow_path' in element) ||
-            // MechanicalVentilation: check for mechanical ventilation-specific properties
-            (element.type === 'MechanicalVentilation' && 'vent_type' in element) ||
-            (element.type === 'MechanicalVentilationDuctwork' && 'duct_type' in element) ||
-            (element.type === 'MechanicalVentilationTerminal' && 'terminal_type' in element) ||
-            // CombustionAppliances: check for combustion appliances-specific properties
-            (element.type === 'CombustionAppliances' && 'appliance_type' in element)
-          );
-        }
-
-        if (!filled) {
-          removePlaceholder('zone', selection.id);
-          // Don't set selection to null here as it might already be set to something else
-        }
-      }
-    }
-  }, [selection, getZoneById, getElementById, geometryStore, removePlaceholder]); // Add store functions to dependencies
 
   // getDormerBundleNameIssue moved to components/DormerBundleEditor.tsx
   // (slice-6 brief STAGE 5); destructured from dormerBundleEditor above.
@@ -2852,9 +2785,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // Helper function to check field validation issues
   //
   // LEFT CENTRALIZED (slice-6 brief decision 5): this is the sixth parallel
-  // structure the scoping pass found, after hydrate/buildElementData/
+  // structure the scoping pass found, after hydrate/
   // renderAttributePanel/resetFormFields/getElementSubtype — but unlike
-  // those five, the ElementFormModule contract has no `validate` method, and
+  // those four, the ElementFormModule contract has no `validate` method, and
   // every one of the 17 families extracted before the wall family (System,
   // WetEmitter, Vents, etc.) left its own field-validation cases inline here
   // rather than growing one. The wall-family cases below (width/height/area/
@@ -3167,62 +3100,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       .map((id) => elementsById[id])
       .filter((element): element is Element => Boolean(element)), [elementsById]);
 
-  const selectedIsDormerAnchorRef = useRef(false);
-  const buildNewElementDataRef = useRef<() => Partial<Element>>(() => ({}));
-
-  const handleSaveElement = () => {
-    if (!elementName.trim() || (!isGlobalElementType(elementType) && !elementZoneId)) {
-      alert('Please fill in all required fields');
-      return;
-    }
-
-    try {
-      if (selection.type === 'element' && selection.id && selectedIsDormerAnchorRef.current) {
-        handleSaveDormerAnchor(selection.id);
-        return;
-      }
-
-      const elementData = buildNewElementDataRef.current();
-      // A new fan or PV array on a model with one electricity supply takes it; opening an element never writes.
-      const saved = selection.id ? getElementById(selection.id) : undefined;
-      if ((!saved || saved.isPlaceholder) && hemDatabaseProducts && (elementType === 'MechanicalVentilation' || elementType === 'OnSiteGeneration')) {
-        const supplies = readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply);
-        const electric = Object.keys(supplies).filter((name) => readExtraJsonRecord(supplies[name]).fuel === 'electricity');
-        const extra = readExtraJsonRecord(elementData.extra_json);
-        if (electric.length === 1 && extra.EnergySupply === undefined) elementData.extra_json = { ...extra, EnergySupply: electric[0] };
-      }
-      if ((selection.type === 'element' || selection.type === 'global') && selection.id) {
-        const existingElement = getElementById(selection.id);
-        if (existingElement && existingElement.isPlaceholder) {
-          elementData.isPlaceholder = false;
-        }
-
-        // For existing elements, preserve coordinates to prevent position reset
-        if (existingElement && !existingElement.isPlaceholder) {
-          // Remove orientation360 from updates to prevent coordinate recalculation
-          const safeUpdates: Partial<Element> & { orientation360?: unknown } = { ...elementData };
-          delete safeUpdates.orientation360;
-          updateElement(selection.id, safeUpdates);
-        } else {
-          updateElement(selection.id, elementData);
-        }
-
-        if (existingElement && existingElement.isPlaceholder) {
-          setSelection({ type: selection.type, id: selection.id });
-        }
-      } else {
-        addElement(elementData as Omit<Element, 'id'>);
-        setSelection(null);
-      }
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to save element');
-    }
-  };
   const handleAddZoneRef = useRef(handleAddZone);
-  const handleSaveElementRef = useRef(handleSaveElement);
   useEffect(() => {
     handleAddZoneRef.current = handleAddZone;
-    handleSaveElementRef.current = handleSaveElement;
   });
 
   // Submit on Enter: Update Zone or Update Element depending on selection
@@ -3232,9 +3112,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         if (selection?.type === 'zone' && selection.isPlaceholder) {
           e.preventDefault();
           handleAddZoneRef.current();
-        } else if ((selection?.type === 'element' || selection?.type === 'global') && selection.isPlaceholder) {
-          e.preventDefault();
-          handleSaveElementRef.current();
         }
       }
     };
@@ -3260,7 +3137,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // "Thermal values from" (lib/thermalMethod.ts): the stored values say which method an element
   // uses; a switch is the user's choice until the next element is selected.
-  const thermalElement = selection?.type === 'element' && !selection.isPlaceholder && !selectedIsDormerAnchor
+  const thermalElement = selection?.type === 'element' && !selectedIsDormerAnchor
     && selectedElement && thermalMethodElementType(selectedElement.type) ? selectedElement : null;
   const thermalGroundU = useMemo(() => (thermalElement?.type === 'BuildingElementGround'
     ? computeGroundUValueFromElementModel(thermalElement as unknown as Record<string, unknown>, readExtraJsonRecord(thermalElement.extra_json), thermalElement.floor_type)
@@ -3296,9 +3173,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       commitExistingElementDraft(patch);
     }
   };
-  useEffect(() => {
-    selectedIsDormerAnchorRef.current = selectedIsDormerAnchor;
-  }, [selectedIsDormerAnchor]);
   useEffect(() => {
     if (!selection || (selection.type !== 'element' && selection.type !== 'global')) return;
     if (selectedIsDormerAnchor) return;
@@ -3662,30 +3536,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     renderFieldLabel,
     fieldUnit,
     getFieldValidationState,
-  });
-
-  const buildNewElementData = (): Partial<Element> => {
-    const viewerElevationPatch =
-      elementSupportsGenericElevationControl(elementType, null, buildingElementGroundFormState.floorType) &&
-      typeof elementElevationInput.value === 'number' &&
-      Number.isFinite(elementElevationInput.value)
-        ? { _base_height: roundToTwoDecimals(elementElevationInput.value) }
-        : {};
-    const baseData = {
-      name: elementName.trim(),
-      zoneId: elementZoneId,
-      floorId: elementFloorId,
-      type: elementType,
-      ...viewerElevationPatch,
-    };
-
-    const form = elementFormInstances[elementType];
-    return form
-      ? form.buildElementData({ baseData, elementZoneId, getZoneNameForElementZoneId })
-      : <div>Select an element type to see attributes</div>;
-  };
-  useEffect(() => {
-    buildNewElementDataRef.current = buildNewElementData;
   });
 
   // Helper functions for AdvancedFieldsEditor
@@ -4104,7 +3954,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // method they show only what that method uses.
   const renderHostElementFields = (method?: ThermalMethod, section?: 'more') => (
     selection?.type === 'element' &&
-    !selection.isPlaceholder &&
     selectedElement &&
     ElementFieldsRenderer &&
     inspectorContributions.elementFields?.elementTypes.includes(selectedElement.type) ? (
@@ -4173,7 +4022,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   ) : null;
 
   const windowWallLink = (
-    selection?.type === 'element' && !selection.isPlaceholder && selectedElement?.type === 'BuildingElementTransparent' ? (
+    selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent' ? (
       <WindowWallLink
         parentName={wallShared.parentElement}
         zoneId={elementZoneId}
@@ -4469,18 +4318,17 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     const el = getElementById(selection.id);
                     if (!el) { setElementType(nextType); return; }
                     const nextSelectionType = isGlobalObject({ type: nextType }) ? 'global' : 'element';
+                    // A type that does not take the drawn shape converts it rather than losing it.
                     const shape = getElementShape(el as any);
-                    if (isTypeShapeCompatible(nextType, shape)) {
-                      setElementType(nextType);
-                      updateElement(el.id, { type: nextType } as Partial<Element>);
-                      setSelection({ ...selection, type: nextSelectionType });
-                    } else {
-                      const ok = window.confirm('Changing the element type may convert its shape. Continue?');
-                      if (!ok) { return; }
-                      setElementType(nextType);
-                      updateElement(el.id, { type: nextType } as Partial<Element>);
-                      setSelection({ ...selection, type: nextSelectionType });
-                    }
+                    const nextShape = isTypeShapeCompatible(nextType, shape)
+                      ? null
+                      : (['point', 'line', 'polygon', 'sloped-polygon'] as const).find((candidate) => isTypeShapeCompatible(nextType, candidate));
+                    setElementType(nextType);
+                    updateElement(el.id, {
+                      type: nextType,
+                      ...(nextShape ? { coordinates: convertShapeCoordinates(el as any, nextShape) } : {}),
+                    } as Partial<Element>);
+                    setSelection({ ...selection, type: nextSelectionType });
                   }}
                   // An existing element keeps its type when the target does not take it; it is not offered for others.
                   options={elementTypeOptions}
@@ -4728,7 +4576,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             )}
 
             {/* System rows are 'global' selections. */}
-            {(selection.type === 'element' || selection.type === 'global') && !selection.isPlaceholder && selectedElement && (
+            {(selection.type === 'element' || selection.type === 'global') && selectedElement && (
               <ProductSlotChips
                 element={selectedElement as unknown as Readonly<Record<string, unknown>> & { name?: string }}
                 productCatalogue={inspectorContributions.productCatalogue}
@@ -5227,7 +5075,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 {selection.type === 'element' || selection.type === 'global' ? (
                   <div className="advanced-fields-full-width">
                     {selection.type === 'element' &&
-                      !selection.isPlaceholder &&
                       !selectedIsDormerAnchor &&
                       elementType === 'BuildingElementAdjacentConditionedSpace' &&
                       selectedShape === 'polygon' && (
@@ -5275,7 +5122,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     {sharedRoofNote}
                     {elementType !== 'BuildingElementTransparent' && thermalMethodControl}
                     {selection.type === 'element' &&
-                      !selection.isPlaceholder &&
                       !selectedIsDormerAnchor &&
                       (thermalMethod ? thermalMethod === 'calculation' : elementType === 'BuildingElementPartyWall') && (
                       <div className="element-editor-section-spacer">
@@ -5354,7 +5200,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           <div className="element-creator-sticky-footer">
             <div
               className={`form-actions ${
-                selection.type !== 'zone' && !selection.isPlaceholder
+                selection.type !== 'zone'
                   ? 'element-editor-actions-row element-editor-actions-row--three'
                   : 'element-editor-actions-row element-editor-actions-row--two'
               }`}
@@ -5370,7 +5216,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     {selection.isPlaceholder ? (
                       <button
                         className="btn btn-standard btn-danger editor-action-btn editor-action-btn--danger"
-                        onClick={() => { removePlaceholder('zone', selection.id); }}
+                        onClick={() => { removePlaceholder(selection.id); }}
                       >
                         Discard
                       </button>
@@ -5387,44 +5233,33 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               ) : (
                 <>
                   <div className="element-editor-footer-group">
-                    <button onClick={selection.isPlaceholder ? handleSaveElement : () => setSelection(null)} className="btn btn-standard btn-yellow editor-action-btn editor-action-btn--primary">
-                      {selection.isPlaceholder ? 'Add Element' : 'Done'}
+                    <button onClick={() => setSelection(null)} className="btn btn-standard btn-yellow editor-action-btn editor-action-btn--primary">
+                      Done
                     </button>
-                    {!selection.isPlaceholder && (
-                      <button
-                        className="btn editor-action-btn editor-action-btn--secondary"
-                        onClick={() => {
-                          if (selectionRepresentsDormer) {
-                            try {
-                              handleDuplicateDormerBundle(selection.id);
-                            } catch (error) {
-                              alert(error instanceof Error ? error.message : 'Failed to duplicate dormer');
-                            }
-                            return;
+                    <button
+                      className="btn editor-action-btn editor-action-btn--secondary"
+                      onClick={() => {
+                        if (selectionRepresentsDormer) {
+                          try {
+                            handleDuplicateDormerBundle(selection.id);
+                          } catch (error) {
+                            alert(error instanceof Error ? error.message : 'Failed to duplicate dormer');
                           }
-                          duplicateElement(selection.id);
-                        }}
-                      >
-                        Duplicate
-                      </button>
-                    )}
+                          return;
+                        }
+                        duplicateElement(selection.id);
+                      }}
+                    >
+                      Duplicate
+                    </button>
                   </div>
                   <div className="element-editor-footer-group element-editor-footer-group--danger">
-                    {selection.isPlaceholder ? (
-                      <button
-                        className="btn btn-standard btn-danger editor-action-btn editor-action-btn--danger"
-                        onClick={() => { removePlaceholder('element', selection.id); }}
-                      >
-                        Discard
-                      </button>
-                    ) : (
-                      <button
-                        className="btn btn-standard btn-danger editor-action-btn editor-action-btn--danger"
-                        onClick={handleElementDelete}
-                      >
-                        Delete
-                      </button>
-                    )}
+                    <button
+                      className="btn btn-standard btn-danger editor-action-btn editor-action-btn--danger"
+                      onClick={handleElementDelete}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </>
               )}
@@ -5433,7 +5268,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         )}
       {assemblyCalculatorOpen &&
         selection.type === 'element' &&
-        !selection.isPlaceholder &&
         ((!selectedIsDormerAnchor &&
           (elementType === 'BuildingElementOpaque' ||
             elementType === 'BuildingElementGround' ||

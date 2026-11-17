@@ -24,6 +24,7 @@ pub mod preflight_diagnostics;
 mod schema_validation;
 mod target_mappings;
 pub use builder::add_builtin_energy_supplies;
+pub use ground_u_value::ground_floor_u_value;
 pub use hemie::{HemieQuadrant, HemieShading};
 pub use target_mappings::map_target_unobstructed_shading;
 

@@ -41,8 +41,11 @@ const METHODS: { value: EdgeInsulationMethod; label: string }[] = [
   { value: 'resistance', label: 'Resistance' },
   { value: 'thickness', label: 'Thickness and material' },
 ];
-/** HEMIE takes a material's conductivity from its own table, which has none for XPS: XPS needs one stated. */
-const NEEDS_CONDUCTIVITY = new Set(['XPS']);
+/**
+ * HEMIE takes a material's conductivity from its own table, which has none for XPS. The converter
+ * gives XPS the value of HEMIE's `Material.XPS` (`XPS_CONDUCTIVITY` in `hemie.rs`).
+ */
+const XPS_CONDUCTIVITY = '0.036 (default)';
 
 export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
   value,
@@ -127,7 +130,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
     const dimension = number('widthOrDepth', <ResolvedFieldLabel presentation={dimensionPresentation} useFHSSchema={schemaMode === 'fhs'} />,
       fieldUnitForAdornment(dimensionPresentation), existing && type === 'vertical' ? '0.26 m (default)' : undefined);
     const conductivity = number('thermalConductivity', hemieFieldLabel('thermal_conductivity'), 'W/m·K',
-      NEEDS_CONDUCTIVITY.has(form[type].material) ? 'Required for XPS' : 'From the material');
+      form[type].material === 'XPS' ? XPS_CONDUCTIVITY : 'From the material');
     return (
       <div key={type}>
         <div style={{ margin: ROW_MARGIN(compact), fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)' }}>
@@ -140,12 +143,9 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
             <StandardDropdown label={hemieFieldLabel('material')} value={form[type].material} options={materials}
               onChange={(value) => set({ material: value })} placeholder="Mineral wool (default)" variant="ghost" size="md" />
           </div>
-          {/* A conductivity XPS needs stays in view; otherwise it is detail. */}
-          {NEEDS_CONDUCTIVITY.has(form[type].material) ? conductivity : (
-            <GroupAccordion label="More" hint="thermal conductivity" openInitially={!!form[type].thermalConductivity}>
-              {conductivity}
-            </GroupAccordion>
-          )}
+          <GroupAccordion label="More" hint="thermal conductivity" openInitially={!!form[type].thermalConductivity}>
+            {conductivity}
+          </GroupAccordion>
         </>}
       </div>
     );

@@ -51,11 +51,11 @@ const DEFAULT_HWOHP = {
   },
 };
 
-function defaultWetHeaterSource(name: string): Record<string, unknown> {
+function defaultWetHeaterSource(name: string, flowLimit: boolean): Record<string, unknown> {
   return {
     type: 'HeatSourceWet',
     name,
-    temp_flow_limit_upper: 65,
+    ...(flowLimit ? { temp_flow_limit_upper: 65 } : {}),
     heater_position: 0.1,
     thermostat_position: 0.33,
   };
@@ -66,7 +66,10 @@ export const DhwStorageHeatSourcePicker: React.FC<{
   systemElement: System;
   onPatchExtraJson: (fn: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
   flat?: boolean;
-}> = ({ elementsById, systemElement, onPatchExtraJson, flat }) => {
+  /** HEM:EPC: a heat pump's coil leaves its upper flow limit blank for the converter's default
+   * (`apply_desnz_defaults`, DESNZ question E54). */
+  heatPumpFlowLimitDefaulted?: boolean;
+}> = ({ elementsById, systemElement, onPatchExtraJson, flat, heatPumpFlowLimitDefaulted }) => {
   const setSelection = useGeometryStore((state) => state.setSelection);
   const [choice, setChoice] = React.useState('');
   const wetNames = collectHeatSourceWetNamesFromProject(elementsById);
@@ -80,6 +83,8 @@ export const DhwStorageHeatSourcePicker: React.FC<{
       return { ...prev, HotWaterSource: { ...sources, [tankName]: { ...tank, HeatSource: update(readRecord(tank.HeatSource)) } } };
     });
   };
+  const isHeatPump = (name: string) => Object.values(elementsById)
+    .some((element) => readRecord(readRecord(readRecord(element.extra_json).HeatSourceWet)[name]).type === 'HeatPump');
   const addHeater = (tankName: string) => {
     if (!choice) return;
     onPatchExtraJson((prev) => {
@@ -94,7 +99,7 @@ export const DhwStorageHeatSourcePicker: React.FC<{
       let name = base;
       for (let i = 2; usedNames.has(name); i++) name = `${base}_${i}`;
       const heater = choice === IMMERSION_VALUE ? defaultImmersionHeater(3)
-        : choice === HWOHP_VALUE ? structuredClone(DEFAULT_HWOHP) : defaultWetHeaterSource(choice.slice(4));
+        : choice === HWOHP_VALUE ? structuredClone(DEFAULT_HWOHP) : defaultWetHeaterSource(choice.slice(4), !(heatPumpFlowLimitDefaulted && isHeatPump(choice.slice(4))));
       return { ...prev, HotWaterSource: { ...sources, [tankName]: {
         ...(choice === HWOHP_VALUE ? { heat_exchanger_surface_area: DEFAULT_HWOHP_CYLINDER_HEAT_EXCHANGER_AREA } : {}),
         ...tank, HeatSource: { ...heaters, [name]: heater },

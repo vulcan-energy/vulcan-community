@@ -49,12 +49,12 @@ export interface OnSiteHostDerivation {
  * (wallFamily.tsx). WindowShading, ContextShading, and Vents share pieces of this
  * state with the wall family and MUST read/write it only through these bindings. Captured once by
  * a module's useFormState (which does receive ctx) and carried in its returned
- * state so hydrate/reset/buildElementData/renderPanel (which mostly don't) can
+ * state so hydrate/reset/renderPanel (which mostly don't) can
  * still reach it — the same passthrough precedent as OnSiteGeneration's
  * getCurrentOrientation. */
 export interface ElementFormSharedCtx {
   /** WindowShading/ContextShading's editable height field; also
-   * BuildingElementGround's hydrate/buildElementData (elementForms/
+   * BuildingElementGround's hydrate (elementForms/
    * buildingElementGround.tsx) — Ground never renders it, but preserves the
    * legacy hydrate write for byte-identical behaviour. */
   heightInput: NumericDraftInputBinding;
@@ -101,7 +101,7 @@ export interface ElementFormSharedCtx {
    * state directly. Implemented in the orchestrator as the existing
    * setPitch/setOrientation360 calls. */
   applyParentPitchOrientationForDisplay: (pitch: number | undefined, orientation: number | undefined) => void;
-  /** WetEmitter's selected SpaceHeatSystem name (elementForms/wetEmitter.tsx) —
+  /** Sets WetEmitter's selected SpaceHeatSystem name (elementForms/wetEmitter.tsx) —
    * NOT a wall-family field, but bridged here for the same structural reason:
    * ElementFormRenderCtx.renderSpaceHeatSystemPicker (the orchestrator-owned
    * System<->WetEmitter bridge, slice-5 brief decision (f).1) is a zero-arg
@@ -112,7 +112,6 @@ export interface ElementFormSharedCtx {
    * shape as parentElement/pitch/orientation360 above — resolves the seam
    * without changing the picker callback's locked `() => ReactNode` contract.
    * See elementForms/wetEmitter.tsx's header for the full writeup. */
-  spaceHeatSystem: string;
   setSpaceHeatSystem: (value: string) => void;
 }
 
@@ -174,10 +173,9 @@ export interface ElementFormStateCtx {
    * by any other name. */
   workspaceResourcePort: GeometryWorkspaceResourcePort;
   /** System's `applySystemPresetChange` needs the selected element's zone
-   * NAME (not just its id) to seed a preset's `Zone` field — the same
-   * orchestrator helper reused verbatim on ElementFormBuildCtx below for
-   * buildElementData's equivalent need, rather than exposing the raw
-   * zones/getZoneById store surface generically. System-only consumer. */
+   * NAME (not just its id) to seed a preset's `Zone` field, rather than
+   * exposing the raw zones/getZoneById store surface generically.
+   * System-only consumer. */
   getZoneNameForElementZoneId: (zoneId: unknown) => string | null;
   /** Derived base_height from the selected floor's Z-level and cumulative
    * storey heights below (effective storey heights bake in wall-derived
@@ -201,18 +199,6 @@ export interface ElementFormStateCtx {
    * getGlobalOrientationOffset/getCurrentOrientation above. Transparent-only
    * consumer. */
   getTransparentOpeningDerivedValues: (element: BuildingElementTransparent) => TransparentOpeningDerivedValues;
-}
-
-export interface ElementFormBuildCtx {
-  baseData: Record<string, unknown>;
-  elementZoneId: string;
-  /** System's buildElementData syncs the SpaceHeatSystem zone name into
-   * extra_json on save — see ElementFormStateCtx's field of the same name
-   * (same underlying orchestrator closure, exposed on both narrow ctx shapes
-   * since buildElementData only receives this one). Optional because System
-   * is its only consumer; every other family's buildNewElementData call site
-   * omits it. */
-  getZoneNameForElementZoneId?: (zoneId: unknown) => string | null;
 }
 
 export interface ElementFormRenderCtx {
@@ -415,8 +401,6 @@ export interface ElementFormModule<S> {
   hydrate(state: S, element: Element): void;
   /** This family's share of the legacy resetFormFields. */
   reset(state: S): void;
-  /** This family's case of buildNewElementData. */
-  buildElementData(state: S, ctx: ElementFormBuildCtx): Partial<Element>;
   /** This family's case of renderAttributePanel. */
   renderPanel(state: S, ctx: ElementFormRenderCtx): ReactNode;
   /** This family's case of getElementSubtype, when it has one. Several legacy
@@ -429,7 +413,6 @@ export interface ElementFormModule<S> {
 export interface ElementFormInstance {
   hydrate(element: Element): void;
   reset(): void;
-  buildElementData(ctx: ElementFormBuildCtx): Partial<Element>;
   renderPanel(ctx: ElementFormRenderCtx): ReactNode;
   subtype(): string | undefined;
 }
@@ -441,7 +424,6 @@ export function bindElementFormModule<S>(
   return {
     hydrate: (element) => module.hydrate(state, element),
     reset: () => module.reset(state),
-    buildElementData: (ctx) => module.buildElementData(state, ctx),
     renderPanel: (ctx) => module.renderPanel(state, ctx),
     subtype: () => module.subtype?.(state),
   };

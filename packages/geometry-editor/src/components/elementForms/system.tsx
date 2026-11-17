@@ -12,7 +12,7 @@
 // values, just applied here to the store-sync effect too).
 //
 // CONTRACT ADDITIONS (this stage): ElementFormStateCtx.elementType and
-// ElementFormStateCtx/ElementFormBuildCtx.getZoneNameForElementZoneId — see
+// ElementFormStateCtx.getZoneNameForElementZoneId — see
 // elementForms/types.ts's doc comments on those fields. elementType is
 // needed because several moved pieces (systemPresetDirectory's useKeyedState
 // key, selectedSystemElement(+Full), systemSwitchNeedsWarning/
@@ -115,7 +115,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import type { Element } from '../../geometry/types';
 import { listCategoryJsonOptions, type WorkspaceSnippetOption } from '../../geometry/parameterLibraryCatalog';
-import { syncSpaceHeatSystemZoneNameInExtraJson } from '../../lib/spaceHeatSystemSync';
 import { collectHeatSourceWetNamesFromProject } from '../../lib/heatSourceWetNamesFromProject';
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { systemPlantTypes, withSystemPlantType } from '../../lib/systemSchemaFlatten';
@@ -186,28 +185,11 @@ export function formatSystemPresetName(preset: string): string {
   return preset.replace(/_/g, ' ');
 }
 
-/** Pure, stateless — duplicated verbatim from ElementCreator's own copy
- * (which the orchestrator keeps for createSpaceHeatSystemForCurrentEmitter,
- * one of the retained cross-creation handlers). See module header. */
-function withSystemSourceMeta(
-  extraJson: Record<string, unknown> | null | undefined,
-  source: SystemElementSource,
-): Record<string, unknown> | null {
-  if (!extraJson || typeof extraJson !== 'object' || Array.isArray(extraJson)) return null;
-  return { ...extraJson, [SYSTEM_SOURCE_META_KEY]: source };
-}
-
 export interface SystemFormState {
   systemSubcategory: string;
   setSystemSubcategory: (value: string) => void;
   systemPreset: string;
   setSystemPreset: (value: string) => void;
-  systemExtraJson: unknown;
-  /** Also called directly by ElementCreator's orchestrator-retained
-   * handleSpaceHeatSystemHeatSourceChange (see system.tsx's module header —
-   * that handler stays orchestrator-owned but still writes this module's
-   * local draft state, same as the DeleteConfirmModal fields below). */
-  setSystemExtraJson: (value: unknown) => void;
   systemUiMode: 'presets' | 'pcdb';
   /** Not read by renderPanel (systemUiMode above is the read side); exposed
    * only because ElementFormModule.reset(state) needs to restore it to
@@ -251,7 +233,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   const isExistingElementSelection = (
     target: ElementFormSelection | null = selection,
   ): target is ElementFormSelection & { type: 'element' | 'global' } =>
-    !!target && (target.type === 'element' || target.type === 'global') && !target.isPlaceholder;
+    !!target && (target.type === 'element' || target.type === 'global');
 
   const [systemSubcategory, setSystemSubcategory] = useState<string>('');
   const [systemPreset, setSystemPreset] = useState<string>('');
@@ -263,7 +245,6 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     systemPresetDirectory ?? 'unsupported',
     emptySystemPresetOptions,
   );
-  const [systemExtraJson, setSystemExtraJson] = useState<unknown>(null);
   const [systemUiMode, setSystemUiMode] = useState<'presets' | 'pcdb'>('presets');
   const prevSystemSelectionIdRef = useRef<string | null>(null);
   const [pendingSystemAction, setPendingSystemAction] = useState<PendingSystemAction | null>(null);
@@ -329,12 +310,12 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   const selectedSystemElementFull = useMemo(() => {
     void ctx.selectedElementV;
     if (!isSystemElementType) return null;
-    if (!selection?.id || selection.isPlaceholder) return null;
+    if (!selection?.id) return null;
     if (selection.type !== 'element' && selection.type !== 'global') return null;
     const element = ctx.getElementById(selection.id);
     return element?.type === 'System' ? element : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see commitSystemSelectionUpdate's dep-array comment above.
-  }, [isSystemElementType, selection?.id, selection?.isPlaceholder, selection?.type, ctx.selectedElementV, ctx.getElementById]);
+  }, [isSystemElementType, selection?.id, selection?.type, ctx.selectedElementV, ctx.getElementById]);
 
   // Re-derived locally rather than threaded through ctx — see module header's
   // "heatSourceWetReferenceOptions / singleHeatSourceWetReferenceName ARE
@@ -398,7 +379,6 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       }
       setSystemSubcategory(params.subcategory);
       setSystemPreset(nextSystemPreset ?? '');
-      setSystemExtraJson(nextExtraJson ?? null);
       setSystemUiMode(uiModeForSystemSource(params.source));
       traceSystemFlow('system-commit', {
         reason: params.reason,
@@ -449,7 +429,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       prevSystemSelectionIdRef.current = null;
       return;
     }
-    if (!selection?.id || selection.isPlaceholder) return;
+    if (!selection?.id) return;
     if (selection.type !== 'element' && selection.type !== 'global') return;
     if (!selectedSystemElement) return;
     const idChanged = prevSystemSelectionIdRef.current !== selection.id;
@@ -467,7 +447,6 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     isSystemElementType,
     selection?.id,
     selection?.type,
-    selection?.isPlaceholder,
     selectedSystemElement,
     systemSourceFromStore,
     systemUiMode,
@@ -477,7 +456,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   const systemSwitchNeedsWarning = useCallback(
     (target: 'presets' | 'pcdb'): boolean => {
       if (!isSystemElementType) return false;
-      if (!selection?.id || selection.isPlaceholder) return false;
+      if (!selection?.id) return false;
       if (selection.type !== 'element' && selection.type !== 'global') return false;
       const el = ctx.getElementById(selection.id) as {
         type?: string;
@@ -504,10 +483,8 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       const extraJson = value === ZONE_UNCONDITIONED ? { [ZONE_UNCONDITIONED]: { [name || 'Unconditioned zone']: { method: 'Calculated' } } } : undefined;
       setSystemSubcategory(value);
       setSystemPreset('');
-      setSystemExtraJson(extraJson ?? null);
       if (
         selection?.id
-        && !selection.isPlaceholder
         && (selection.type === 'element' || selection.type === 'global')
       ) {
         ctx.updateElement(selection.id, {
@@ -538,10 +515,8 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
       const nextPreset = value.trim();
       if (!nextPreset) {
         setSystemPreset('');
-        setSystemExtraJson(null);
         if (
           selection?.id
-          && !selection.isPlaceholder
           && (selection.type === 'element' || selection.type === 'global')
         ) {
           commitSystemSelectionUpdate({
@@ -561,7 +536,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
         );
         const parsedRaw = withoutPresetPrimaryPipework(JSON.parse(raw) as Record<string, unknown>);
         const selectedElement =
-          selection?.id && !selection.isPlaceholder && (selection.type === 'element' || selection.type === 'global')
+          selection?.id && (selection.type === 'element' || selection.type === 'global')
             ? ctx.getElementById(selection.id)
             : null;
         const selectedZoneName =
@@ -578,12 +553,9 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
                 singleHeatSourceWetReferenceName,
               )
             : parsedRaw;
-        const nextExtraJson = withSystemSourceMeta(parsed, 'presets') ?? {};
         setSystemPreset(nextPreset);
-        setSystemExtraJson(nextExtraJson);
         if (
           selection?.id
-          && !selection.isPlaceholder
           && (selection.type === 'element' || selection.type === 'global')
         ) {
           commitSystemSelectionUpdate({
@@ -651,7 +623,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   );
 
   const clearSystemToPcdbShell = useCallback(() => {
-    if (!selection?.id || selection.isPlaceholder) return;
+    if (!selection?.id) return;
     if (selection.type !== 'element' && selection.type !== 'global') return;
     commitSystemSelectionUpdate({
       source: 'pcdb',
@@ -663,7 +635,7 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
   }, [selection, systemSubcategory, commitSystemSelectionUpdate]);
 
   const applyFirstSamplePresetAfterPcdb = useCallback(async () => {
-    if (!selection?.id || selection.isPlaceholder) return;
+    if (!selection?.id) return;
     if (selection.type !== 'element' && selection.type !== 'global') return;
     const dir = SYSTEM_SUBCATEGORY_TO_DIR[systemSubcategory];
     const options = dir
@@ -842,8 +814,6 @@ function useFormState(ctx: ElementFormStateCtx): SystemFormState {
     setSystemSubcategory,
     systemPreset,
     setSystemPreset,
-    systemExtraJson,
-    setSystemExtraJson,
     systemUiMode,
     setSystemUiMode,
     prevSystemSelectionIdRef,
@@ -877,14 +847,12 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
     if (element.type !== 'System') return;
     state.setSystemSubcategory(element.subcategory || '');
     state.setSystemPreset(element.system_preset || '');
-    state.setSystemExtraJson(element.extra_json || null);
   },
 
   reset(state) {
     // System's five legacy resetFormFields lines, verbatim.
     state.setSystemSubcategory('');
     state.setSystemPreset('');
-    state.setSystemExtraJson(null);
     state.setSystemUiMode('presets');
     state.prevSystemSelectionIdRef.current = null;
 
@@ -899,21 +867,6 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
     // and the modal reads this module's pendingSystemAction directly (a
     // live reference, not a copy), so clearing it here closes the leak.
     state.setPendingSystemAction(null);
-  },
-
-  buildElementData(state, ctx) {
-    const syncedSystemExtraJson =
-      state.systemSubcategory === 'SpaceHeatSystem'
-        ? syncSpaceHeatSystemZoneNameInExtraJson(state.systemExtraJson, ctx.getZoneNameForElementZoneId?.(ctx.elementZoneId) ?? null)
-        : null;
-    const elementData: Record<string, unknown> = {
-      ...ctx.baseData,
-      subcategory: state.systemSubcategory || undefined,
-      system_preset: state.systemPreset || undefined,
-      zoneId: ctx.elementZoneId || undefined,
-      extra_json: syncedSystemExtraJson || state.systemExtraJson || undefined,
-    };
-    return elementData as Partial<Element>;
   },
 
   renderPanel(state, ctx) {
@@ -965,7 +918,6 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
           <UnconditionedZoneFields
             row={selectedSystemElementFull}
             commit={(extraJson) => {
-              state.setSystemExtraJson(extraJson);
               ctx.updateElement(selectedSystemElementFull.id, { extra_json: extraJson } as Partial<Element>);
             }}
           />

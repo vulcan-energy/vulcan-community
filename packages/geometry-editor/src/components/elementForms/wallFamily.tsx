@@ -113,7 +113,7 @@ export function useWallFamilyFormState({
     value: unknown,
   ) => { message: string; variant: 'error' | 'warning' } | null;
 }) {
-  const isExistingSelection = (selection.type === 'element' || selection.type === 'global') && !selection.isPlaceholder;
+  const isExistingSelection = (selection.type === 'element' || selection.type === 'global');
   const [wallShapeOpen, setWallShapeOpen] = useKeyedState(
     selection.id,
     false,

@@ -21,7 +21,7 @@ import { Tooltip } from './Tooltip';
 import { loadBundledAssemblyLibrary, type BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import type { AssemblyExample, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
 import { MASS_CLASS_LABELS, parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
-import { GROUND_FLOOR_TYPE_LABELS, type GroundFloorType } from '../lib/groundUValueCalculator';
+import { GROUND_FLOOR_TYPE_LABELS, type GroundFloorType } from '../lib/groundFloor';
 import { getElementTypeDisplayName } from '../lib/displayNames';
 import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS } from '../lib/assemblyMaterialFabric';
 import {

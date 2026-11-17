@@ -140,7 +140,7 @@ export interface BuildingElementOpaqueFormState {
 
 function useFormState(ctx: ElementFormStateCtx): BuildingElementOpaqueFormState {
   const isExistingElementSelection = (): boolean =>
-    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
+    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
 
   const commitUnheatedPitchedRoofCeilingElevation = (value: number | '') => {
     if (!isExistingElementSelection()) return;
@@ -209,31 +209,6 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
     state.setIsUnheatedPitchedRoof(false);
     state.setIsExternalDoor(false);
     state.unheatedPitchedRoofCeilingElevationInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    const width = state.widthInput.value;
-    const height = state.heightInput.value;
-    const coldRoofCeilingExtraJson =
-      state.isUnheatedPitchedRoof && typeof state.unheatedPitchedRoofCeilingElevationInput.value === 'number'
-        ? mergeUnheatedPitchedRoofCeilingElevationExtraJson(
-            undefined,
-            state.unheatedPitchedRoofCeilingElevationInput.value,
-          )
-        : undefined;
-    return {
-      ...ctx.baseData,
-      width,
-      height,
-      area: typeof width === 'number' && typeof height === 'number' ? width * height : undefined,
-      pitch: state.pitch,
-      orientation360: Math.round(state.orientation360 ?? 0),
-      base_height: state.baseHeightInput.value === '' ? undefined : state.baseHeightInput.value,
-      is_unheated_pitched_roof: state.isUnheatedPitchedRoof,
-      is_external_door: state.isExternalDoor,
-      parent_element: state.parentElement,
-      ...(coldRoofCeilingExtraJson ? { extra_json: coldRoofCeilingExtraJson } : {}),
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

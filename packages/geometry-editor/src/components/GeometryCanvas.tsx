@@ -1853,6 +1853,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   ]);
 
   // Load preset data on-demand when user selects a preset from the draw toolbar
+  const [drawPresetFailure, setDrawPresetFailure] = useState<{ preset: string; message: string } | null>(null);
+  // Keyed by the preset and its data: a later successful load of the same preset clears it.
+  const drawPresetError = drawPresetFailure?.preset === drawPreset && !drawPresetData ? drawPresetFailure.message : undefined;
   useEffect(() => {
     if (!drawPreset) {
       setDrawPresetData(null);
@@ -1866,8 +1869,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           setDrawPresetData(JSON.parse(raw));
         }
       } catch (e) {
-        console.warn(`[Presets] Failed to load preset ${drawPreset}`, e);
-        if (!cancelled) setDrawPresetData(null);
+        if (!cancelled) {
+          setDrawPresetData(null);
+          setDrawPresetFailure({ preset: drawPreset, message: `Could not load this preset: ${e instanceof Error ? e.message : String(e)}` });
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -3388,13 +3393,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     completeGuideOverlayCalibrationInteraction(false);
   }, [completeGuideOverlayCalibrationInteraction, overlayCalibrateMode]);
 
-  // Beside the compass; if the elements panel covers the compass row, beside that panel instead.
+  // Beside the compass; if the elements panel covers the compass row, under that panel so the drawing stays clear.
   const contributedPanelDefaultPosition = useMemo(() => {
     const coversCompass = elementsRect.x < CONTRIBUTED_PANEL_DEFAULT_X
       && elementsRect.y < compassMinY + COMPASS_PANEL_DEFAULT.height
       && elementsRect.y + elementsRect.height > compassMinY;
-    return { x: coversCompass ? elementsRect.x + elementsRect.width + 8 : CONTRIBUTED_PANEL_DEFAULT_X, y: compassMinY };
-  }, [compassMinY, elementsRect]);
+    // ponytail: 160 px is a contributed panel's usual height; a taller panel is clamped when dragged.
+    return coversCompass
+      ? { x: elementsRect.x, y: Math.min(elementsRect.y + elementsRect.height + 8, Math.max(compassMinY, stageSize.height - 160 - 12)) }
+      : { x: CONTRIBUTED_PANEL_DEFAULT_X, y: compassMinY };
+  }, [compassMinY, elementsRect, stageSize.height]);
 
   const canvasPanelAvailabilityContext = useMemo<GeometryCanvasPanelContext>(
     () => ({
@@ -8875,6 +8883,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             setOrthogonalRoomStart={setOrthogonalRoomStart}
             setOrthogonalRoomEnd={setOrthogonalRoomEnd}
             drawPreset={drawPreset}
+            drawPresetError={drawPresetError}
             setDrawPreset={setDrawPreset}
             presetOptions={elementPresetOptions}
             drawMvhrDuctRole={drawMvhrDuctRole}
@@ -9497,7 +9506,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             minWidth={DETAILS_PANEL_MIN_W}
             minHeight={DETAILS_PANEL_MIN_H}
             maxWidth={Math.max(DETAILS_PANEL_MIN_W, Math.floor(stageSize.width - 24))}
-            maxHeight={Math.max(DETAILS_PANEL_MIN_H, Math.floor(stageSize.height * 0.8))}
+            maxHeight={Math.max(DETAILS_PANEL_MIN_H, Math.floor(stageSize.height - 24))}
             dragHandleClassName="panel-drag-handle"
             cancel="input, textarea, select, button"
             style={{ zIndex }}
@@ -9506,7 +9515,10 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               setActivePanel('details');
               setDetailsMode('manual');
             }}
-            onResizeStart={() => setActivePanel('details')}
+            onResizeStart={() => {
+              setActivePanel('details');
+              setDetailsMode('manual');
+            }}
             onDragStop={(_e, d) => {
               setDetailsRect(prev => clampRectToCanvas({ ...prev, x: d.x, y: d.y }));
             }}

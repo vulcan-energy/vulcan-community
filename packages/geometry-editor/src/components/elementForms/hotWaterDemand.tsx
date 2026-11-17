@@ -70,18 +70,6 @@ export const hotWaterDemandFormModule: ElementFormModule<HotWaterDemandFormState
     state.ratedPowerInput.setValue('');
   },
 
-  buildElementData(state, ctx) {
-    return {
-      ...ctx.baseData,
-      subcategory: state.hotWaterSubcategory || undefined,
-      allow_low_flowrate: state.hotWaterSubcategory === 'MixerShower' ? state.allowLowFlowrate : undefined,
-      size: state.sizeInput.value || undefined,
-      flowrate: state.flowrateInput.value || undefined,
-      rated_power: state.ratedPowerInput.value || undefined,
-      zoneId: undefined // Global object
-    } as Partial<Element>;
-  },
-
   renderPanel(state, ctx) {
     const { hotWaterSubcategory, setHotWaterSubcategory, allowLowFlowrate, setAllowLowFlowrate, sizeInput, flowrateInput, ratedPowerInput } = state;
     const { elementType, fieldUnit, renderFieldLabel, registerBaseFieldRefs, getFieldValidationIssue, commitExistingElementDraft } = ctx;

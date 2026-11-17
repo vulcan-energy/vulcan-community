@@ -1646,7 +1646,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'array',
   },
   'BuildingElementTransparent:g_value': {
-    description: 'Total solar energy transmittance of the glazing (0–1).',
+    description: 'Total solar energy transmittance of the transparent part of the window (0–1).',
     type: 'number',
     unitSemantic: 'fraction',
   },

@@ -144,7 +144,7 @@ export { DEFAULT_DEFAULTS_PATH } from '../../../lib/workspacePaths';
 
 import { internalAdjacentConditionedAreaMultiplier } from '../../../lib/elementArea';
 import { lineFaceEnvelope } from '../../../lib/profileLineFace';
-import { assertCsvMigrationResolved, csvMigrationIssues, dropCalculatedGroundUValues, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
+import { assertCsvMigrationResolved, csvMigrationIssues, markAssemblyGroundUValuesStated, liftStoreyIndexDuctsToMetres, resolveCsvUValueMeaning, upgradePcdbProductReferences, type UValueInterpretation, type CsvMigrationIssue } from '../../../geometry/io/csvSemanticMigration';
 import { parseFabricPreset } from '../../../lib/fabricPreset';
 
 export interface IoSlice {
@@ -2513,10 +2513,10 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     const loadedCsvBaseline = get().generateCSV({ allowUnresolvedMigration: true });
     // Applied after the baseline so the upgrade leaves the model dirty and the next save writes it.
     const loadedElements = get().elementIds.map(id => get().elementsById[id]);
-    const calculatedGroundU = dropCalculatedGroundUValues(loadedElements, targetRules(options.schemaPort, get().complianceSettings).constructionBands);
+    const groundUMarked = markAssemblyGroundUValuesStated(loadedElements, targetRules(options.schemaPort, get().complianceSettings).constructionBands);
     const upgradedElements = rederiveContextShadingFromDrawing(
       liftStoreyIndexDuctsToMetres(
-        upgradePcdbProductReferences(calculatedGroundU.elements),
+        upgradePcdbProductReferences(groundUMarked),
         withEffectiveStoreyHeights(get().floors, loadedElements),
       ),
       get().globalOrientationOffset,
@@ -2533,10 +2533,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    const calculatedGroundUNotice = calculatedGroundU.names.length
-      ? [`Calculated floor U-value removed, so the age band applies: ${calculatedGroundU.names.join(', ')}. To use a calculated value, open Calculate U-value and apply it.`]
-      : [];
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed), ...calculatedGroundUNotice], upgraded };
+    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
   }
 
   /**

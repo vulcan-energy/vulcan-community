@@ -73,6 +73,9 @@ export type DirectAdvancedFieldsProps = {
   beforeMore?: React.ReactNode;
   /** Host fields shown last inside the "More" group, named in its hint; `stated` opens it. */
   hostMore?: { fields: React.ReactNode; stated: boolean; labels: readonly string[] };
+  /** A field the user was sent to (an error link); "More" opens when it holds it. */
+  focusFieldKey?: string | null;
+  focusFieldVersion?: number;
 };
 
 // Prop shape accepted by the five custom controls, inferred (not imported) from the
@@ -659,9 +662,11 @@ function renderControlForProperty(args: {
 }): React.ReactElement {
   const { segments, resolved, value, label, scope, schema, config, elementType, replicateRequiredError, applyChange } = args;
   // An unstated field whose default the run applies is not "required": the default shows as its placeholder.
-  const defaults = config as { derivedDefaults?: Record<string, unknown>; defaultProducts?: Record<string, unknown> };
+  // Under a product rule the conversion picks the product or names the one to pick, so the form does not ask for it.
+  const defaults = config as { derivedDefaults?: Record<string, unknown>; defaultProducts?: Record<string, unknown>; productRule?: boolean };
   const pointer = `/${segments.map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`;
-  const defaultApplies = defaults.derivedDefaults?.[segments[segments.length - 1] ?? ''] !== undefined || defaults.defaultProducts?.[pointer] !== undefined;
+  const defaultApplies = defaults.derivedDefaults?.[segments[segments.length - 1] ?? ''] !== undefined || defaults.defaultProducts?.[pointer] !== undefined
+    || (!!defaults.productRule && segments[segments.length - 1] === 'product_id');
   const required = args.required && !(defaultApplies && (value == null || value === ''));
 
   const path = segments.join('.');
@@ -866,6 +871,8 @@ export function DirectAdvancedFields({
   onDataChange,
   beforeMore,
   hostMore,
+  focusFieldKey,
+  focusFieldVersion,
 }: DirectAdvancedFieldsProps): React.ReactElement {
   const properties = readRecord(schema.properties);
   const requiredList = Array.isArray(schema.required)
@@ -1009,6 +1016,8 @@ export function DirectAdvancedFields({
     const label = labelForProperty(key, {}, elementType);
     return /^[A-Z][a-z]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
   });
+  // "More" opens for a field the user was sent to (an error link), and stays open while it is the one asked for.
+  const moreReveal = focusFieldKey && moreKeys.includes(focusFieldKey) ? `${focusFieldKey}:${focusFieldVersion ?? 0}` : '';
   const moreStated = layout
     ? moreNodes.some((node) => isStated(getAtPath(data, segmentsFromLayoutScope(node.scope ?? ''))))
     : engineEntries.some(({ key }) => isStated(data[key]));
@@ -1018,7 +1027,7 @@ export function DirectAdvancedFields({
       {beforeMore}
       {((layout ? moreNodes.length : engineEntries.length) > 0 || hostMore) && (
         // Open while the user has stated one of these; otherwise their defaults stay out of the way.
-        <GroupAccordion label="More" hint={moreHint([...new Set([...moreLabels, ...(hostMore?.labels ?? [])])])} openInitially={moreStated || hostMore?.stated}>
+        <GroupAccordion label="More" hint={moreHint([...new Set([...moreLabels, ...(hostMore?.labels ?? [])])])} openInitially={moreStated || hostMore?.stated} reveal={moreReveal}>
           {layout ? moreNodes.map((node, i) => renderLayoutNode(node, `more-${i}`)) : engineEntries.map(renderFlatEntry)}
           {hostMore?.fields}
         </GroupAccordion>

@@ -97,6 +97,8 @@ export interface DrawToolbarProps {
   setOrthogonalRoomStart: (point: { x: number; y: number } | null) => void;
   setOrthogonalRoomEnd: (point: { x: number; y: number } | null) => void;
   drawPreset: string;
+  /** Why the picked preset could not be loaded. */
+  drawPresetError?: string;
   setDrawPreset: (preset: string) => void;
   presetOptions: Array<{ value: string; label: string; source?: 'system' | 'user' }>;
   drawMvhrDuctRole: MvhrDuctRole;
@@ -139,6 +141,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
   setOrthogonalRoomStart,
   setOrthogonalRoomEnd,
   drawPreset,
+  drawPresetError,
   setDrawPreset,
   presetOptions,
   drawMvhrDuctRole,
@@ -318,6 +321,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
             onChange={(value: string) => setDrawPreset(value)}
             options={presetOptions}
             placeholder="Preset..."
+            error={drawPresetError}
             size="sm"
             variant="ghost"
             className="preset-dropdown"

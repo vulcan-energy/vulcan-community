@@ -18,7 +18,7 @@
 // width/height/area/parentElement are shared with the wall family via
 // ctx.shared (same precedent as windowShading/contextShading/vents) —
 // captured into this module's own returned state during useFormState so
-// hydrate/reset/buildElementData/renderPanel (which mostly don't receive
+// hydrate/reset/renderPanel (which mostly don't receive
 // ctx) can still reach them. Ground is the first ctx.shared consumer that
 // needs `widthInput` (the other five consumers never did), so
 // ElementFormSharedCtx gained that one field — see types.ts.
@@ -37,9 +37,8 @@
 // (elementFieldPresentation's `floorType` prop, the three
 // assemblyModalPitchDeg/ElementMode/GroundFloorType helpers that feed the
 // still-orchestrator-owned <AssemblyCalculatorModal> per decision 10, the
-// two elementSupportsGenericElevationControl call sites, buildNewElementData's
-// generic viewerElevationPatch, and the assembly modal's onApply Ground
-// branch) reads floorType/thicknessWallsInput/derivedGroundArea/
+// two elementSupportsGenericElevationControl call sites, and the assembly modal's onApply Ground
+// branch) reads floorType/thicknessWallsInput/
 // derivedGroundPerimeter. Rather than inventing a bridge for these, this
 // module reuses the existing "read the module's own useFormState return
 // value directly from orchestrator code" precedent already established for
@@ -62,11 +61,6 @@
 //   (every family's "Elevation above model ground" field), so only write
 //   access via the renderPanel ctx was needed; kept as the full binding for
 //   symmetry with heightInput/areaInput on ElementFormSharedCtx.
-//
-// INTENTIONAL BEHAVIOUR FIX (slice-6 brief decision 3, plan-doc latent bug
-// (a)): buildElementData drops the legacy `pitch: wallShared.pitch` emission
-// — see the comment at its call site below for the full writeup and the
-// precondition-grep result.
 //
 // readFiniteNumber, parseLiveDecimalInput, formatToTwoDecimals,
 // INLINE_FIELD_NOTE_STYLE (now the field-source-note class): RESOLVED in slice-6 STAGE 6 — these tiny pure
@@ -120,7 +114,7 @@ import {
 } from '../../lib/groundSuspendedFabricSync';
 import {
   GROUND_FLOOR_TYPE_LABELS,
-} from '../../lib/groundUValueCalculator';
+} from '../../lib/groundFloor';
 import {
   computeGroundExposedPerimeterDetails,
   type GroundExposedPerimeterDetails,
@@ -189,7 +183,6 @@ export interface BuildingElementGroundFormState {
   areaInput: NumericDraftInputBinding;
   parentElement: string;
   setParentElement: (value: string) => void;
-  derivedGroundArea: number;
   derivedGroundEffectiveArea: number;
   autoDerivedTotalArea: number;
   groundTotalAreaManual: boolean;
@@ -214,7 +207,7 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
   const [floorType, setFloorType] = useState<GroundFloorType>('');
 
   const isExistingElementSelection = (): boolean =>
-    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
+    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
 
   const commitGroundPerimeter = (value: number | '') => {
     if (!isExistingElementSelection()) return;
@@ -546,7 +539,6 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     areaInput: ctx.shared.areaInput,
     parentElement: ctx.shared.parentElement,
     setParentElement: ctx.shared.setParentElement,
-    derivedGroundArea,
     autoDerivedTotalArea,
     groundTotalAreaManual,
     groundTotalAreaWarning,
@@ -602,61 +594,6 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
     state.groundLineHeightInput.setValue('');
     state.depthBasementFloorInput.setValue('');
     state.thicknessWallsInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    const derivedArea = state.derivedGroundArea;
-    const derivedPerimeter = state.derivedGroundPerimeter;
-    const autoTotalArea = state.autoDerivedTotalArea || derivedArea;
-    const authoredTotalArea = typeof state.totalAreaInput.value === 'number'
-      ? state.totalAreaInput.value
-      : autoTotalArea;
-    const extraJsonGround = typeof state.groundLineHeightInput.value === 'number'
-      ? { [GROUND_LINE_HEIGHT_EXTRA_KEY]: state.groundLineHeightInput.value }
-      : undefined;
-    return {
-      ...ctx.baseData,
-      width: state.widthInput.value,
-      area: derivedArea,
-      // INTENTIONAL BEHAVIOUR FIX (slice-6 brief decision 3, plan-doc latent
-      // bug (a)): legacy also emitted `pitch: wallShared.pitch` here, even
-      // though BuildingElementGround has no `pitch` field
-      // (geometry/types.ts:176-189), no pitch UI, and hydrate above never
-      // reads one — the value silently persisted into the store and
-      // round-tripped through save/load with no effect on anything, since
-      // nothing downstream reads it (Adjacent-like's own `pitch` emission a
-      // few cases over IS legitimate — untouched).
-      //
-      // Precondition grep (this slice's Stage 1 requirement) before landing:
-      // no consumer anywhere reads an editor-persisted Ground `pitch`. In
-      // crates/vulcan-model-transform/src/builder.rs the CSV-row-driven
-      // `element_context.insert("pitch", ...)` only fires when the CSV row
-      // itself has a `pitch` column, which Ground rows never do
-      // (geometry/io/geometryCsvLayouts.ts' 'Ground Elements' column list
-      // omits `pitch`, and stores/geometryStore/slices/ioSlice.ts's
-      // `generateCSV` Ground row builder enumerates fields explicitly
-      // without `element.pitch` — the wall/party types' pitch columns are
-      // where builder.rs actually gets pitch values from).
-      // crates/vulcan-csv-codec has zero `pitch` references at all.
-      //
-      // IMPORTANT CAVEAT — do not "simplify" further: core-input.schema.json's
-      // BuildingElementGround* variants DO list `pitch` in properties AND
-      // required. That requirement is satisfied by the Rust builder's
-      // `derive_blank_csv_pitch`, which gives every Ground row pitch 180 (pitch
-      // never comes from the defaults template) — independent of anything the
-      // editor persists. Only the editor-side phantom emission was dead.
-      // Dropped here.
-      total_area: authoredTotalArea,
-      [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: groundTotalAreaMismatch(
-        authoredTotalArea,
-        autoTotalArea,
-      ),
-      perimeter: derivedPerimeter,
-      floor_type: state.floorType || undefined,
-      depth_basement_floor: state.depthBasementFloorInput.value === '' ? undefined : state.depthBasementFloorInput.value,
-      thickness_walls: state.thicknessWallsInput.value === '' ? undefined : state.thicknessWallsInput.value,
-      extra_json: extraJsonGround,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

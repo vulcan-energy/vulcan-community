@@ -329,7 +329,7 @@ pub(crate) fn mvhr_ductwork(
     stated: Option<&Map<String, Value>>,
     ducts: &[Value],
     location: Option<&str>,
-) -> (Value, Option<SchemaOmission>) {
+) -> (Value, Vec<SchemaOmission>) {
     let path = json_pointer(&[
         "InfiltrationVentilation",
         "MechanicalVentilation",
@@ -339,8 +339,9 @@ pub(crate) fn mvhr_ductwork(
     let mut out = stated.cloned().unwrap_or_default();
     if ducts.is_empty() {
         let notice = notice(&path, format!("The MVHR '{name}' has no drawn ducts, so its ductwork uses the defaults. Draw its ducts to change them."));
-        return (Value::Object(out), Some(notice));
+        return (Value::Object(out), vec![notice]);
     }
+    let size_stated = out.contains_key("ductwork_size");
     // HEM counts only the intake and exhaust ducts of an MVHR inside the envelope, and only the
     // supply and extract ducts of one outside it; the full input states only those lengths.
     let counted: &[&str] = match location {
@@ -403,15 +404,20 @@ pub(crate) fn mvhr_ductwork(
     // the band with the greatest length (the larger one at a tie).
     let mut band_lengths = [0.0; 3];
     let mut banded = false;
+    let mut measured: Vec<String> = Vec::new();
     for d in &ducts {
-        let (field, sizes) = match d["cross_section_shape"].as_str() {
-            Some("rectangular") => ("duct_perimeter_mm", [328.0, 528.0, 620.0]),
-            Some("circular") => ("external_diameter_mm", [100.0, 125.0, 150.0]),
+        let (field, sizes, what) = match d["cross_section_shape"].as_str() {
+            Some("rectangular") => ("duct_perimeter_mm", [328.0, 528.0, 620.0], "perimeter"),
+            Some("circular") => ("external_diameter_mm", [100.0, 125.0, 150.0], "diameter"),
             _ => continue,
         };
         let Some(mm) = d[field].as_f64() else {
             continue;
         };
+        let size = format!("{mm} mm {what}");
+        if !measured.contains(&size) {
+            measured.push(size);
+        }
         let distance = |i: usize| (sizes[i] - mm).abs();
         let band = (0..3)
             .rev()
@@ -439,6 +445,10 @@ pub(crate) fn mvhr_ductwork(
         &mut missing,
         "cross-section shape",
     );
+    let mut notices = Vec::new();
+    if let (false, Some(band)) = (size_stated, size.as_ref().and_then(Value::as_str)) {
+        notices.push(notice(&path, format!("The MVHR '{name}' ductwork takes the {band} size band, the band nearest its drawn duct sizes ({}); where they fall in more than one band, the band with the most duct length. Draw the ducts at a band size to change it.", measured.join(", "))));
+    }
     set("ductwork_size", size, &mut missing, "size");
     set("insulation_present", insulated, &mut missing, "insulation");
     let field = |key: &str| one(ducts.iter().map(|d| d.get(key).cloned()).collect());
@@ -454,10 +464,10 @@ pub(crate) fn mvhr_ductwork(
         &mut missing,
         "reflective surface",
     );
-    let notice = (!missing.is_empty()).then(|| {
-        notice(&path, format!("The MVHR '{name}' ductwork uses the default {}: its drawn ducts give no single value. Draw the missing ducts, or give the drawn ones one value, to change it.", missing.join(", ")))
-    });
-    (Value::Object(out), notice)
+    if !missing.is_empty() {
+        notices.push(notice(&path, format!("The MVHR '{name}' ductwork uses the default {}: its drawn ducts give no single value. Draw the missing ducts, or give the drawn ones one value, to change it.", missing.join(", "))));
+    }
+    (Value::Object(out), notices)
 }
 
 /// The full input's MVHR product states no `vent_type` (the product gives it), and only that
@@ -690,8 +700,10 @@ fn combi_daily_hot_water(bedrooms: u64, floor_area: f64) -> u64 {
 ///   (DESNZ-defined).
 /// - Wet distribution: no variable flow, and then a design flow rate of 0.06 L/s
 ///   (DESNZ-defined), written as 3.6 because HEM reads `design_flow_rate` in L/min; the design
-///   flow temperature by emitter type and temperature difference by heat source type
-///   (DESNZ-defined).
+///   flow temperature by emitter type (the first emitter's when they differ) and temperature
+///   difference by heat source type (DESNZ-defined).
+/// - Hot water: a combi's daily usage from the occupancy; a heat pump coil's upper flow limit
+///   60 °C.
 /// - Ventilation zone base height: 0 m for a house, bungalow or park home, or a dwelling whose
 ///   base storey is the ground floor (DESNZ-defined); any other built form must state it.
 /// - Envelope area: from the air test report when stated, else derived from the drawn elements,
@@ -771,9 +783,9 @@ pub(crate) fn apply_desnz_defaults(
             system.insert("design_flow_rate".into(), json!(3.6));
             used.push("design_flow_rate 3.6 (L/min)".to_string());
         }
-        // DESNZ-defined: the design flow temperature by emitter type and the design temperature
-        // difference by heat source type, when every emitter or heat source agrees; otherwise
-        // the system states them.
+        // DESNZ-defined: the design temperature difference by heat source type, when every heat
+        // source agrees (otherwise the system states it), and the design flow temperature by
+        // emitter type.
         let one = |values: Vec<Option<&str>>| -> Option<String> {
             let first = values.first().copied().flatten()?;
             values
@@ -781,12 +793,22 @@ pub(crate) fn apply_desnz_defaults(
                 .all(|v| *v == Some(first))
                 .then(|| first.to_string())
         };
-        let emitter = one(system["emitters"]
+        // Assumption pending DESNZ E40 (Vulcan's assumption registry lists it): with emitters of
+        // different types, the first emitter's type sets the design flow temperature, as HEMIE's
+        // `_serialize_design_flow_temp` does. If DESNZ gives a rule for a mix, apply it here.
+        let types: Vec<Option<&str>> = system["emitters"]
             .as_array()
             .into_iter()
             .flatten()
             .map(|e| e["wet_emitter_type"].as_str())
-            .collect());
+            .collect();
+        let emitter = types.first().copied().flatten().map(|first| {
+            if types.iter().all(|t| *t == Some(first)) {
+                first.to_string()
+            } else {
+                format!("first emitter, {first}")
+            }
+        });
         let sources: Vec<Option<&str>> = match &system["HeatSource"] {
             Value::Array(items) => items.iter().collect(),
             other => vec![other],
@@ -801,7 +823,7 @@ pub(crate) fn apply_desnz_defaults(
         .collect();
         let source = one(sources);
         if !system.contains_key("design_flow_temp") {
-            let temp = match emitter.as_deref() {
+            let temp = match types.first().copied().flatten() {
                 Some("radiator") => Some(55),
                 Some("fancoil" | "ufh") => Some(45),
                 _ => None,
@@ -842,7 +864,7 @@ pub(crate) fn apply_desnz_defaults(
         if !system.contains_key("design_flow_temp") {
             need(
                 "design_flow_temp",
-                "when its emitters differ in type".into(),
+                "without an emitter whose type gives one".into(),
             );
         }
         if !system.contains_key("temp_diff_emit_dsgn") {
@@ -959,6 +981,41 @@ pub(crate) fn apply_desnz_defaults(
                     json_pointer(&["HotWaterSource", name]),
                     "daily_HW_usage",
                     json!(usage),
+                );
+            }
+        }
+    }
+    // Assumption pending DESNZ E54 (Vulcan's assumption registry lists it): a heat pump's hot water
+    // coil with no upper flow temperature limit takes 60 °C (DESNZ-defined for a standardised heat
+    // pump cylinder; the FHS notional uses the same). HEM needs it for a heat pump and has no
+    // default. If DESNZ answers differently, change or delete this; the run then reports
+    // the field as required again (`E_EPC_HEAT_PUMP_FLOW_LIMIT`).
+    for (name, source) in model["HotWaterSource"]
+        .as_object_mut()
+        .into_iter()
+        .flatten()
+    {
+        for (heater_name, heater) in source
+            .get_mut("HeatSource")
+            .and_then(Value::as_object_mut)
+            .into_iter()
+            .flatten()
+        {
+            let heat_pump = heater["name"]
+                .as_str()
+                .and_then(|n| heat_source_types.get(n))
+                .is_some_and(|t| t == "HeatPump");
+            if heater["type"] == "HeatSourceWet"
+                && heat_pump
+                && heater
+                    .get("temp_flow_limit_upper")
+                    .is_none_or(Value::is_null)
+            {
+                heater["temp_flow_limit_upper"] = json!(60);
+                derive(
+                    json_pointer(&["HotWaterSource", name, "HeatSource", heater_name]),
+                    "temp_flow_limit_upper",
+                    json!(60),
                 );
             }
         }
@@ -2107,6 +2164,77 @@ mod tests {
     }
 
     #[test]
+    fn a_heat_pump_coil_with_no_upper_flow_limit_takes_60() {
+        let mut model = json!({
+            "HeatSourceWet": {"hp": {"type": "HeatPump"}, "boiler": {"type": "Boiler"}},
+            "HotWaterSource": {"cyl": {"type": "StorageTank", "HeatSource": {
+                "coil": {"type": "HeatSourceWet", "name": "hp"},
+                "stated": {"type": "HeatSourceWet", "name": "hp", "temp_flow_limit_upper": 55},
+                "boiler coil": {"type": "HeatSourceWet", "name": "boiler"}
+            }}}
+        });
+        let mut derived = Vec::new();
+        apply_desnz_defaults(
+            &mut model,
+            false,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut derived,
+        );
+        let heaters = &model["HotWaterSource"]["cyl"]["HeatSource"];
+        assert_eq!(heaters["coil"]["temp_flow_limit_upper"], 60);
+        assert_eq!(heaters["stated"]["temp_flow_limit_upper"], 55);
+        assert!(heaters["boiler coil"]
+            .get("temp_flow_limit_upper")
+            .is_none());
+        assert!(derived
+            .iter()
+            .any(|d| d.path == "/HotWaterSource/cyl/HeatSource/coil"
+                && d.field == "temp_flow_limit_upper"
+                && d.value == 60));
+    }
+
+    #[test]
+    fn a_circuit_with_mixed_emitters_takes_the_first_emitters_design_flow_temperature() {
+        let run = |first: &str, second: &str| {
+            let mut model = json!({
+                "HeatSourceWet": {"hp": {"type": "HeatPump"}},
+                "SpaceHeatSystem": {"c": {"type": "WetDistribution", "HeatSource": {"name": "hp"},
+                    "emitters": [{"wet_emitter_type": first}, {"wet_emitter_type": second}]}}
+            });
+            let (mut errors, mut notices) = (Vec::new(), Vec::new());
+            apply_desnz_defaults(
+                &mut model,
+                false,
+                &mut errors,
+                &mut notices,
+                &mut Vec::new(),
+            );
+            assert!(
+                !errors
+                    .iter()
+                    .any(|e| e.path.starts_with("/SpaceHeatSystem")),
+                "{errors:?}"
+            );
+            let notice = notices
+                .iter()
+                .find(|n| n.path == "/SpaceHeatSystem/c")
+                .unwrap();
+            (
+                model["SpaceHeatSystem"]["c"]["design_flow_temp"].clone(),
+                notice.message.clone(),
+            )
+        };
+        let (temp, notice) = run("radiator", "ufh");
+        assert_eq!(temp, 55);
+        assert!(
+            notice.contains("design flow temp 55 (first emitter, radiator)"),
+            "{notice}"
+        );
+        assert_eq!(run("ufh", "radiator").0, 45);
+    }
+
+    #[test]
     fn a_circuit_with_no_desnz_default_is_named_for_each_missing_field() {
         let mut model = json!({
             "IsExistingBuilding": true,
@@ -2152,6 +2280,16 @@ mod tests {
             size(&[duct("circular", "external_diameter_mm", 110.0, 1.0)]),
             "small"
         );
+        // The notice names the band and the drawn sizes it came from.
+        let (_, notices) = mvhr_ductwork(
+            "MVHR",
+            None,
+            &[duct("rectangular", "duct_perimeter_mm", 400.0, 1.0)],
+            Some("inside"),
+        );
+        assert!(notices.iter().any(|n| n.message.starts_with(
+            "The MVHR 'MVHR' ductwork takes the small size band, the band nearest its drawn duct sizes (400 mm perimeter)"
+        )), "{notices:#?}");
         assert_eq!(
             size(&[duct("circular", "external_diameter_mm", 112.5, 1.0)]),
             "medium"
@@ -2178,14 +2316,14 @@ mod tests {
             "large"
         );
         // No size drawn: the default, named in the notice.
-        let (out, notice) = mvhr_ductwork(
+        let (out, notices) = mvhr_ductwork(
             "MVHR",
             None,
             &[json!({"duct_type": "intake", "length": 1.0})],
             Some("inside"),
         );
         assert!(out.get("ductwork_size").is_none());
-        assert!(notice.unwrap().message.contains("size"));
+        assert!(notices[0].message.contains("size"));
     }
 
     #[test]

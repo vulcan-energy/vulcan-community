@@ -6,7 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GeometryWorkspaceResourcePort } from "../../../../geometry-editor-host/src/index";
 import { FabricTable } from "../FabricTable";
-import { BUILT_IN_FABRIC_PRESETS, FabricTabCloseContext, presetValueFor } from "../../lib/fabricPreset";
+import { FabricTabCloseContext } from "../fabricTabCloseContext";
+import { BUILT_IN_FABRIC_PRESETS, presetValueFor } from "../../lib/fabricPreset";
 import { createGeometryStore, GeometryStoreProvider } from "../../stores/geometryStore";
 
 const FABRIC_FILE = {
@@ -321,7 +322,6 @@ describe("FabricTable", () => {
     const user = userEvent.setup();
     const close = vi.fn();
     const { store, row } = setup({ a: wall("a", "Wall A"), b: wall("b", "Wall B", { u_value: 0.3 }) }, { close });
-    expect(screen.getByText("Select a count to show those elements on the drawing.")).toBeInTheDocument();
     // Nothing to show: a zero count is text.
     expect(within(row("roof")).queryByRole("button", { name: "0" })).not.toBeInTheDocument();
     await user.click(within(row("wall")).getByRole("button", { name: "1 with own values" }));

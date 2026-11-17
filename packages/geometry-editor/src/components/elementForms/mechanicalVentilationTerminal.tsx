@@ -15,7 +15,7 @@
 // parentElement/setParentElement (the MVHR unit this terminal belongs to) is
 // shared with the wall family via ctx.shared, same precedent as Vents/
 // MechanicalVentilation — captured into this module's own returned state
-// during useFormState so hydrate/reset/buildElementData/renderPanel can still
+// during useFormState so hydrate/reset/renderPanel can still
 // reach it. Unlike MechanicalVentilation, Terminal does NOT share pitch/
 // orientation360 with the wall family: a manually-positioned terminal's own
 // orientation/pitch are dedicated integer inputs (mvhrTerminalOrientationInput
@@ -31,15 +31,8 @@
 // against the pre-move file), so it moves here as a module-local const
 // instead of staying a shared orchestrator constant.
 //
-// getCurrentTerminal/findEligibleHost are captured-at-useFormState-time
-// helpers (same precedent as Vents' findWallOrWindowParentByName) so
-// buildElementData — which only receives the narrower ElementFormBuildCtx,
-// without selection/getElementById/elementsById — can still resolve the
-// currently selected element and look up a host by name at save time.
-// renderPanel receives the full ElementFormRenderCtx already, so it computes
-// the equivalent lookups directly from ctx instead of reusing these helpers,
-// same split as MechanicalVentilation's module. Both replace the
-// orchestrator's old `allElements` local (Object.values(elementsById), NOT
+// renderPanel computes the selected element and host lookups directly from
+// ctx. It replaces the orchestrator's old `allElements` local (Object.values(elementsById), NOT
 // elementIds.map(id => elementsById[id])) with Object.values(ctx.elementsById)
 // so the host dropdown's option order is unchanged.
 //
@@ -73,7 +66,7 @@ import { useGeometryStore } from '../../stores/geometryStore';
 import { isExistingBuilding } from '../../lib/windowOpenings';
 import { resolveVentilationZoneBaseDrawingZ } from '../../lib/effectiveDwellingDetails';
 import { getParentByName } from '../../lib/parentOrientation';
-import { defaultMvhrTerminalZ, deriveMechanicalVentilationTerminalPosition, isMvhrTerminalHost } from '../../lib/mvhrDuctwork';
+import { deriveMechanicalVentilationTerminalPosition, isMvhrTerminalHost } from '../../lib/mvhrDuctwork';
 import { MVHR_TERMINAL_ROLES } from '../../lib/mvhrRoles';
 import { ParentElementDropdown } from '../ParentElementDropdown';
 import { FieldValidationIndicator } from '../ValidationIndicator';
@@ -111,17 +104,10 @@ export interface MechanicalVentilationTerminalFormState {
   /** Shared with the wall family — see module header comment. */
   parentElement: string;
   setParentElement: (value: string) => void;
-  /** Captured from ElementFormStateCtx so buildElementData (which only
-   * receives ElementFormBuildCtx) can still resolve the live selection and an
-   * eligible host by name — see module header comment. */
-  getCurrentTerminal: () => Element | undefined;
-  findEligibleHost: (hostName: string) => Element | undefined;
   /** An existing building places each vent in its host element, at a stated position in it. */
   existingBuilding: boolean;
   /** The ventilation zone base the exported terminal height is measured from. */
   ventilationZoneBaseHeightM: number;
-  /** A new terminal's height on the selected storey (its base + the default terminal height). */
-  defaultTerminalZ: number;
 }
 
 function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFormState {
@@ -141,7 +127,7 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
   );
 
   const isExistingElementSelection = (): boolean =>
-    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global') && !ctx.selection.isPlaceholder;
+    !!ctx.selection && (ctx.selection.type === 'element' || ctx.selection.type === 'global');
 
   const commitMvhrTerminalMidHeightAirFlowPath = (value: number | '') => {
     if (!isExistingElementSelection() || typeof value !== 'number') return;
@@ -181,14 +167,6 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
     { commitOnChange: true },
   );
 
-  const getCurrentTerminal = (): Element | undefined =>
-    ctx.selection?.type === 'element' || ctx.selection?.type === 'global'
-      ? ctx.getElementById(ctx.selection.id)
-      : undefined;
-
-  const findEligibleHost = (hostName: string): Element | undefined =>
-    Object.values(ctx.elementsById).find((element) => element.name === hostName);
-
   return {
     terminalType,
     setTerminalType,
@@ -203,9 +181,6 @@ function useFormState(ctx: ElementFormStateCtx): MechanicalVentilationTerminalFo
     mvhrTerminalPitchInput,
     parentElement: ctx.shared.parentElement,
     setParentElement: ctx.shared.setParentElement,
-    getCurrentTerminal,
-    findEligibleHost,
-    defaultTerminalZ: defaultMvhrTerminalZ(ctx.derivedBaseHeight),
   };
 }
 
@@ -241,36 +216,6 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
     // new terminal's form. Reset them here.
     state.mvhrTerminalOrientationInput.setValue('');
     state.mvhrTerminalPitchInput.setValue('');
-  },
-
-  buildElementData(state, ctx) {
-    const current = state.getCurrentTerminal();
-    const selectedHost = state.hostElement ? state.findEligibleHost(state.hostElement) : undefined;
-    const eligibleHostName = isMvhrTerminalHost(selectedHost) ? state.hostElement : '';
-    const currentPoint = current?.coordinates?.[0] ?? { x: 0, y: 0, z: state.defaultTerminalZ };
-    const z =
-      typeof state.mvhrTerminalMidHeightAirFlowPathInput.value === 'number'
-        ? state.mvhrTerminalMidHeightAirFlowPathInput.value
-        : (typeof currentPoint.z === 'number' ? currentPoint.z : state.defaultTerminalZ);
-    return {
-      ...ctx.baseData,
-      terminal_type: state.terminalType || undefined,
-      parent_element: state.parentElement || null,
-      host_element: eligibleHostName || null,
-      orientation360: eligibleHostName
-        ? undefined
-        : (typeof state.mvhrTerminalOrientationInput.value === 'number'
-          ? state.mvhrTerminalOrientationInput.value
-          : undefined),
-      pitch: eligibleHostName
-        ? undefined
-        : (typeof state.mvhrTerminalPitchInput.value === 'number'
-          ? state.mvhrTerminalPitchInput.value
-          : undefined),
-      mid_height_air_flow_path: z,
-      coordinates: [{ ...currentPoint, z }],
-      zoneId: undefined,
-    } as Partial<Element>;
   },
 
   renderPanel(state, ctx) {

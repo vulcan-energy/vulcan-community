@@ -12,12 +12,12 @@ import {
   DEFAULT_WIND_SPEED_MPS_GROUND_U,
   GROUND_FLOOR_TYPE_LABELS,
   parseWindShieldLocation,
-} from '../lib/groundUValueCalculator';
+} from '../lib/groundFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
 
 export interface GroundUValueCalculatorApplyPatch {
   u_value: number;
-  /** BS EN ISO 13370 ventilation term — stored in extra_json for suspended floors (default 5 m/s, BR 497 section 4.7.2 alignment). */
+  /** BS EN ISO 13370 §7.2 ventilation term — stored in extra_json for suspended floors (default 5 m/s, the UK average BR 443 §9.2 gives). */
   wind_speed_mps?: number;
   /** Optional; this modal does not write R_g — edit `thermal_resist_insul` in Advanced Fields (kept for callers that merge patches manually). */
   thermal_resist_insul?: number;
@@ -113,7 +113,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
         : null;
 
     const required = [
-      { key: 'thermal_resistance_floor_construction', label: 'Floor construction thermal resistance', ok: rFloor != null && rFloor > 0 },
+      { key: 'thermal_resistance_floor_construction', label: 'Floor construction thermal resistance', ok: rFloor != null && rFloor >= 0 },
       { key: 'total_area', label: 'Total area', ok: totalArea != null && totalArea > 0 },
       { key: 'perimeter', label: 'Perimeter (auto)', ok: perimeter != null && perimeter > 0 },
       { key: 'thickness_walls', label: 'Wall thickness', ok: thicknessWalls != null && thicknessWalls > 0 },
@@ -146,7 +146,7 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
             {
               key: 'thermal_resist_walls_base',
               label: 'Basement wall R below ground',
-              ok: thermalResistanceBasementWalls != null && thermalResistanceBasementWalls > 0,
+              ok: thermalResistanceBasementWalls != null && thermalResistanceBasementWalls >= 0,
             },
           ]
         : []),
@@ -154,7 +154,16 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
         ? [
             { key: 'height_upper_surface', label: 'Height upper surface', ok: (suspendedInputs?.heightUpperSurface ?? 0) > 0 },
             { key: 'thermal_transm_walls', label: 'U-value adjacent walls', ok: (suspendedInputs?.thermalTransmWalls ?? 0) > 0 },
-            { key: 'area_per_perimeter_vent', label: 'Vent area per perimeter', ok: (suspendedInputs?.areaPerPerimeterVent ?? -1) >= 0 },
+            {
+              key: 'area_per_perimeter_vent',
+              label: 'Vent area per perimeter',
+              ok: (readFinite(advancedFieldsData?.area_per_perimeter_vent) ?? -1) >= 0,
+            },
+            {
+              key: 'thermal_resist_insul',
+              label: 'Thermal resistance insulation',
+              ok: (readFinite(advancedFieldsData?.thermal_resist_insul) ?? -1) >= 0,
+            },
             {
               key: 'wind_speed_mps',
               label: 'Wind speed (m/s)',
@@ -224,6 +233,9 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
             value = `${suspendedInputs.areaPerPerimeterVent.toFixed(4)} m²/m`;
           }
           break;
+        case 'thermal_resist_insul':
+          value = fmt(readFinite(advancedFieldsData?.thermal_resist_insul), 3, ' m²K/W');
+          break;
         case 'wind_speed_mps':
           value = fmt(windParsed, 2, ' m/s');
           break;
@@ -233,14 +245,6 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
       detailRows.push({ key: r.key, label: r.label, ok: r.ok, value });
     }
 
-    if (floorType === 'Suspended_floor') {
-      detailRows.push({
-        key: 'thermal_resist_insul',
-        label: 'Thermal resistance insulation',
-        ok: rgParsed > 0,
-        value: rgParsed > 0 ? `${rgParsed.toFixed(3)} m²K/W` : '—',
-      });
-    }
 
     if (floorType === 'Unheated_basement') {
       detailRows.push(
@@ -314,8 +318,8 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
             ) : model.floorType === 'Heated_basement' ? (
               <>
                 {' '}
-                Basement floors use BS EN ISO 13370 §9.1-style equivalent thickness including{' '}
-                <code style={{ fontSize: 11 }}>depth_basement_floor</code> (BR 443 §10.1).
+                The basement floor by BS EN ISO 13370 §7.3.2, with half the{' '}
+                <code style={{ fontSize: 11 }}>depth_basement_floor</code> added to its equivalent thickness (BR 443 §10.1).
               </>
             ) : model.floorType === 'Unheated_basement' ? (
               <>
@@ -339,8 +343,8 @@ export const GroundUValueCalculatorModal: React.FC<GroundUValueCalculatorModalPr
               }}
             >
               <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                Wind speed v (m/s) for ISO 13370 ventilation term — default {DEFAULT_WIND_SPEED_MPS_GROUND_U} m/s (BR 497
-                2nd ed. section 4.7.2 / underfloor void assumptions)
+                Wind speed v (m/s) for the ISO 13370 ventilation term — {DEFAULT_WIND_SPEED_MPS_GROUND_U} m/s, the UK
+                average (BR 443 §9.2), when none is stated
                 <DraftSafeNumberInput
                   min={0}
                   step={0.1}

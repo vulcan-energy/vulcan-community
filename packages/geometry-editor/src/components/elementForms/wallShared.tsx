@@ -80,7 +80,6 @@ import {
   applyCompassOrientationToSlopedPolygonCoords,
 } from '../../lib/openingSegmentOutward';
 import { convertShapeCoordinates, getElementShape } from '../../lib/shapeUtils';
-import { VULCAN_UI_PARTY_ELEMENT_KEY } from '../../lib/assemblyMaterialFabric';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import type { BuildingElementOpaque, BuildingElementTransparent, Element, ElementType } from '../../geometry/types';
 // Not formPrimitives' useDecimalInput: that wrapper doesn't forward `syncExternal`, and the
@@ -92,7 +91,7 @@ import type { BuildingElementOpaque, BuildingElementTransparent, Element, Elemen
 // copies (Opaque/Transparent/Adjacent-like) all read from — same "only one renders at a time,
 // hooks must run unconditionally" reasoning that motivated PR #31's own single call site.
 import { useNumericDraftInput } from '../numericDraftInput';
-import { readExtraJsonRecord, useDecimalInput, type NumericDraftInputBinding } from './formPrimitives';
+import { useDecimalInput, type NumericDraftInputBinding } from './formPrimitives';
 import { ADJACENT_LIKE_ELEMENT_TYPES } from '../../lib/elementArea';
 import type { ElementFormSelection } from './types';
 
@@ -298,33 +297,7 @@ export function useWallSharedFormState(args: {
       if (currentElement) {
         const currentShape = getElementShape(currentElement);
 
-        // For polygons: only allow 0° or 180° (horizontal surfaces)
-        if (currentShape === 'polygon' && newPitch !== 0 && newPitch !== 180) {
-          const ok = window.confirm(
-            `Polygon elements should have pitch 0° (horizontal up) or 180° (horizontal down). Convert to sloped polygon shape to use angled pitch ${newPitch}°?`
-          );
-          if (ok) {
-            // Keep same coordinates, just update pitch - sloped-polygon uses same coordinate structure.
-            const patch: Partial<Element> = { pitch: newPitch } as Partial<Element>;
-            if (elementType === 'BuildingElementOpaque' && currentElement.type === 'BuildingElementAdjacentConditionedSpace') {
-              const extra = readExtraJsonRecord(currentElement.extra_json);
-              if (VULCAN_UI_PARTY_ELEMENT_KEY in extra) {
-                const nextExtra = { ...extra };
-                delete nextExtra[VULCAN_UI_PARTY_ELEMENT_KEY];
-                patch.extra_json = nextExtra;
-              }
-            }
-            updateElement(currentElement.id, patch);
-            setPitch(newPitch);
-            return;
-          } else {
-            // Reset to 0° if user cancels
-            setPitch(0);
-            updateElement(selection.id, { pitch: 0 });
-            return;
-          }
-        }
-
+        // A flat polygon's surface is a 0°/180° dropdown, so a typed pitch never reaches one.
         // For lines: suggest polygon conversion for horizontal surfaces
         if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
           const ok = window.confirm(

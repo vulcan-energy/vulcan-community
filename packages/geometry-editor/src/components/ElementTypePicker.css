@@ -181,3 +181,9 @@
     padding: 6px;
   }
 }
+
+/* "+ Element" in the elements panel: the add button's look, the picker's menu. */
+.element-type-picker__trigger.add-button {
+  justify-content: center !important;
+  width: 100%;
+}

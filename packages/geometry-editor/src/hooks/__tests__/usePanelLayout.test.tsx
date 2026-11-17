@@ -19,6 +19,7 @@ import {
 } from '../usePanelLayout';
 
 const STAGE_SIZE = Object.freeze({ width: 1000, height: 800 });
+const FILEBAR_HEIGHT_PX = 46;
 
 type PanelLayoutHandle = ReturnType<typeof usePanelLayout>;
 
@@ -56,6 +57,12 @@ const PanelLayoutHarness = forwardRef<PanelLayoutHandle, PanelLayoutHarnessProps
       });
     }, []);
 
+    // jsdom does no layout: the File bar reports a 46 px tall bar at the top.
+    const setFilebarRef = useCallback((filebar: HTMLDivElement | null) => {
+      if (filebar === null) return;
+      Object.defineProperty(filebar, 'offsetHeight', { configurable: true, value: FILEBAR_HEIGHT_PX });
+    }, []);
+
     useImperativeHandle(forwardedRef, () => layout, [layout]);
 
     return (
@@ -66,7 +73,7 @@ const PanelLayoutHarness = forwardRef<PanelLayoutHandle, PanelLayoutHarnessProps
           '--geometry-canvas-host-top-inset': `${hostTopInsetPx}px`,
         } as CSSProperties}
       >
-        <div className="overlay-filebar" />
+        <div className="overlay-filebar" ref={setFilebarRef} />
         <div ref={containerRef} />
       </div>
     );
@@ -114,7 +121,9 @@ describe('usePanelLayout composition insets', () => {
       initialElementsPanelPlacement: 'right' as const,
       freshElementsLeftPx: 568,
       safeTopPx: 12,
-      detailsTopPx: 224,
+      panelTopPx: 70,
+      // Elements and Details share the right column.
+      detailsTopPx: 282,
     },
     {
       composition: 'Inset host desktop',
@@ -122,7 +131,8 @@ describe('usePanelLayout composition insets', () => {
       initialElementsPanelPlacement: 'left' as const,
       freshElementsLeftPx: 0,
       safeTopPx: 132,
-      detailsTopPx: 344,
+      panelTopPx: 190,
+      detailsTopPx: 190,
     },
     {
       composition: 'Inset host mobile',
@@ -130,7 +140,8 @@ describe('usePanelLayout composition insets', () => {
       initialElementsPanelPlacement: 'left' as const,
       freshElementsLeftPx: 0,
       safeTopPx: 172,
-      detailsTopPx: 384,
+      panelTopPx: 230,
+      detailsTopPx: 230,
     },
   ])(
     'uses one coherent fresh, reset and clamp layout for $composition',
@@ -139,6 +150,7 @@ describe('usePanelLayout composition insets', () => {
       initialElementsPanelPlacement,
       freshElementsLeftPx,
       safeTopPx,
+      panelTopPx,
       detailsTopPx,
     }) => {
       const {
@@ -151,9 +163,10 @@ describe('usePanelLayout composition insets', () => {
         initialElementsPanelPlacement,
       );
       const layout = layoutRef.current!;
+      // Panels open under the File bar; Details runs to the canvas bottom.
       const expectedElements = {
         x: 568,
-        y: safeTopPx,
+        y: panelTopPx,
         width: 420,
         height: 200,
       };
@@ -161,7 +174,7 @@ describe('usePanelLayout composition insets', () => {
         x: 648,
         y: detailsTopPx,
         width: 340,
-        height: 360,
+        height: STAGE_SIZE.height - 12 - detailsTopPx,
       };
 
       // Mount-time geometry is committed in a layout effect, so the public
@@ -182,7 +195,10 @@ describe('usePanelLayout composition insets', () => {
           ...expectedElements,
           y: -100,
         }),
-        expectedElements,
+        {
+          ...expectedElements,
+          y: safeTopPx,
+        },
       );
       expectRect(
         layout.clampRectToCanvas({

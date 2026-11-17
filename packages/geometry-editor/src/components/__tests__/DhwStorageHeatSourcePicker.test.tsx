@@ -49,3 +49,22 @@ it('uses the existing cylinder and heat-pump icons for the new presets', () => {
   expect(getPointElementIconNode({ ...system, system_preset: 'hwo_heat_pump_cylinder' })).toEqual(Cylinder);
   expect(getPointElementIconNode({ ...system, system_preset: 'exhaust_air_mev_heat_pump' })).toEqual(ThermometerSnowflake);
 });
+
+it('leaves a heat pump coil\'s upper flow limit blank for the HEM:EPC default (E54), and gives it 65 otherwise', () => {
+  const tank: System = { id: 'dhw', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource', parent_element: null,
+    coordinates: [{ x: 0, y: 0, z: 0 }], extra_json: { HotWaterSource: { cyl: { type: 'StorageTank', volume: 150 } } } };
+  const hp: System = { ...tank, id: 'hp', name: 'Heat pump', subcategory: 'HeatSourceWet', extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } };
+  const added = (epc: boolean) => {
+    const onPatch = vi.fn();
+    render(<GeometryStoreProvider store={createGeometryStore()}>
+      <DhwStorageHeatSourcePicker elementsById={{ dhw: tank, hp }} systemElement={tank} heatPumpFlowLimitDefaulted={epc}
+        onPatchExtraJson={(patch) => onPatch(patch(tank.extra_json as Record<string, unknown>))} />
+    </GeometryStoreProvider>);
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'wet:hp' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add heater' }));
+    cleanup();
+    return onPatch.mock.lastCall![0].HotWaterSource.cyl.HeatSource.linked_heat_source;
+  };
+  expect(added(true)).toEqual({ type: 'HeatSourceWet', name: 'hp', heater_position: 0.1, thermostat_position: 0.33 });
+  expect(added(false).temp_flow_limit_upper).toBe(65);
+});

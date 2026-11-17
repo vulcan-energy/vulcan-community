@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { createContext } from 'react';
 import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
 import type { Element } from '../geometry/types';
 import { GROUND_U_VALUE_MANUAL_KEY } from './groundSuspendedFabricSync';
@@ -17,9 +16,6 @@ import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
  * defaults file never changes: a pinned target runs only its own. The rules here match the
  * converter's.
  */
-
-/** Closes Global Settings; its Fabric tab provides it so a count can show elements on the drawing. */
-export const FabricTabCloseContext = createContext<(() => void) | null>(null);
 
 export type FabricRow = 'wall' | 'adjacent_wall' | 'roof' | 'ground_floor' | 'window' | 'door';
 export const FABRIC_ROWS: readonly FabricRow[] = ['wall', 'adjacent_wall', 'roof', 'ground_floor', 'window', 'door'];

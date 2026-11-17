@@ -192,7 +192,6 @@ export interface DormerBundleEditorApi {
     hostName?: string;
     parameters?: Partial<DormerBundleParameters>;
   }) => void;
-  handleSaveDormerAnchor: (anchorId: string) => void;
   handleDuplicateDormerBundle: (anchorId: string) => void;
   getDormerBundleNameIssue: (candidateName: string, currentBundleId?: string | null) => string | null;
   /** Called from ElementCreator's "load element data" effect, right after
@@ -449,10 +448,6 @@ export function useDormerBundleEditor(args: {
     });
     setSelectedElementIds(regeneratedElementIds);
     setSelection({ type: 'dormer', id: metadata.bundle_id });
-  };
-
-  const handleSaveDormerAnchor = (anchorId: string) => {
-    regenerateDormerAnchor(anchorId);
   };
 
   const handleDuplicateDormerBundle = (anchorId: string) => {
@@ -878,7 +873,6 @@ export function useDormerBundleEditor(args: {
     renderDormerBundleEditor,
     regenerateDormerAnchor,
     commitDormerAnchorChanges,
-    handleSaveDormerAnchor,
     handleDuplicateDormerBundle,
     getDormerBundleNameIssue,
     hydrateDormerMetadata,
