@@ -117,6 +117,20 @@ describe("GlobalSettingsModal target-required rows", () => {
     if (rows) expect(terrain.textContent).not.toContain("(default)");
   });
 
+  it("shows the Context Shading join row only while it is on or the converter asks for it", async () => {
+    const store = renderWith();
+    await screen.findByLabelText("Shield Class");
+    const row = () => screen.queryByLabelText("Join shading parts to fit HEM's segment limit");
+    expect(row()).not.toBeInTheDocument();
+    act(() => store.getState().setComplianceSettings({ ContextShadingJoinParts: true }));
+    expect(row()).toBeChecked();
+    await userEvent.click(row()!);
+    expect(store.getState().complianceSettings.ContextShadingJoinParts).toBe(false);
+    await waitFor(() => expect(row()).not.toBeInTheDocument());
+    act(() => store.setState({ targetValidation: { items: [{ message: "Set ContextShadingJoinParts to TRUE to join parts." }] } as never }));
+    expect(row()).not.toBeChecked();
+  });
+
 });
 
 const EPC_ROWS = ["IsExistingBuilding", "PartGcompliance", "HasElectricitySmartMeter", "HeatingControlType", "ColdWaterSource",
@@ -188,6 +202,20 @@ describe("GlobalSettingsModal HEM:EPC Global values", () => {
     expect(screen.queryByRole("group", { name: "Noise nuisance" })).not.toBeInTheDocument();
     await user.click(within(screen.getByRole("group", { name: "Cross ventilation" })).getByRole("button", { name: "Yes" }));
     expect(store.getState().complianceSettings).toMatchObject({ Ventilation_cross_vent_possible: true });
+  });
+
+  it("opens More while it holds an unanswered required field, and keeps it open once answered", async () => {
+    const user = userEvent.setup();
+    const store = createGeometryStore();
+    store.getState().setComplianceSettings({ IsExistingBuilding: true });
+    renderEpc(store, "Ventilation_cross_vent_possible");
+    const crossVent = await screen.findByRole("group", { name: "Cross ventilation" });
+    const more = crossVent.closest("details")!;
+    expect(more).toHaveAttribute("open");
+    await user.click(within(crossVent).getByRole("button", { name: "No" }));
+    expect(store.getState().complianceSettings.Ventilation_cross_vent_possible).toBe(false);
+    // The answer does not fold the box away under the pointer.
+    expect(more).toHaveAttribute("open");
   });
 
   it("asks for the GUID once the dwelling has a smart meter, and checks its format", async () => {

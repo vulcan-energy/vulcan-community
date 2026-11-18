@@ -1241,6 +1241,7 @@ const KNOWN_METADATA_FIELD_NAMES: &[&str] = &[
     "NumberOfHabitableRooms",
     "KitchenExtractorHoodExternal",
     "ComplianceValidationEnabled",
+    CONTEXT_SHADING_JOIN_PARTS,
     "General_build_type",
     "General_built_form",
     "General_storeys_in_dwelling",
@@ -1320,6 +1321,194 @@ pub(crate) fn extract_metadata_field(
 }
 
 const VULCAN_CSV_VERSION: &str = "VulcanCsvVersion";
+/// Metadata setting (TRUE/FALSE, absent is FALSE): when Context Shading makes more segments than
+/// the schema takes, join neighbouring parts of one object (`build_context_shading`).
+const CONTEXT_SHADING_JOIN_PARTS: &str = "ContextShadingJoinParts";
+
+/// A Context Shading row as merged: its arcs in whole degrees (`from`, `to`, distance).
+struct ShadingObject<'r> {
+    name: &'r str,
+    shading_type: &'static str,
+    height: Option<Value>,
+    pieces: Vec<(u32, u32, Option<Value>)>,
+}
+
+/// The shading segments the objects make: cut at every arc end and at north (a segment may not
+/// cross it), neighbours with the same shading joined.
+fn shading_segments_of(objects: &[ShadingObject]) -> Vec<(u32, u32, Vec<Value>)> {
+    let mut arcs: Vec<(u32, u32, Value)> = Vec::new();
+    for object in objects {
+        for (from, to, distance) in &object.pieces {
+            let mut shading = serde_json::Map::new();
+            shading.insert("type".into(), Value::String(object.shading_type.into()));
+            if let Some(height) = &object.height {
+                shading.insert("height".into(), height.clone());
+            }
+            if let Some(distance) = distance {
+                shading.insert("distance".into(), distance.clone());
+            }
+            let shading = Value::Object(shading);
+            if from < to {
+                arcs.push((*from, *to, shading));
+            } else {
+                arcs.push((*from, 360, shading.clone()));
+                if *to > 0 {
+                    arcs.push((0, *to, shading));
+                }
+            }
+        }
+    }
+    let mut bounds: BTreeSet<u32> = BTreeSet::from([0, 360]);
+    bounds.extend(arcs.iter().flat_map(|(from, to, _)| [*from, *to]));
+    let bounds: Vec<u32> = bounds.into_iter().collect();
+    let mut segments: Vec<(u32, u32, Vec<Value>)> = Vec::new();
+    for pair in bounds.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let shading: Vec<Value> = arcs
+            .iter()
+            .filter(|(a, b, _)| *a <= from && to <= *b)
+            .map(|(_, _, object)| object.clone())
+            .collect();
+        match segments.last_mut() {
+            Some(last) if last.2 == shading => last.1 = to,
+            _ => segments.push((from, to, shading)),
+        }
+    }
+    segments
+}
+
+/// The neighbouring parts (object, first part) whose join costs least: the width of the farther
+/// part times the change in its angle, atan(height / distance), as it takes the nearer distance.
+/// Only a join that removes a segment boundary counts: the shared end is not north, no other arc
+/// ends there, and the distances differ. Ties go to the first shared end clockwise from north.
+fn cheapest_part_join(objects: &[ShadingObject]) -> Option<(usize, usize)> {
+    let ends = |skip: (usize, usize)| {
+        objects.iter().enumerate().flat_map(move |(i, o)| {
+            o.pieces
+                .iter()
+                .enumerate()
+                .filter(move |(j, _)| i != skip.0 || (*j != skip.1 && *j != skip.1 + 1))
+                .flat_map(|(_, p)| [p.0, p.1])
+        })
+    };
+    let mut best: Option<(f64, u32, (usize, usize))> = None;
+    for (i, object) in objects.iter().enumerate() {
+        let Some(height) = object.height.as_ref().and_then(Value::as_f64) else {
+            continue;
+        };
+        for (j, pair) in object.pieces.windows(2).enumerate() {
+            let (a, b) = (&pair[0], &pair[1]);
+            let (Some(d1), Some(d2)) = (
+                a.2.as_ref().and_then(Value::as_f64),
+                b.2.as_ref().and_then(Value::as_f64),
+            ) else {
+                continue;
+            };
+            let at = a.1;
+            if at != b.0 || at == 0 || d1 == d2 || ends((i, j)).any(|e| e == at) {
+                continue;
+            }
+            let farther = if d1 > d2 { a } else { b };
+            let width = f64::from((farther.1 + 360 - farther.0) % 360);
+            let cost = width * ((height / d1).atan() - (height / d2).atan()).abs();
+            if best.is_none_or(|(c, e, _)| (cost, at) < (c, e)) {
+                best = Some((cost, at, (i, j)));
+            }
+        }
+    }
+    best.map(|(_, _, join)| join)
+}
+
+/// One part of a Context Shading object: its arc (degrees clockwise) and distance.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ShadingPart {
+    pub start: f64,
+    pub end: f64,
+    pub distance: f64,
+}
+
+/// The `parts` cell of a Context Shading row (`start:end:distance;...`). `None` when blank, so
+/// the row reads as one arc. Otherwise the parts, or the E027 message: unreadable, fewer than two,
+/// over 360 degrees, out of clockwise order or overlapping (gaps are allowed), or not matching the
+/// row's `start_angle`, `end_angle` and `distance` (whole degrees; the smallest part distance).
+pub(crate) fn context_shading_parts(
+    row: &BTreeMap<String, Value>,
+    name: &str,
+    start: f64,
+    end: f64,
+) -> Option<Result<Vec<ShadingPart>, String>> {
+    let cell = row.get("parts").filter(|v| csv_cell_is_set(v))?;
+    let fail = |problem: &str, fix: &str| {
+        Some(Err(format!(
+            "Context Shading row '{name}' {problem}, so its shading is not in the model. {fix}"
+        )))
+    };
+    let parts: Option<Vec<ShadingPart>> = cell.as_str().and_then(|text| {
+        text.split(';')
+            .map(|part| {
+                match part
+                    .split(':')
+                    .map(|value| parse_finite(value.trim()))
+                    .collect::<Vec<_>>()[..]
+                {
+                    [Some(start), Some(end), Some(distance)] => Some(ShadingPart {
+                        start,
+                        end,
+                        distance,
+                    }),
+                    _ => None,
+                }
+            })
+            .collect()
+    });
+    let Some(parts) = parts else {
+        return fail(
+            "has a parts cell that cannot be read",
+            "Write start:end:distance for each part, separated by semicolons.",
+        );
+    };
+    if parts.len() < 2 {
+        return fail(
+            "has fewer than two parts",
+            "Give two or more, or clear parts.",
+        );
+    }
+    let width = |p: &ShadingPart| (p.end - p.start).rem_euclid(360.0);
+    if parts.iter().map(width).sum::<f64>() > 360.0 + 1e-9 {
+        return fail(
+            "has parts covering more than 360 degrees",
+            "Remove the extra parts.",
+        );
+    }
+    let mut swept = 0.0;
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            swept += (part.start - parts[i - 1].end).rem_euclid(360.0);
+        }
+        swept += width(part);
+    }
+    if swept > 360.0 + 1e-9 {
+        return fail(
+            "has parts out of clockwise order or overlapping",
+            "List them clockwise from start_angle, with no overlaps.",
+        );
+    }
+    let degree = |a: f64| a.round().rem_euclid(360.0);
+    let nearest = parts
+        .iter()
+        .map(|p| p.distance)
+        .fold(f64::INFINITY, f64::min);
+    let distance = row
+        .get("distance")
+        .and_then(|v| v.as_f64().or_else(|| parse_finite(v.as_str()?)));
+    if degree(start) != degree(parts[0].start)
+        || degree(end) != degree(parts[parts.len() - 1].end)
+        || distance != Some(nearest)
+    {
+        return Some(Err(format!("Context Shading row '{name}' is not in the model: start_angle, end_angle or distance differs from its parts. Update both, or clear parts.")));
+    }
+    Some(Ok(parts))
+}
 const LEGACY_VULCAN_CSV_VERSION: u64 = 1;
 const CURRENT_VULCAN_CSV_VERSION: u64 = 4;
 
@@ -1701,6 +1890,7 @@ pub struct JSONBuilder {
     product_slots: RefCell<Vec<crate::ProductSlot>>,
     product_candidates: RefCell<BTreeMap<String, Vec<crate::ProductCandidate>>>,
     hemie_shading: RefCell<Option<crate::HemieShading>>,
+    building_parts: RefCell<Vec<crate::BuildingPartElements>>,
     provenance: RefCell<crate::hemie::Provenance>,
     derived_defaults: RefCell<Vec<crate::DerivedDefault>>,
     /// Model path of each object a Geometry CSV row authored (Systems, wet emitter and
@@ -1723,6 +1913,11 @@ impl JSONBuilder {
 
     pub fn take_hemie_shading(&self) -> Option<crate::HemieShading> {
         self.hemie_shading.borrow_mut().take()
+    }
+
+    /// An existing building's parts and their elements, for the editor's "Select this part".
+    pub fn take_building_parts(&self) -> Vec<crate::BuildingPartElements> {
+        self.building_parts.take()
     }
 
     pub fn take_provenance(&self) -> crate::hemie::Provenance {
@@ -1791,6 +1986,7 @@ impl JSONBuilder {
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
+            building_parts: RefCell::default(),
             provenance: RefCell::default(),
             derived_defaults: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
@@ -1834,6 +2030,7 @@ impl JSONBuilder {
             product_slots: RefCell::new(Vec::new()),
             product_candidates: RefCell::default(),
             hemie_shading: RefCell::default(),
+            building_parts: RefCell::default(),
             provenance: RefCell::default(),
             derived_defaults: RefCell::default(),
             slot_rows: RefCell::new(Vec::new()),
@@ -1885,10 +2082,9 @@ impl JSONBuilder {
         self.slot_rows
             .borrow_mut()
             .push((path.clone(), name.to_string()));
-        self.csv_rows.borrow_mut().push((
-            path,
-            format!("Wet Emitters row '{name}' (system '{system}')"),
-        ));
+        self.csv_rows
+            .borrow_mut()
+            .push((path, format!("Emitter '{name}' on '{system}'")));
     }
 
     /// Drain the non-fatal merge problems collected during `build_json`.
@@ -2263,6 +2459,22 @@ impl JSONBuilder {
             }
         }
 
+        // The template's zone holds placeholder elements ("roof 0", "wall 0"): a model that draws
+        // no zone has none, and says what to draw rather than what the placeholders lack.
+        if self.profile.requires_authored_zones()
+            && csv_data.get("Zone").is_none_or(|rows| rows.is_empty())
+        {
+            result["Zone"] = Value::Object(serde_json::Map::new());
+            // An existing building's HEMIE conversion names the missing walls itself.
+            if !existing_building {
+                self.push_non_fatal(
+                    "E_EPC_NO_ZONE",
+                    "/Zone",
+                    "The model has no rooms yet. Draw the dwelling's walls on the plan.",
+                );
+            }
+        }
+
         // Process zone-centric sections
         self.build_zone_structure(&mut result, csv_data)?;
 
@@ -2315,6 +2527,18 @@ impl JSONBuilder {
     ) {
         let mut errors = Vec::new();
         let mut notices = Vec::new();
+        // Read before an existing building's HEMIE Geometry replaces the zones; reported after it.
+        let unlabelled: Vec<String> = if self.profile.asks_for_space_labels() {
+            result["Zone"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(_, zone)| zone.get("livingroom_area").is_none_or(Value::is_null))
+                .map(|(name, _)| name.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         if self.profile.states_appliance_presence() {
             let presence = crate::epc_mappings::APPLIANCE_PRESENCE.map(|(_, row, _)| {
                 let present = csv_data
@@ -2466,10 +2690,20 @@ impl JSONBuilder {
                 &self.schema,
                 &mut errors,
                 &mut notices,
+                &mut self.building_parts.borrow_mut(),
             ) {
                 *self.hemie_shading.borrow_mut() = Some(shading);
                 *self.provenance.borrow_mut() = provenance;
             }
+        }
+        for zone in unlabelled {
+            errors.push(ValidationError {
+                code: "E_EPC_SPACE_LABELS".into(),
+                path: crate::json_pointer(&["Zone", &zone, "livingroom_area"]),
+                message: format!("Label the spaces in '{zone}' (the living room and the rest of the dwelling): select the zone and open the Space Labeller. HEM:EPC takes the living room's area from the labels."),
+                schema_path: None,
+                keyword: None,
+            });
         }
         self.name_csv_rows(&mut errors);
         self.non_fatal_errors.borrow_mut().extend(errors);
@@ -4496,9 +4730,16 @@ impl JSONBuilder {
                 "Found Context Shading section with {} rows",
                 section_data.len()
             );
+            let join_parts = metadata_field_value(csv_data, CONTEXT_SHADING_JOIN_PARTS)
+                .and_then(|v| {
+                    self.csv_bool_non_fatal(Some(&v), CONTEXT_SHADING_JOIN_PARTS, "Metadata")
+                })
+                .unwrap_or(false);
             // A row without both angles and a known type cannot place an obstacle: report it by
             // row and column instead of leaving the sky open.
-            let mut obstacles = Vec::new();
+            // Each object shades its own arcs, at any size: one per part, else the row's. The
+            // schema takes whole degrees (`from`, `to`; 0 to 360 is the whole circle).
+            let mut objects: Vec<ShadingObject> = Vec::new();
             for row in section_data {
                 let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
                 let start = Self::read_context_shading_angle(row, &["start angle", "start_angle"]);
@@ -4519,83 +4760,100 @@ impl JSONBuilder {
                         );
                     }
                 }
-                if let (Some(start), Some(end), Some(shading_type)) = (start, end, shading_type) {
-                    obstacles.push((row, start, end, shading_type));
-                }
-            }
-            // Each object shades its own arc, at any size. The schema takes
-            // whole degrees, and a segment may not cross north, so an arc across 0/360 is split.
-            let mut arcs: Vec<(u32, u32, Value)> = Vec::new();
-            for &(row, start, end, shading_type) in &obstacles {
-                let mut object = serde_json::Map::new();
-                object.insert("type".into(), Value::String(shading_type.to_string()));
-                for key in ["height", "distance"] {
-                    if let Some(value) = row.get(key).filter(|v| csv_cell_is_set(v)) {
-                        object.insert(key.to_string(), value.clone());
-                    }
-                }
-                let object = Value::Object(object);
-                let (from, to) = (
-                    start.round().rem_euclid(360.0) as u32,
-                    end.round().rem_euclid(360.0) as u32,
-                );
-                if (end - start).abs() >= 360.0 {
-                    arcs.push((0, 360, object));
-                } else if from < to {
-                    arcs.push((from, to, object));
-                } else if from > to {
-                    arcs.push((from, 360, object.clone()));
-                    if to > 0 {
-                        arcs.push((0, to, object));
-                    }
-                } else {
-                    let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
+                let (Some(start), Some(end), Some(shading_type)) = (start, end, shading_type)
+                else {
+                    continue;
+                };
+                let degree = |a: f64| a.round().rem_euclid(360.0) as u32;
+                let distance = row.get("distance").filter(|v| csv_cell_is_set(v)).cloned();
+                let pieces: Vec<(u32, u32, Option<Value>)> =
+                    match context_shading_parts(row, name, start, end) {
+                        Some(Err(message)) => {
+                            self.push_non_fatal(
+                                "E027",
+                                &crate::json_pointer(&["Context Shading", name, "parts"]),
+                                &message,
+                            );
+                            continue;
+                        }
+                        Some(Ok(parts)) => parts
+                            .iter()
+                            .map(|p| {
+                                (
+                                    degree(p.start),
+                                    degree(p.end),
+                                    serde_json::Number::from_f64(p.distance).map(Value::Number),
+                                )
+                            })
+                            .filter(|(from, to, _)| from != to)
+                            .collect(),
+                        None if (end - start).abs() >= 360.0 => vec![(0, 360, distance)],
+                        None => Some((degree(start), degree(end), distance))
+                            .filter(|(from, to, _)| from != to)
+                            .into_iter()
+                            .collect(),
+                    };
+                if pieces.is_empty() {
                     self.push_non_fatal(
                         "E027",
                         &crate::json_pointer(&["Context Shading", name, "end_angle"]),
                         &format!("Context Shading row '{name}' is narrower than 1 degree, so its shading is not in the model. Draw it wider or remove it."),
                     );
+                    continue;
                 }
+                objects.push(ShadingObject {
+                    name,
+                    shading_type,
+                    height: row.get("height").filter(|v| csv_cell_is_set(v)).cloned(),
+                    pieces,
+                });
             }
-            let mut bounds: BTreeSet<u32> = BTreeSet::from([0, 360]);
-            bounds.extend(arcs.iter().flat_map(|(from, to, _)| [*from, *to]));
-            let bounds: Vec<u32> = bounds.into_iter().collect();
-            let mut segments: Vec<(u32, u32, Vec<Value>)> = Vec::new();
-            for pair in bounds.windows(2) {
-                let (from, to) = (pair[0], pair[1]);
-                let shading: Vec<Value> = arcs
-                    .iter()
-                    .filter(|(a, b, _)| *a <= from && to <= *b)
-                    .map(|(_, _, object)| object.clone())
-                    .collect();
-                match segments.last_mut() {
-                    Some(last) if last.2 == shading => last.1 = to,
-                    _ => segments.push((from, to, shading)),
-                }
-            }
-            let shaded = |segments: &[(u32, u32, Vec<Value>)]| {
-                let count = segments.iter().filter(|s| !s.2.is_empty()).count();
-                // One shaded segment across north is two in the schema.
-                let wraps = segments.len() > 1
-                    && !segments[0].2.is_empty()
-                    && segments[0].2 == segments[segments.len() - 1].2;
-                count - usize::from(wraps)
-            };
-            let shaded_count = shaded(&segments);
-            if shaded_count > 18 {
-                self.push_non_fatal(
-                    "E027",
-                    "/Context Shading",
-                    &format!("Context Shading makes {shaded_count} shaded segments. The model takes at most 18. Combine neighbouring objects of similar height into one."),
-                );
-            }
+            let mut segments = shading_segments_of(&objects);
             let (min_segments, max_segments) = self.shading_segment_limits();
-            if let Some(max) = max_segments.filter(|max| segments.len() > *max) {
-                self.push_non_fatal(
-                    "E027",
-                    "/Context Shading",
-                    &format!("Context Shading makes {} segments, shaded and unshaded, and this HEM version's schema takes at most {max}. An arc across north counts twice. Combine neighbouring objects of similar height into one.", segments.len()),
-                );
+            if let Some(max) = max_segments {
+                while join_parts && segments.len() > max {
+                    let Some((i, j)) = cheapest_part_join(&objects) else {
+                        break;
+                    };
+                    let object = &mut objects[i];
+                    let (a, b) = (object.pieces[j].clone(), object.pieces.remove(j + 1));
+                    let nearer = [&a.2, &b.2]
+                        .into_iter()
+                        .flatten()
+                        .min_by(|x, y| x.as_f64().partial_cmp(&y.as_f64()).unwrap())
+                        .cloned();
+                    let shown = |to: u32| if to == 0 { 360 } else { to };
+                    self.schema_omissions
+                        .borrow_mut()
+                        .push(crate::finalization::SchemaOmission {
+                            label: None,
+                            code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
+                            path: crate::json_pointer(&["Context Shading", object.name, "parts"]),
+                            message: format!(
+                                "HEM takes at most {max} segments, so {} {}-{} and {}-{} are joined at the nearer distance, {} m.",
+                                object.name,
+                                a.0,
+                                shown(a.1),
+                                b.0,
+                                shown(b.1),
+                                nearer.as_ref().and_then(Value::as_f64).expect("joined parts have distances")
+                            ),
+                        });
+                    object.pieces[j] = (a.0, b.1, nearer);
+                    segments = shading_segments_of(&objects);
+                }
+                if segments.len() > max {
+                    let join = if !join_parts && objects.iter().any(|o| o.pieces.len() > 1) {
+                        format!(" Or set the Metadata row {CONTEXT_SHADING_JOIN_PARTS} to TRUE to join neighbouring parts of an object at the nearer distance.")
+                    } else {
+                        String::new()
+                    };
+                    self.push_non_fatal(
+                        "E027",
+                        "/Context Shading",
+                        &format!("Context Shading makes {} segments, shaded and unshaded, and this HEM version's schema takes at most {max}. An arc across north counts twice. Combine neighbouring objects of similar height into one.{join}", segments.len()),
+                    );
+                }
             }
             // The schema may need a minimum number of segments. Splitting a segment keeps its
             // shading, so the result does not change. `map_contract_unobstructed_shading` keeps
@@ -7645,7 +7903,12 @@ impl JSONBuilder {
                             _ => self.push_non_fatal(
                                 "E065",
                                 "Systems",
-                                &format!("Systems row '{element_name}' has unknown subcategory '{subcategory}', so it is not in the model. Correct the subcategory."),
+                                &if subcategory.is_empty() {
+                                    // A new plant system before its category is picked.
+                                    format!("'{element_name}' has no category, so it is not in the model. Choose its category.")
+                                } else {
+                                    format!("Systems row '{element_name}' has unknown subcategory '{subcategory}', so it is not in the model. Correct the subcategory.")
+                                },
                             ),
                         }
                     } else {
@@ -8399,7 +8662,11 @@ impl JSONBuilder {
                         .get("Name")
                         .and_then(Value::as_str)
                         .unwrap_or_default();
-                    let effective_length = effective_length.unwrap_or_else(|| {
+                    // A radiator drawn as a line states its length by the line.
+                    let drawn = crate::epc_mappings::plan_length(emitter_row)
+                        .filter(|length| *length > 0.0)
+                        .map(times_units);
+                    let effective_length = effective_length.or(drawn).unwrap_or_else(|| {
                         let (length, notice) = self
                             .product_settings
                             .borrow()
@@ -12490,6 +12757,30 @@ mod wet_emitter_tests {
     }
 
     #[test]
+    fn systems_row_with_no_category_asks_for_one() {
+        let csv = r#"Zone
+Name,Type,volume,floor_area
+Living,Zone,100,50
+
+Systems
+Name,Zone,Type,subcategory,system_preset,extra_json
+System,Living,System,,,
+"#;
+        let builder = JSONBuilder::new(SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        let mut result = builder.defaults.clone();
+        builder
+            .merge_systems(&mut result, &parse_csv(csv))
+            .expect("Systems should merge");
+        let errors = builder.take_non_fatal_errors();
+        assert!(
+            errors.iter().any(|e| e.code == "E065"
+                && e.message
+                    == "'System' has no category, so it is not in the model. Choose its category."),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
     fn ventilation_row_with_an_unknown_type_is_reported() {
         let csv = r#"Zone
 Name,Type,volume,floor_area
@@ -12570,7 +12861,7 @@ Radiator 2,Living,WetEmitter,radiator,2.0
         builder.name_csv_rows(&mut errors);
         assert_eq!(
             errors[0].message,
-            "Wet Emitters row 'Lounge' (system 'Living radiator'): \"n\" is a required property"
+            "Emitter 'Lounge' on 'Living radiator': \"n\" is a required property"
         );
     }
 
@@ -15363,8 +15654,8 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         );
     }
 
-    /// Each object shades its own start-to-end arc at any size, and the
-    /// model takes at most 18 shaded segments.
+    /// Each object shades its own start-to-end arc at any size, up to the
+    /// schema's segment limit.
     #[test]
     fn context_shading_segments_follow_each_objects_own_arc() {
         let build = |rows: &[&str], profile: crate::ConversionProfile| {
@@ -15432,22 +15723,22 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
         assert_eq!(&segments[..3], &[(0, 10, 1), (10, 20, 2), (20, 30, 1)]);
         assert_eq!(segments.last(), Some(&(350, 360, 1)));
 
-        // 19 separate objects exceed the 18 shaded segments the model takes.
-        let rows: Vec<String> = (0..19)
-            .map(|i| format!("S{i},ContextShading,obstacle,{},{},5,7", i * 18, i * 18 + 9))
+        // The only limit is the schema's: 18 shaded segments from north make 36 with the gaps.
+        let rows: Vec<String> = (0..18)
+            .map(|i| {
+                format!(
+                    "S{i},ContextShading,obstacle,{},{},5,7",
+                    i * 20,
+                    i * 20 + 10
+                )
+            })
             .collect();
         let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
-        let (_, errors) = build(&rows, rust);
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.path == "/Context Shading" && e.message.contains("19 shaded segments")),
-            "{errors:?}"
-        );
-        let (_, errors) = build(&rows[..18], rust);
+        let (segments, errors) = build(&rows, rust);
         assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(segments.len(), 36);
         // 18 objects that start after north leave an unshaded segment at each end: 37 segments,
-        // one more than the FHS schema takes, though the shaded limit holds.
+        // one more than the FHS schema takes.
         let rows: Vec<String> = (0..18)
             .map(|i| {
                 format!(
@@ -15482,6 +15773,277 @@ Shade 1,ContextShading,overhang,10,20,,7,,"0,0,0"
                 assert!(sum <= 1.0, "{start}-{end}: {segments:?}");
             }
         }
+    }
+
+    /// Context Shading rows (Name, Type, shading_type, start, end, distance, height, parts) on the
+    /// current Rust FHS schema (8 to 36 segments): each segment's (start, end, shading), the
+    /// errors, and the Context Shading notices.
+    #[allow(clippy::type_complexity)]
+    fn build_context_shading_parts(
+        metadata: &str,
+        rows: &[&str],
+    ) -> (
+        Vec<(u64, u64, Vec<Value>)>,
+        Vec<ValidationError>,
+        Vec<String>,
+    ) {
+        let csv = format!(
+            "Metadata\n{metadata}\n\nZone\nName,Type,volume,floor_area\nLiving,Zone,100,50\n\nContext Shading\nName,Type,shading_type,start_angle,end_angle,distance,height,parts\n{}\n",
+            rows.join("\n")
+        );
+        let data = CSVParser::new().parse_csv(&csv).expect("CSV should parse");
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        builder.set_conversion_profile(crate::ConversionProfile::CurrentRustFhs);
+        let mut result = builder.defaults.clone();
+        builder.build_zone_structure(&mut result, &data).unwrap();
+        builder
+            .process_root_level_sections(&mut result, &data)
+            .unwrap();
+        let segments = result["ExternalConditions"]["shading_segments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|seg| {
+                (
+                    seg["start360"].as_u64().unwrap(),
+                    seg["end360"].as_u64().unwrap(),
+                    seg.get("shading")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        let notices = builder
+            .take_schema_omissions()
+            .into_iter()
+            .filter(|n| n.path.starts_with("/Context Shading"))
+            .map(|n| n.message)
+            .collect();
+        (segments, builder.take_non_fatal_errors(), notices)
+    }
+
+    /// The shaded segments, with the schema's minimum-count padding splits joined back.
+    #[allow(clippy::type_complexity)]
+    fn shaded(segments: &[(u64, u64, Vec<Value>)]) -> Vec<(u64, u64, Vec<(String, f64)>)> {
+        let mut out: Vec<(u64, u64, Vec<(String, f64)>)> = Vec::new();
+        for (a, b, s) in segments.iter().filter(|(_, _, s)| !s.is_empty()) {
+            let objects: Vec<(String, f64)> = s
+                .iter()
+                .map(|o| {
+                    (
+                        format!("{}@{}", o["type"].as_str().unwrap(), o["height"]),
+                        o["distance"].as_f64().unwrap(),
+                    )
+                })
+                .collect();
+            match out.last_mut() {
+                Some(last) if last.1 == *a && last.2 == objects => last.1 = *b,
+                _ => out.push((*a, *b, objects)),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn context_shading_parts_give_each_part_its_own_arc() {
+        let o = |d: f64| ("obstacle@7".to_string(), d);
+        // Each part is its own arc, with the row's type and height and the part's distance.
+        let (segments, errors, _) = build_context_shading_parts(
+            "",
+            &["L,ContextShading,obstacle,220,335,0.28,7,220:264:4.97;264:335:0.28"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            shaded(&segments),
+            vec![(220, 264, vec![o(4.97)]), (264, 335, vec![o(0.28)])]
+        );
+
+        // Spaces round a value read as the editor reads them: a hand-written file reaches here.
+        let (spaced, errors, _) = build_context_shading_parts(
+            "",
+            &["L,ContextShading,obstacle,220,335,0.28,7, 220:264:4.97; 264 : 335 : 0.28 "],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(spaced, segments);
+
+        // A blank parts cell reads the row exactly as before.
+        let (blank, errors, _) =
+            build_context_shading_parts("", &["L,ContextShading,obstacle,220,335,0.28,7,"]);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(shaded(&blank), vec![(220, 335, vec![o(0.28)])]);
+        let (segments, _, _) =
+            build_context_shading_parts("", &["L,ContextShading,obstacle,220,335,0.28,7"]);
+        assert_eq!(segments, blank);
+
+        // Parts across north are split at 0/360 like any arc.
+        let (segments, errors, _) = build_context_shading_parts(
+            "",
+            &["N,ContextShading,obstacle,350,30,1.5,7,350:10:2.5;10:30:1.5"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            shaded(&segments),
+            vec![
+                (0, 10, vec![o(2.5)]),
+                (10, 30, vec![o(1.5)]),
+                (350, 360, vec![o(2.5)])
+            ]
+        );
+
+        // A part narrower than a whole degree is skipped while another part survives.
+        let (segments, errors, _) = build_context_shading_parts(
+            "",
+            &["S,ContextShading,obstacle,220,264.3,0.28,7,220:264:4.97;264:264.3:0.28"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(shaded(&segments), vec![(220, 264, vec![o(4.97)])]);
+        // With none left, the row is narrower than 1 degree.
+        let (segments, errors, _) = build_context_shading_parts(
+            "",
+            &["S,ContextShading,obstacle,220.1,220.4,1,7,220.1:220.2:1;220.2:220.4:1"],
+        );
+        assert!(shaded(&segments).is_empty());
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].path, "/Context Shading/S/end_angle");
+        assert!(errors[0].message.contains("narrower than 1 degree"));
+    }
+
+    #[test]
+    fn context_shading_parts_that_do_not_fit_the_row_are_e027() {
+        for (row, problem) in [
+            ("220,335,0.28,7,220:264", "Write start:end:distance for each part, separated by semicolons."),
+            ("220,335,0.28,7,220:264:4.97;", "Write start:end:distance for each part, separated by semicolons."),
+            ("220,335,0.28,7,a:b:c;264:335:0.28", "Write start:end:distance for each part, separated by semicolons."),
+            ("220,335,0.28,7,220:335:0.28", "fewer than two parts"),
+            ("220,335,0.28,7,220:270:4.97;264:335:0.28", "out of clockwise order or overlap"),
+            ("220,335,1,7,220:240:1;300:335:1;240:300:1", "out of clockwise order or overlap"),
+            ("0,30,1,7,0:200:1;200:30:1", "more than 360 degrees"),
+            ("221,335,0.28,7,220:264:4.97;264:335:0.28", "start_angle, end_angle or distance differs from its parts. Update both, or clear parts."),
+            ("220,334,0.28,7,220:264:4.97;264:335:0.28", "start_angle, end_angle or distance differs from its parts. Update both, or clear parts."),
+            ("220,335,0.3,7,220:264:4.97;264:335:0.28", "start_angle, end_angle or distance differs from its parts. Update both, or clear parts."),
+        ] {
+            let (segments, errors, _) =
+                build_context_shading_parts("", &[&format!("L,ContextShading,obstacle,{row}")]);
+            assert!(shaded(&segments).is_empty(), "{row}: the row is not merged");
+            assert_eq!(errors.len(), 1, "{row}: {errors:?}");
+            assert_eq!(errors[0].code, "E027");
+            assert_eq!(errors[0].path, "/Context Shading/L/parts", "{row}");
+            assert!(
+                errors[0].message.starts_with("Context Shading row 'L'")
+                    && errors[0].message.contains(problem),
+                "{row}: {}",
+                errors[0].message
+            );
+        }
+        // Gaps between parts are allowed; whole-degree rounding of the row's angles is too.
+        let (segments, errors, _) = build_context_shading_parts(
+            "",
+            &["L,ContextShading,obstacle,220.4,334.6,0.28,7,220:240:4.97;250:335:0.28"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(shaded(&segments).len(), 2);
+    }
+
+    #[test]
+    fn context_shading_parts_are_joined_only_with_the_setting() {
+        // 40 parts of 8 degrees from 5 to 325: 42 segments with the open sky at each end.
+        // Neighbours alternate 2 m and 20 m, except seven pairs at 7.5 m and 7.51 m, which cost
+        // the same and least to join.
+        let close = [1, 7, 13, 19, 25, 31, 36];
+        let distance = |k: usize| {
+            if close.contains(&k) {
+                "7.5"
+            } else if k > 0 && close.contains(&(k - 1)) {
+                "7.51"
+            } else if k.is_multiple_of(2) {
+                "2"
+            } else {
+                "20"
+            }
+        };
+        let parts: Vec<String> = (0..40)
+            .map(|k| format!("{}:{}:{}", 5 + 8 * k, 13 + 8 * k, distance(k)))
+            .collect();
+        let row = format!("L,ContextShading,obstacle,5,325,2,7,{}", parts.join(";"));
+
+        // Without the setting the error stays and says parts can be joined.
+        let (_, errors, notices) = build_context_shading_parts("", &[&row]);
+        assert!(notices.is_empty(), "{notices:?}");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0]
+                .message
+                .starts_with("Context Shading makes 42 segments")
+                && errors[0].message.contains("ContextShadingJoinParts"),
+            "{}",
+            errors[0].message
+        );
+        let (_, errors, _) = build_context_shading_parts("ContextShadingJoinParts,FALSE", &[&row]);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+
+        // With it, the cheapest joins go first, and the tie between the seven close pairs goes to
+        // the first six clockwise from north.
+        let run = || build_context_shading_parts("ContextShadingJoinParts,TRUE", &[&row]);
+        let (segments, errors, notices) = run();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(segments.len(), 36);
+        assert_eq!(notices.len(), 6, "{notices:?}");
+        assert_eq!(
+            notices[0],
+            "HEM takes at most 36 segments, so L 13-21 and 21-29 are joined at the nearer distance, 7.5 m."
+        );
+        let o = |d: f64| ("obstacle@7".to_string(), d);
+        let shaded = shaded(&segments);
+        assert!(shaded.contains(&(13, 29, vec![o(7.5)])), "{shaded:?}");
+        assert!(shaded.contains(&(253, 269, vec![o(7.5)])), "{shaded:?}");
+        assert!(shaded.contains(&(293, 301, vec![o(7.5)])), "{shaded:?}");
+        assert!(shaded.contains(&(301, 309, vec![o(7.51)])), "{shaded:?}");
+        assert_eq!(run().0, segments, "fitting is deterministic");
+
+        // The joined part takes the nearer distance. A join that leaves neighbours at one distance
+        // merges their segments too, so fewer joins are needed.
+        let (segments, errors, notices) = build_context_shading_parts(
+            "ContextShadingJoinParts,TRUE",
+            &[&format!(
+                "L,ContextShading,obstacle,5,325,2,7,{}",
+                (0..40_u32)
+                    .map(|k| format!(
+                        "{}:{}:{}",
+                        5 + 8 * k,
+                        13 + 8 * k,
+                        if k.is_multiple_of(2) { 2 } else { 3 }
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(";")
+            )],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!((segments.len(), notices.len()), (36, 3));
+        assert!(
+            notices[0].ends_with("joined at the nearer distance, 2 m."),
+            "{notices:?}"
+        );
+
+        // Rows with no parts cannot be joined: the error stays, with no notice.
+        let rows: Vec<String> = (0..18)
+            .map(|i| {
+                format!(
+                    "S{i},ContextShading,obstacle,{},{},5,7,",
+                    i * 18 + 1,
+                    i * 18 + 10
+                )
+            })
+            .collect();
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let (_, errors, notices) =
+            build_context_shading_parts("ContextShadingJoinParts,TRUE", &rows);
+        assert!(notices.is_empty(), "{notices:?}");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0]
+            .message
+            .starts_with("Context Shading makes 37 segments"));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 import { toFhsMassDistributionClass } from '../../lib/assemblyMassHeuristic';
 import { alignedArealHeatCapacity } from '../../lib/assemblyAppliedUi';
 import { documentArealHeatCapacity, type PinnedArealHeatCapacity } from '../../../../geometry-editor-host/src/schemaPort';
+import { CONTEXT_SHADING_JOIN_PARTS_METADATA_KEY } from '../../lib/contextShadingGeometry';
 import { HEMIE_RETIRED_ROWS } from '../../lib/hemieFabric';
 import type { ExternalDetailProfileLink } from '../../lib/assemblyTypes';
 import {
@@ -203,6 +204,8 @@ export type ComplianceSettings = {
   NumberOfBathrooms?: number;
   NumberOfSanitaryAccommodations?: number;
   KitchenExtractorHoodExternal?: boolean;
+  /** Join neighbouring Context Shading parts when HEM's segment limit is exceeded (the ContextShadingJoinParts row). */
+  ContextShadingJoinParts?: boolean;
   /** Metadata rows only some targets take (TARGET_INPUT_ROWS); unset means the file has no row. */
   HasElectricitySmartMeter?: boolean;
   ElectricitySmartMeterGUID?: string;
@@ -718,6 +721,11 @@ export const parseCsvToGeometry = (
       const value = line.split(',')[1]?.trim().toUpperCase();
       // Anything but TRUE or FALSE (blank included) stays unset and is reported; it is not \"no\".
       if (value === 'TRUE' || value === 'FALSE') complianceSettings.KitchenExtractorHoodExternal = value === 'TRUE';
+      continue;
+    }
+    if (line.startsWith(`${CONTEXT_SHADING_JOIN_PARTS_METADATA_KEY},`)) {
+      const value = line.split(',')[1]?.trim().toUpperCase();
+      if (value === 'TRUE' || value === 'FALSE') complianceSettings.ContextShadingJoinParts = value === 'TRUE';
       continue;
     }
     if (line.startsWith('ElectricitySmartMeterGUID,')) {

@@ -9,6 +9,10 @@ export type SearchableDescribedOption = {
   value: string;
   label: string;
   description?: string;
+  /** A short figure at the option's right (a library row's U). */
+  aside?: string;
+  /** How the figure reads in the option's accessible name (`U 0.20`); defaults to `aside`. */
+  asideLabel?: string;
   /** Extra text matched by search only (not shown). */
   searchText?: string;
 };
@@ -57,6 +61,15 @@ interface SearchableDescribedSelectProps {
   'aria-label'?: string;
   /** Opens the menu on mount. */
   defaultOpen?: boolean;
+  /**
+   * Keeps the menu inside the nearest ancestor matching this selector (a panel or a modal): at most
+   * as wide as it, aligned to the trigger's left edge, else its right edge.
+   */
+  menuBoundsSelector?: string;
+  /** Long option names wrap to two lines at regular weight, and every row keeps a tick slot so figures align. */
+  wrapOptionLabels?: boolean;
+  /** The listbox's accessible name when the trigger has no `aria-label` (the trigger then names the value). */
+  listboxLabel?: string;
 }
 
 const focusOnMount = (node: HTMLElement | null) => node?.focus();
@@ -86,6 +99,9 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   'aria-labelledby': ariaLabelledBy,
   'aria-label': ariaLabel,
   defaultOpen = false,
+  menuBoundsSelector,
+  wrapOptionLabels = false,
+  listboxLabel,
 }) => {
   const selectedValueId = useId();
   const listboxId = useId();
@@ -269,19 +285,21 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
     const gap = 8;
     const preferredHeight = 460;
     const minComfortableHeight = 260;
-    const spaceBelow = window.innerHeight - rect.bottom - gap - viewportMargin;
-    const spaceAbove = rect.top - gap - viewportMargin;
+    const container = menuBoundsSelector ? triggerRef.current.closest(menuBoundsSelector)?.getBoundingClientRect() : undefined;
+    const floor = container ? Math.min(container.bottom, window.innerHeight - viewportMargin) : window.innerHeight - viewportMargin;
+    const ceiling = container ? Math.max(container.top, viewportMargin) : viewportMargin;
+    const spaceBelow = floor - rect.bottom - gap;
+    const spaceAbove = rect.top - gap - ceiling;
     const openAbove = spaceBelow < minComfortableHeight && spaceAbove > spaceBelow;
     const available = Math.max(openAbove ? spaceAbove : spaceBelow, 160);
     const maxHeight = Math.min(preferredHeight, available);
-    const width = Math.min(
-      Math.max(rect.width, menuMinWidth),
-      window.innerWidth - viewportMargin * 2,
-    );
-    const x = Math.min(
-      Math.max(rect.left, viewportMargin),
-      window.innerWidth - viewportMargin - width,
-    );
+    const bounds = container
+      ? { left: Math.max(container.left, viewportMargin), right: Math.min(container.right, window.innerWidth - viewportMargin) }
+      : { left: viewportMargin, right: window.innerWidth - viewportMargin };
+    const width = Math.min(Math.max(rect.width, menuMinWidth), bounds.right - bounds.left);
+    // From the trigger's left edge; in a container, one that would run past it aligns to the trigger's right edge.
+    const anchored = container && rect.left + width > bounds.right ? rect.right - width : rect.left;
+    const x = Math.min(Math.max(anchored, bounds.left), bounds.right - width);
     setMenuPosition({
       x,
       ...(openAbove
@@ -476,8 +494,8 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
             id={listboxId}
             role="listbox"
             tabIndex={searchable ? undefined : -1}
-            aria-label={ariaLabel}
-            aria-labelledby={ariaLabel ? undefined : ariaLabelledBy}
+            aria-label={ariaLabel ?? listboxLabel}
+            aria-labelledby={ariaLabel || listboxLabel ? undefined : ariaLabelledBy}
             aria-activedescendant={searchable ? undefined : activeOptionId}
             onKeyDown={searchable ? undefined : handleMenuKeyDown}
             style={{ overflow: 'auto', flex: '1 1 auto', minHeight: 0 }}
@@ -570,6 +588,7 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                             role="option"
                             tabIndex={-1}
                             aria-selected={isSelected}
+                            aria-label={opt.aside ? `${opt.label}, ${opt.asideLabel ?? opt.aside}` : undefined}
                             onMouseDown={(e) => e.preventDefault()}
                             onMouseMove={() => {
                               if (!isActive) setActiveIndex(navigableIndex.get(opt) ?? 0);
@@ -595,7 +614,16 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                           >
                             <div style={{ minWidth: 0 }}>
                               <div
-                                style={{
+                                style={wrapOptionLabels ? {
+                                  fontSize: 13,
+                                  fontWeight: 400,
+                                  lineHeight: 1.35,
+                                  color: 'var(--text-primary)',
+                                  overflow: 'hidden',
+                                  display: '-webkit-box',
+                                  WebkitBoxOrient: 'vertical',
+                                  WebkitLineClamp: 2,
+                                } : {
                                   fontSize: 13,
                                   fontWeight: 650,
                                   color: 'var(--text-primary)',
@@ -615,9 +643,14 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
                                 </div>
                               )}
                             </div>
-                            {isSelected && (
-                              <div style={{ color: 'var(--accent-primary)', paddingTop: 2, flexShrink: 0 }} aria-hidden="true">
-                                ✓
+                            {opt.aside && (
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', paddingTop: 2, flexShrink: 0, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
+                                {opt.aside}
+                              </div>
+                            )}
+                            {(isSelected || wrapOptionLabels) && (
+                              <div style={{ color: 'var(--accent-primary)', paddingTop: 2, flexShrink: 0, width: wrapOptionLabels ? 12 : undefined }} aria-hidden="true">
+                                {isSelected ? '✓' : null}
                               </div>
                             )}
                           </button>

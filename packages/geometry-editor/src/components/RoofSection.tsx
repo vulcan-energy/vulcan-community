@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useLayoutEffect, useRef, useState } from 'react';
-import { roofSectionView, roofSectionSummary, type RoofSectionInput } from '../lib/roofSectionView';
+import { roofSectionView, roofSectionSummary, type RoofSectionInput, type RoomField } from '../lib/roofSectionView';
 import type { SvgLabel } from '../lib/heatingSizingView';
 import './RoofSection.css';
 
@@ -16,7 +16,23 @@ function Label({ label, className }: { label: SvgLabel; className?: string }) {
   return <text className={className} x={label.x} y={label.y} textAnchor={label.anchor}>{label.text}</text>;
 }
 
-export function RoofSection({ input, onEditPitch }: { input: RoofSectionInput; onEditPitch?: () => void }) {
+/** A value the user can edit: a click (or Enter) focuses its field. */
+function Link({ label, onClick }: { label: SvgLabel; onClick: () => void }) {
+  return (
+    <text
+      className="roof-section__link"
+      x={label.x}
+      y={label.y}
+      textAnchor={label.anchor}
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter') onClick(); }}
+    >{label.text}</text>
+  );
+}
+
+export function RoofSection({ input, onEdit }: { input: RoofSectionInput; onEdit?: (field: 'pitch' | RoomField) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [open, setOpen] = useState(narrowOpen);
@@ -42,27 +58,18 @@ export function RoofSection({ input, onEditPitch }: { input: RoofSectionInput; o
   if (!view) {
     body = <p className="roof-section__summary">{summaryLine}</p>;
   } else {
-    const link = input.pitch.editable && onEditPitch;
     const drawing = (
       <svg className="roof-section__svg" viewBox={`0 0 ${view.width} ${view.height}`} role="img" aria-label={`Section across the ridge: ${summary}`}>
-        <path className="roof-section__roof" d={view.outline} />
+        <path className={`roof-section__roof${view.room ? ' roof-section__roof--void' : ''}`} d={view.outline} />
+        {view.room ? <path className="roof-section__room" d={view.room.outline} /> : null}
+        {view.room?.lines.map((l) => <line key={`${l.x1} ${l.y2}`} className="roof-section__wall" {...l} />)}
         <line className="roof-section__eaves" {...view.eavesLine} />
         {view.ticks.map((t) => <line key={t.x} className="roof-section__eaves" x1={t.x} x2={t.x} y1={t.y1} y2={t.y2} />)}
         <Label label={view.labels.ridge} />
         <Label label={view.labels.eaves} />
         <Label label={view.labels.fill} className="roof-section__fill" />
-        {link ? (
-          <text
-            className="roof-section__link"
-            x={view.labels.pitch.x}
-            y={view.labels.pitch.y}
-            textAnchor={view.labels.pitch.anchor}
-            role="button"
-            tabIndex={0}
-            onClick={onEditPitch}
-            onKeyDown={(e) => { if (e.key === 'Enter') onEditPitch(); }}
-          >{view.labels.pitch.text}</text>
-        ) : <Label label={view.labels.pitch} />}
+        {input.pitch.editable && onEdit ? <Link label={view.labels.pitch} onClick={() => onEdit('pitch')} /> : <Label label={view.labels.pitch} />}
+        {view.room?.links.map(({ label, field }) => (onEdit ? <Link key={field} label={label} onClick={() => onEdit(field)} /> : <Label key={field} label={label} />))}
       </svg>
     );
     body = inline ? <div className="roof-section__box">{drawing}</div> : (

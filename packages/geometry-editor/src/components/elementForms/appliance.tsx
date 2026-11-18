@@ -13,6 +13,7 @@
 
 import { useState } from 'react';
 import type { Element } from '../../geometry/types';
+import { energySupplyLabel } from '../systemEditorUtils';
 import { applianceRequiresEnergySupply } from '../../lib/schemaCache';
 import { useGeometryStore } from '../../stores/geometryStore';
 import { StandardDropdown } from '../StandardDropdown';
@@ -85,7 +86,7 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
               { value: '', label: 'Select appliance' },
               ...(applianceKey && !applianceKeyOptions.includes(applianceKey)
                 ? [{ value: applianceKey, label: `${applianceKey} (unavailable in this version)`, disabled: true }] : []),
-              ...applianceKeyOptions.map(key => ({ value: key, label: key })),
+              ...applianceKeyOptions.map(key => ({ value: key, label: key.replace(/_/g, ' ') })),
             ]}
             variant="ghost"
             size="md"
@@ -105,8 +106,8 @@ export const applianceFormModule: ElementFormModule<ApplianceFormState> = {
                   commitExistingElementDraft({ extra_json: Object.keys(extra).length ? extra : undefined } as Partial<Element>);
                 }}
                 options={[
-                  ...(energySupply && !energySupplyNames.includes(energySupply) ? [{ value: energySupply, label: energySupply }] : []),
-                  ...energySupplyNames.map((name) => ({ value: name, label: name })),
+                  ...(energySupply && !energySupplyNames.includes(energySupply) ? [{ value: energySupply, label: energySupplyLabel(energySupply) }] : []),
+                  ...energySupplyNames.map((name) => ({ value: name, label: energySupplyLabel(name) })),
                 ]}
                 placeholder="Select energy supply"
                 variant="ghost"

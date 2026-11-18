@@ -14,7 +14,7 @@ import { useKeyedState } from '../hooks/useKeyedState';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { BuildErrorItem } from '../types/buildErrors';
 import { resolveIssueTarget, type IssueTarget } from '../lib/issueTarget';
-import { buildErrorListItems, displayBuildErrorRows as toDisplayBuildErrorRows, globalSettingsFieldOf, type DisplayBuildError } from '../lib/buildErrorDisplay';
+import { buildErrorFixAction, buildErrorListItems, buildErrorTechnicalText, displayBuildErrorRows as toDisplayBuildErrorRows, globalSettingsFieldOf, type DisplayBuildError, type IssueAction } from '../lib/buildErrorDisplay';
 import { usesEpcGlobalValues } from '../lib/globalSettingsValidation';
 import { useTargetRules } from '../hooks/useTargetRules';
 import type { GeometryDocumentHostPort } from '../../../geometry-document/src';
@@ -44,7 +44,13 @@ export type HostIssueRow = Readonly<{
   location: string;
   message: string;
   select?: () => void;
+  /** A fix beside the row, such as joining Context Shading parts. */
+  action?: IssueAction;
 }>;
+
+const IssueActionButton = ({ action }: { action: IssueAction }) => (
+  <button type="button" className="btn btn-small btn-secondary save-error-action" onClick={action.run}>{action.label}</button>
+);
 
 export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Readonly<{
   saveError: string | null;
@@ -246,7 +252,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     (state) => state.complianceSettings.scenariosBaseModelEnabled === false,
   );
   const elementsById = useGeometryStore((s) => s.elementsById);
-  // The live target check's errors show from the moment a model opens, until a Save reports its own.
+  // The live target check's errors show from the moment a model opens and follow every edit; a Save's check shows only until it runs.
   const targetValidationItems = useGeometryStore((s) => s.targetValidation?.items);
   const buildErrorItems = useMemo(
     () => buildErrorListItems(reportedBuildErrorItems, targetValidationItems),
@@ -277,6 +283,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const [isSaveErrorModalOpen, setIsSaveErrorModalOpen] = useState(false);
   const [saveErrorCopied, setSaveErrorCopied] = useState(false);
   const [prevHasSaveErrorDropdownContent, setPrevHasSaveErrorDropdownContent] = useState(hasSaveErrorDropdownContent);
+  const setComplianceSettings = useGeometryStore((s) => s.setComplianceSettings);
   const requestCsvUpgrade = useGeometryStore((s) => s.requestCsvUpgrade);
   const getCsvMigrationIssues = useGeometryStore((s) => s.getCsvMigrationIssues);
   const resolveCsvMeaning = useGeometryStore((s) => s.resolveCsvUValueInterpretation);
@@ -594,11 +601,15 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         ) : (
           <div className="save-error-user-message">{error.userMessage}</div>
         )}
+        {(() => {
+          const action = buildErrorFixAction(error.item.message, setComplianceSettings);
+          return action && <IssueActionButton action={action} />;
+        })()}
         <details className="save-error-technical">
           <summary>Details{error.derived.length > 0 ? ` (+${error.derived.length} related)` : ''}</summary>
           {[error, ...error.derived].map((detail) => (
             <React.Fragment key={buildErrorRowKey(detail)}>
-              <div className="save-error-technical-body">{detail.item.technicalMessage || detail.item.message}</div>
+              <div className="save-error-technical-body">{buildErrorTechnicalText(detail.item)}</div>
               {(detail.item.path || detail.item.code || detail.item.keyword) && (
                 <div className="save-error-technical-meta">
                   {[detail.item.path, detail.item.keyword, detail.item.code].filter(Boolean).join(' • ')}
@@ -712,6 +723,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
                           {row.message}
                         </button>
                       ) : <div className="save-error-user-message">{row.message}</div>}
+                      {row.action && <IssueActionButton action={row.action} />}
                     </div>
                   </div>
                 ))}

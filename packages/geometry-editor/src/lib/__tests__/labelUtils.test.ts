@@ -16,6 +16,31 @@ import {
 } from '../labelUtils';
 
 describe('getSmartLabelPillTexts', () => {
+  const shading = (extra: Record<string, unknown>) => ({
+    id: 'cs', name: 'Block', type: 'ContextShading', start_angle: 220, end_angle: 335, distance: 0.28, ...extra,
+  }) as any;
+
+  it('shows a Context Shading object whole: its range and one distance', () => {
+    expect(getSmartLabelPillTexts(shading({}), { showLineDimensions: false })).toEqual(['220°-335°', '0.28m']);
+  });
+
+  it('shows a range when the parts differ in distance', () => {
+    const parts = [
+      { start_angle: 220, end_angle: 264, distance: 4.97 },
+      { start_angle: 264, end_angle: 335, distance: 0.28 },
+    ];
+    expect(getSmartLabelPillTexts(shading({ parts }), { showLineDimensions: false })).toEqual(['220°-335°', '0.28–4.97m']);
+  });
+
+  it('shows one distance when every part has it', () => {
+    const parts = [
+      { start_angle: 10, end_angle: 40, distance: 2.7 },
+      { start_angle: 40, end_angle: 70, distance: 2.7 },
+    ];
+    expect(getSmartLabelPillTexts(shading({ parts, start_angle: 10, end_angle: 70, distance: 2.7 }), { showLineDimensions: false }))
+      .toEqual(['10°-70°', '2.70m']);
+  });
+
   it('shows radiator unit count alongside line length', () => {
     const pills = getSmartLabelPillTexts(
       {

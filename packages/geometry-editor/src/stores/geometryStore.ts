@@ -69,7 +69,6 @@ import {
   isInternalFloorElement,
   isStoreyHeightWall,
   heightlessStoreyWallPatches,
-  isWalkableFloorHorizontalPolygon,
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
 } from '../lib/zoneDerivation';
@@ -93,7 +92,7 @@ import {
   canSpaceLabelBeMarkedOpenToLivingRoom,
   dwellingCountZoneIds,
   formatDwellingCountMismatchWarnings,
-  fullDwellingCountsCompliancePatch,
+  followingDwellingCountsPatch,
   getDwellingCountSpaceLabelMismatchState,
   SPACE_LABEL_OPEN_TO_LIVING_ROOM_KEY,
 } from '../lib/spaceLabelDerivation';
@@ -244,10 +243,19 @@ import { collectDuplicateElementNameWarnings } from '../lib/elementNameDuplicate
 import { elementFieldSource } from '../lib/fieldDefault';
 import type { FieldSourceOf } from '../lib/provenance';
 import {
-  calculateContextShadingAngularRangeFromCoordinates,
-  calculateContextShadingDistanceFromCoordinates,
+  CONTEXT_SHADING_DEFAULT_CENTRE,
+  contextShadingStoredFields,
+  deriveContextShadingInModel,
+  generatedNeighbourStoredFields,
+  moveContextShadingLine,
+  rederiveContextShadingFromDrawing,
+  type ContextShadingDerivation,
+  type ContextShadingLineEdit,
 } from '../lib/contextShadingGeometry';
+import { keptDerivation } from '../lib/contextShadingDerivedCache';
 import {
+  contextShadingSplitRefusal,
+  isContextGeneratedElement,
   syncDevelopmentContextShadingElements,
   type DevelopmentContextShadingModel,
 } from '../lib/developmentContextShading';
@@ -682,34 +690,31 @@ const PROJECT_DEFAULTS = {
   pos_eps: 0.01          // meters - position tolerance
 };
 
-function isContextShadingFloorLikeParentCandidate(element: Element): boolean {
-  return (
-    element.type === 'BuildingElementGround' ||
-    isWalkableFloorHorizontalPolygon(element)
-  );
+/**
+ * The model's shading centre as a parent name: the parent another Context Shading object states,
+ * else the default centre. A new object takes it.
+ */
+function currentContextShadingParent(elementsById: Record<string, Element>, excludeElementId?: string): string {
+  const other = Object.values(elementsById).find((element) =>
+    element.type === 'ContextShading' && element.id !== excludeElementId && !element.isPlaceholder);
+  return (other as ContextShading | undefined)?.parent_element || CONTEXT_SHADING_DEFAULT_CENTRE;
 }
 
-function findLowestContextShadingParent(
-  elementsById: Record<string, Element>,
-  floors: Floor[],
-  excludeElementId?: string,
-): Element | null {
-  const candidates = Object.values(elementsById)
-    .filter((element) => {
-      if (!element || element.id === excludeElementId || element.isPlaceholder) return false;
-      if (!isContextShadingFloorLikeParentCandidate(element)) return false;
-      if (!Array.isArray(element.coordinates) || element.coordinates.length < 3) return false;
-      return calculatePolygonArea(element.coordinates) > 0;
-    })
-    .sort((a, b) => {
-      const aFloor = getElementCanvasFloorZValue(a, floors) ?? 0;
-      const bFloor = getElementCanvasFloorZValue(b, floors) ?? 0;
-      if (aFloor !== bFloor) return aFloor - bFloor;
-      const areaDelta = calculatePolygonArea(b.coordinates) - calculatePolygonArea(a.coordinates);
-      if (Math.abs(areaDelta) > 1e-9) return areaDelta;
-      return (a.name || a.id).localeCompare(b.name || b.id);
-    });
-  return candidates[0] ?? null;
+/**
+ * Re-derives a Context Shading element's envelope and parts from its drawing into `target`. A
+ * drawing or parent that cannot give parts leaves the stored values for validation to report. A
+ * generated Development neighbour keeps only its parts above 0, as the sync writes it; one with
+ * none left is left as stored for the next sync to remove.
+ */
+function applyContextShadingDerivation(
+  draft: ContextShading,
+  target: Partial<ContextShading>,
+  state: Pick<GeometryState, 'elementsById' | 'floors' | 'globalOrientationOffset'>,
+): void {
+  const derived = deriveContextShadingInModel(draft, Object.values(state.elementsById), state.floors, state.globalOrientationOffset);
+  if (!derived || 'issue' in derived) return;
+  const fields = isContextGeneratedElement(draft) ? generatedNeighbourStoredFields(derived) : contextShadingStoredFields(derived);
+  if (fields) Object.assign(target, fields);
 }
 
 function applyContextShadingCreationDerivations(
@@ -722,34 +727,15 @@ function applyContextShadingCreationDerivations(
   const updateRecord = normalizedUpdates as Partial<ContextShading> & Record<string, unknown>;
   const parentExplicitlyUpdated = Object.prototype.hasOwnProperty.call(updateRecord, 'parent_element');
   const coordinatesExplicitlyUpdated = Object.prototype.hasOwnProperty.call(updateRecord, 'coordinates');
-  const isNewElement = prevElement.isPlaceholder === true;
   const draft = { ...prevElement, ...updateRecord } as ContextShading;
-  const allElements = Object.values(state.elementsById);
 
-  let parent = draft.parent_element
-    ? allElements.find((element) => element.name === draft.parent_element) ?? null
-    : null;
-
-  if (isNewElement && !parentExplicitlyUpdated && !parent) {
-    parent = findLowestContextShadingParent(state.elementsById, state.floors, prevElement.id);
-    if (parent?.name) {
-      updateRecord.parent_element = parent.name;
-      draft.parent_element = parent.name;
-    }
+  if (prevElement.isPlaceholder === true && !parentExplicitlyUpdated && !draft.parent_element) {
+    const parent = currentContextShadingParent(state.elementsById, prevElement.id);
+    updateRecord.parent_element = parent;
+    draft.parent_element = parent;
   }
-
-  if (!parent || (!coordinatesExplicitlyUpdated && !parentExplicitlyUpdated)) return;
-  if (!Array.isArray(draft.coordinates) || draft.coordinates.length === 0) return;
-  if (!Array.isArray(parent.coordinates) || parent.coordinates.length === 0) return;
-
-  const angles = calculateContextShadingAngularRangeFromCoordinates(
-    draft,
-    parent,
-    state.globalOrientationOffset,
-  );
-  updateRecord.start_angle = roundToTwoDecimals(angles.start_angle);
-  updateRecord.end_angle = roundToTwoDecimals(angles.end_angle);
-  updateRecord.distance = calculateContextShadingDistanceFromCoordinates(draft, parent, Object.values(state.elementsById));
+  if (!coordinatesExplicitlyUpdated && !parentExplicitlyUpdated) return;
+  applyContextShadingDerivation(draft, updateRecord, state);
 }
 
 function applyNewContextShadingElementDerivations(
@@ -757,37 +743,11 @@ function applyNewContextShadingElementDerivations(
   state: Pick<GeometryState, 'elementsById' | 'floors' | 'globalOrientationOffset'>,
 ): void {
   if (element.type !== 'ContextShading') return;
-
   const contextElement = element as ContextShading;
-  const allElements = Object.values(state.elementsById);
-  let parent = contextElement.parent_element
-    ? allElements.find((candidate) => candidate.name === contextElement.parent_element) ?? null
-    : null;
-
-  if (!parent) {
-    parent = findLowestContextShadingParent(state.elementsById, state.floors, contextElement.id);
-    if (parent?.name) {
-      contextElement.parent_element = parent.name;
-    }
+  if (!contextElement.parent_element) {
+    contextElement.parent_element = currentContextShadingParent(state.elementsById, contextElement.id);
   }
-
-  if (!parent || !Array.isArray(contextElement.coordinates) || contextElement.coordinates.length === 0) return;
-  if (!Array.isArray(parent.coordinates) || parent.coordinates.length === 0) return;
-
-  const angles = calculateContextShadingAngularRangeFromCoordinates(
-    contextElement,
-    parent,
-    state.globalOrientationOffset,
-  );
-  if (typeof contextElement.start_angle !== 'number' || !Number.isFinite(contextElement.start_angle)) {
-    contextElement.start_angle = roundToTwoDecimals(angles.start_angle);
-  }
-  if (typeof contextElement.end_angle !== 'number' || !Number.isFinite(contextElement.end_angle)) {
-    contextElement.end_angle = roundToTwoDecimals(angles.end_angle);
-  }
-  if (typeof contextElement.distance !== 'number' || !Number.isFinite(contextElement.distance) || contextElement.distance <= 0) {
-    contextElement.distance = calculateContextShadingDistanceFromCoordinates(contextElement, parent, allElements);
-  }
+  applyContextShadingDerivation(contextElement, contextElement, state);
 }
 
 const normalizeOrientationOffset = (offset: number) => {
@@ -1686,9 +1646,26 @@ export interface GeometryState extends
     options?: { recompute?: boolean },
   ) => void;
 
-  calculateContextShadingAngles: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg?: number) => { start_angle: number; end_angle: number };
-  calculateShadingAngularRange: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg?: number) => { start_angle: number; end_angle: number };
-  calculateContextShadingDistance: (contextShading: ContextShading, parentElement: Element) => number;
+  /**
+   * A Context Shading object's envelope and parts from its drawing, measured from the model's
+   * centre for its parent. Null with no coordinates or no floor; `{ issue }` when it cannot be split.
+   */
+  /** A stored object's derivation as the form shows it: a generated neighbour's kept parts. */
+  deriveContextShadingFor: (contextShading: ContextShading) => ContextShadingDerivation | null;
+  /** Sets the shading centre of every Context Shading object: a floor's name, or null for the default ({@link CONTEXT_SHADING_DEFAULT_CENTRE}). One undo step. */
+  setContextShadingCentre: (parentName: string | null) => void;
+  /**
+   * Gives a 2-point line object the typed Distance, Start Angle or End Angle by moving the line.
+   * Returns false, changing nothing, when the value cannot be reached. One undo step.
+   */
+  editContextShadingLine: (id: string, edit: ContextShadingLineEdit) => boolean;
+  /**
+   * Replaces a drawn polygon Context Shading object with one 2-point line per part (the face
+   * stretch the centre sees), keeping its type, height and centre, and selects the lines. One
+   * undo step. Returns the new ids, or null (nothing changed) for a line, a generated
+   * Development neighbour or a drawing that cannot be split.
+   */
+  splitContextShadingIntoLines: (id: string) => string[] | null;
   syncDevelopmentContextShading: (args: {
     projectId: string;
     activeStem: string;
@@ -2883,7 +2860,7 @@ const createElementValidation = (schemaPort: GeometrySchemaPort) => {
     const defaultsLookup = state.defaultsLookup;
     const key = [
       eb, state.elementIds, state.zones, state.floors, state.globalOrientationOffset, state.complianceSettings,
-      state.sourceCsvVersion, state.csvUpgradeRequested, state.calculateContextShadingDistance,
+      state.sourceCsvVersion, state.csvUpgradeRequested,
       state.targetValidation, state.defaultsLoading, defaultsLookup, state.defaultsJson,
       state.junctionPsiDefaultsPath, state.junctionPsiDefaultsMap, state.spaceLabelsById,
       state.spaceLabelIds, state.hostValidationFindings, schemaPort.getRevision?.(),
@@ -2906,7 +2883,6 @@ const createElementValidation = (schemaPort: GeometrySchemaPort) => {
         ...targetValidationFlags(schemaPort, cs),
         complianceSettings: cs,
         numberOfBedrooms: cs?.NumberOfBedrooms,
-        calculateContextShadingDistance: state.calculateContextShadingDistance,
         unusedContextShading: state.targetValidation?.distantShading?.unused_objects,
         defaultsLoading: state.defaultsLoading,
         defaultsLookup,
@@ -3187,6 +3163,43 @@ const createGeometryState = (
     }));
     return outcomes.filter((outcome): outcome is GeometryPostCommandEffectResult => outcome !== undefined);
   };
+  const spaceLabelsOf = (state: GeometryState): SpaceLabel[] =>
+    state.spaceLabelIds.map((lid) => state.spaceLabelsById[lid]).filter(Boolean);
+  /**
+   * Writes what the space labels give: the primary zone's areas, and the room counts that follow
+   * the labels (`followingDwellingCountsPatch`; a typed count stays). `before` is the labels as
+   * they were before the edit.
+   */
+  const syncSpaceLabelDerivedValues = (before: SpaceLabel[]) => {
+    const state = get();
+    const labels = spaceLabelsOf(state);
+    const primary = state.zones.find((z) => !z.isPlaceholder);
+    const geometryAnalysis = primary
+      ? analyzeZoneSpaceLabels(primary.id, labels, Object.values(state.elementsById).filter(Boolean))
+      : undefined;
+    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, geometryAnalysis);
+    set({ zones: nextZones });
+
+    if (labels.length > 0) {
+      // Counts span every non-placeholder zone: a two-zone FHS model keeps its
+      // bedrooms in "Rest of Dwelling", and primary-zone-only aggregation exported
+      // NumberOfBedrooms: 0. Skipped entirely when no footprint carries a room type,
+      // so drawing an untyped footprint cannot wipe hand-entered counts.
+      const zoneIds = dwellingCountZoneIds(nextZones);
+      const { dwellingCounts, hasLabelledFootprints } = aggregateDwellingCounts(labels, zoneIds);
+      if (hasLabelledFootprints) {
+        const previous = aggregateDwellingCounts(before, zoneIds);
+        const patch = followingDwellingCountsPatch(
+          get().complianceSettings,
+          dwellingCounts,
+          previous.hasLabelledFootprints ? previous.dwellingCounts : null,
+        );
+        if (Object.keys(patch).length) get().setComplianceSettings(patch);
+      }
+    }
+
+    get().saveToHistoryDebounced();
+  };
   const commitElementDrafts = (
     elements: ElementDraft[],
     historySource: string,
@@ -3254,7 +3267,17 @@ const createGeometryState = (
         workingState.elementsById,
         workingState.floors,
       );
+      // A zone made for a drawn element is real once the element is in it: it takes the space
+      // labels' areas and counts like any other zone.
+      const filledZoneIds = new Set(addedIds.flatMap((id) => {
+        const element = workingState.elementsById[id];
+        return element && !element.isPlaceholder && element.zoneId ? [element.zoneId] : [];
+      }));
+      const zones = state.zones.some((zone) => zone.isPlaceholder && filledZoneIds.has(zone.id))
+        ? state.zones.map((zone) => (zone.isPlaceholder && filledZoneIds.has(zone.id) ? { ...zone, isPlaceholder: false } : zone))
+        : state.zones;
       return {
+        zones,
         elementsById: workingState.elementsById,
         elementIds: workingState.elementIds,
         floors: workingState.floors,
@@ -3761,15 +3784,9 @@ const createGeometryState = (
       undefined,
       state.globalOrientationOffset,
     );
-    const autoContextShadingParent =
-      type === 'ContextShading'
-        ? (
-            parentElementName
-              ? Object.values(state.elementsById).find((element) => element.name === parentElementName) ?? null
-              : findLowestContextShadingParent(state.elementsById, state.floors)
-          )
-        : null;
-    const autoContextShadingParentName = parentElementName || autoContextShadingParent?.name || null;
+    const autoContextShadingParentName = type === 'ContextShading'
+      ? parentElementName || currentContextShadingParent(state.elementsById)
+      : null;
     let newElement: Element;
     switch (type) {
       case 'BuildingElementOpaque':
@@ -5269,7 +5286,7 @@ const createGeometryState = (
         [zoneId]: print,
       },
     });
-    if (!opts?.dryRun) get().syncDerivedValuesFromSpaceLabels();
+    if (!opts?.dryRun) syncSpaceLabelDerivedValues(spaceLabelsOf(state));
     return {
       changed: true,
       previousCount: prevInZone.length,
@@ -5278,32 +5295,7 @@ const createGeometryState = (
     };
   },
 
-  syncDerivedValuesFromSpaceLabels: () => {
-    const state = get();
-    const labels = state.spaceLabelIds.map((lid) => state.spaceLabelsById[lid]).filter(Boolean);
-    const primary = state.zones.find((z) => !z.isPlaceholder);
-    const geometryAnalysis = primary
-      ? analyzeZoneSpaceLabels(primary.id, labels, Object.values(state.elementsById).filter(Boolean))
-      : undefined;
-    const { zones: nextZones } = applySpaceLabelsToZonesAndCompliance(state.zones, labels, geometryAnalysis);
-    set({ zones: nextZones });
-
-    if (labels.length > 0) {
-      // Counts span every non-placeholder zone: a two-zone FHS model keeps its
-      // bedrooms in "Rest of Dwelling", and primary-zone-only aggregation exported
-      // NumberOfBedrooms: 0. Skipped entirely when no footprint carries a room type,
-      // so drawing an untyped footprint cannot wipe hand-entered counts.
-      const { dwellingCounts, hasLabelledFootprints } = aggregateDwellingCounts(
-        labels,
-        dwellingCountZoneIds(nextZones),
-      );
-      if (hasLabelledFootprints) {
-        get().setComplianceSettings(fullDwellingCountsCompliancePatch(dwellingCounts));
-      }
-    }
-
-    get().saveToHistoryDebounced();
-  },
+  syncDerivedValuesFromSpaceLabels: () => syncSpaceLabelDerivedValues(spaceLabelsOf(get())),
 
   addSpaceLabel: (params) => {
     const state = get();
@@ -5357,11 +5349,12 @@ const createGeometryState = (
       spaceLabelsById: { ...state.spaceLabelsById, [id]: label },
       spaceLabelIds: [...state.spaceLabelIds, id],
     });
-    get().syncDerivedValuesFromSpaceLabels();
+    syncSpaceLabelDerivedValues(spaceLabelsOf(state));
     return id;
   },
 
   updateSpaceLabel: (id, updates) => measureGeometryStoreAction('updateSpaceLabel', () => {
+    const before = spaceLabelsOf(get());
     set((state) => {
       const prev = state.spaceLabelsById[id];
       if (!prev) return state;
@@ -5421,10 +5414,11 @@ const createGeometryState = (
         spaceLabelsById: { ...state.spaceLabelsById, [id]: next },
       };
     });
-    get().syncDerivedValuesFromSpaceLabels();
+    syncSpaceLabelDerivedValues(before);
   }),
 
   removeSpaceLabel: (id) => {
+    const before = spaceLabelsOf(get());
     set((state) => {
       if (!state.spaceLabelsById[id]) return state;
       const rest = { ...state.spaceLabelsById };
@@ -5436,7 +5430,7 @@ const createGeometryState = (
           state.spaceLabellerSelectedLabelId === id ? null : state.spaceLabellerSelectedLabelId,
       };
     });
-    get().syncDerivedValuesFromSpaceLabels();
+    syncSpaceLabelDerivedValues(before);
   },
 
   addElement: (element) => {
@@ -5663,7 +5657,9 @@ const createGeometryState = (
       rejectHeightEditOnProfiledFace(prevElement, updates);
       if (prevElement.nonNumericCells) normalizedUpdates.nonNumericCells = uneditedNonNumericCells(prevElement, updates);
       if (updates.extra_json) {
-        normalizedUpdates.extra_json = dropAssemblyEnvelopeOnFabricOverride(prevElement.type, prevElement.extra_json, updates.extra_json);
+        normalizedUpdates.extra_json = dropAssemblyEnvelopeOnFabricOverride(
+          prevElement.type, prevElement.extra_json, updates.extra_json, targetRules(schemaPort, state.complianceSettings).arealHeatCapacity,
+        );
       }
       if (prevElement.type === 'BuildingElementTransparent' && Object.prototype.hasOwnProperty.call(updates, 'extra_json')) {
         // Advanced-field edits replace extra_json, including unchanged automatic values.
@@ -5993,9 +5989,10 @@ const createGeometryState = (
         const tentative = { ...prevElement, ...normalizedUpdates } as Element;
         const coords = (tentative as any).coordinates as Array<{x:number,y:number,z:number}> | undefined;
         const coordsMissing = !Array.isArray(coords) || coords.length === 0;
-        if (coordsMissing) {
+        // A Context Shading row with no drawing is its typed values: an edit invents no shape.
+        if (coordsMissing && tentative.type !== 'ContextShading') {
           (normalizedUpdates as any).coordinates = generateDefaultCoordinates(tentative);
-        } else {
+        } else if (!coordsMissing) {
           if (tentative.type === 'BuildingElementPartyWall' && coords.length > 2) {
             (normalizedUpdates as any).coordinates = convertShapeCoordinates(tentative as Element, 'line');
           }
@@ -7512,19 +7509,29 @@ const createGeometryState = (
         }
 
         if (el.type === 'ContextShading') {
-          // Stored start/end angles are in the building's local-north convention
-          // (raw azimuth − offset). Geometry hasn't moved, so the new stored values
-          // are just (old − offsetDelta). Equivalent to re-deriving from the bounding
-          // box with the new offset, but cheaper and avoids needing the parent.
+          // A drawn object re-derives: its whole-degree parts must be re-rounded. Any other row
+          // keeps its values, shifted: stored angles are raw azimuth less the offset.
           const shift = (a: unknown) =>
             typeof a === 'number' ? roundToTwoDecimals(((a - offsetDelta) % 360 + 360) % 360) : a;
-          const next = {
-            ...el,
-            start_angle: shift((el as { start_angle?: number }).start_angle),
-            end_angle: shift((el as { end_angle?: number }).end_angle),
-            _v: (el._v ?? 0) + 1,
-          } as Element;
-          updatedById[el.id] = next;
+          const shading = el as ContextShading;
+          const derived: Partial<ContextShading> = {};
+          applyContextShadingDerivation(shading, derived, { ...state, globalOrientationOffset: nextOffset });
+          // Parts shift in whole degrees, and the envelope follows them so the converter's
+          // envelope check still holds.
+          const parts = shading.parts?.map((part) => ({
+            ...part,
+            start_angle: Math.round(shift(part.start_angle) as number) % 360,
+            end_angle: Math.round(shift(part.end_angle) as number) % 360,
+          }));
+          const typed = Object.keys(derived).length > 0 ? {} : parts?.length ? {
+            start_angle: parts[0].start_angle,
+            end_angle: parts[parts.length - 1].end_angle,
+            parts,
+          } : {
+            start_angle: shift(shading.start_angle),
+            end_angle: shift(shading.end_angle),
+          };
+          updatedById[el.id] = { ...el, ...typed, ...derived, _v: (el._v ?? 0) + 1 } as Element;
           return;
         }
 
@@ -7737,25 +7744,70 @@ const createGeometryState = (
   },
 
 
-  // Calculate the angular range that a ContextShading object affects (which shading segments it blocks).
-  // Uses the actual polygon vertices rather than an axis-aligned bounding box, so rotated objects
-  // do not overstate their angular footprint.
-  // When `globalOffsetDeg` is non-zero the returned angles are expressed in the building's
-  // local north convention (raw azimuth − offset), matching how `orientation360` is stored
-  // on walls/PV. Default is 0 so existing geometry-only callers keep raw azimuth.
-  calculateShadingAngularRange: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg = 0) => {
-    return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, globalOffsetDeg);
+  deriveContextShadingFor: (contextShading) => {
+    const state = get();
+    return keptDerivation(contextShading, deriveContextShadingInModel(contextShading, Object.values(state.elementsById), state.floors, state.globalOrientationOffset));
   },
 
-  // Calculate ContextShading angles from the actual footprint relative to parent.
-  // See `calculateShadingAngularRange` for the offset convention.
-  calculateContextShadingAngles: (contextShading: ContextShading, parentElement: Element, globalOffsetDeg = 0) => {
-    return calculateContextShadingAngularRangeFromCoordinates(contextShading, parentElement, globalOffsetDeg);
+  setContextShadingCentre: (parentName) => {
+    const centre = parentName || CONTEXT_SHADING_DEFAULT_CENTRE;
+    const updates = Object.fromEntries(Object.values(get().elementsById).flatMap((element) =>
+      element.type === 'ContextShading' && element.parent_element !== centre
+        ? [[element.id, { parent_element: centre } as Partial<Element>]]
+        : []));
+    if (Object.keys(updates).length === 0) return;
+    get().updateElementsBulk(updates);
+    get().saveToHistory('setContextShadingCentre');
   },
 
-  // ContextShading distance from the drawing
-  calculateContextShadingDistance: (contextShading: ContextShading, parentElement: Element) => {
-    return calculateContextShadingDistanceFromCoordinates(contextShading, parentElement, Object.values(get().elementsById));
+  editContextShadingLine: (id, edit) => {
+    const state = get();
+    const element = state.elementsById[id];
+    if (element?.type !== 'ContextShading') return false;
+    const coordinates = moveContextShadingLine(
+      element as ContextShading, Object.values(state.elementsById), state.floors, state.globalOrientationOffset, edit,
+    );
+    if (!coordinates) return false;
+    state.updateElement(id, { coordinates });
+    get().saveToHistory('editContextShadingLine');
+    return true;
+  },
+
+  splitContextShadingIntoLines: (id) => {
+    const state = get();
+    const polygon = state.elementsById[id];
+    if (polygon?.type !== 'ContextShading' || contextShadingSplitRefusal(polygon)) return null;
+    const elements = Object.values(state.elementsById);
+    const derived = deriveContextShadingInModel(polygon as ContextShading, elements, state.floors, state.globalOrientationOffset);
+    if (!derived || 'issue' in derived) return null;
+    const z = polygon.coordinates[0].z;
+    const working = { ...state.elementsById };
+    delete working[id];
+    // "<name> 1", "<name> 2", ...: numbers another element already uses are skipped.
+    const taken = new Set(Object.values(working).map((element) => element.name));
+    let number = 0;
+    const nextName = () => {
+      do number += 1; while (taken.has(`${polygon.name} ${number}`));
+      return `${polygon.name} ${number}`;
+    };
+    const lines = derived.parts.map((part) => {
+      const line = { ...(polygon as ContextShading), id: generateId(), coordinates: part.stretch.map(({ x, y }) => ({ x, y, z })), _v: 0 } as ContextShading;
+      delete line.parts;
+      const lineDerived = deriveContextShadingInModel(line, elements, state.floors, state.globalOrientationOffset);
+      if (lineDerived && !('issue' in lineDerived)) Object.assign(line, contextShadingStoredFields(lineDerived));
+      const named = { ...line, name: nextName(), _nameAutoSync: false } as Element;
+      working[named.id] = named;
+      return named;
+    });
+    const ids = lines.map((line) => line.id);
+    set({
+      elementsById: working,
+      elementIds: state.elementIds.flatMap((elementId) => (elementId === id ? ids : [elementId])),
+      selection: null,
+      selectedElementIds: ids,
+    } as Partial<GeometryState>);
+    get().saveToHistory('splitContextShadingIntoLines');
+    return ids;
   },
 
   syncDevelopmentContextShading: ({ projectId, activeStem, contextModels }) => {
@@ -7866,7 +7918,6 @@ const createGeometryState = (
       buildingRegulationsChecks,
       complianceSettings: cs,
       numberOfBedrooms: cs?.NumberOfBedrooms,
-      calculateContextShadingDistance: state.calculateContextShadingDistance,
       unusedContextShading: state.targetValidation?.distantShading?.unused_objects,
       defaultsLoading: state.defaultsLoading,
       defaultsLookup: state.getDefaultsLookup(),
@@ -7983,6 +8034,39 @@ const createGeometryState = (
 
 export type GeometryStoreApi = StoreApi<GeometryState>;
 
+/**
+ * Keeps drawn Context Shading values in line with the dwelling through the user's edits: a floor
+ * plate moved, a wall's layers or a floor's wall thickness changed re-derives every drawn object,
+ * as the load does, so a save or a run never sends values the drawing no longer gives. The writes
+ * ride in the user's undo step. An edit to Context Shading alone derives in the edit itself.
+ */
+function followContextShadingDwelling(store: GeometryStoreApi, schemaPort: GeometrySchemaPort): void {
+  let syncing = false;
+  const typed = schemaPort.availability === 'available'
+    ? (element: Element) => coerceElementToStrictestNumericTyping(element, schemaPort)
+    : undefined;
+  store.subscribe((state, previous) => {
+    if (syncing || state.writeIntent() !== 'user') return;
+    if (state.elementsById === previous.elementsById && state.floors === previous.floors) return;
+    const elements = Object.values(state.elementsById);
+    if (!elements.some((element) => element.type === 'ContextShading' && (element.coordinates?.length ?? 0) > 0)) return;
+    const dwellingChanged = state.floors !== previous.floors
+      || elements.some((element) => element.type !== 'ContextShading' && previous.elementsById[element.id] !== element)
+      || Object.values(previous.elementsById).some((element) => element.type !== 'ContextShading' && !state.elementsById[element.id]);
+    if (!dwellingChanged) return;
+    const next = rederiveContextShadingFromDrawing(elements, state.floors, state.globalOrientationOffset, typed, isContextGeneratedElement);
+    if (next === elements) return;
+    const changed = Object.fromEntries(next.flatMap((element, index) =>
+      element === elements[index] ? [] : [[element.id, { ...element, _v: (element._v ?? 0) + 1 } as Element]]));
+    syncing = true;
+    try {
+      state.asEditFollowUp(() => store.setState({ elementsById: { ...store.getState().elementsById, ...changed } }));
+    } finally {
+      syncing = false;
+    }
+  });
+}
+
 /** Creates one geometry state container for an editor host. */
 export const createGeometryStore = (
   options: CreateGeometryStoreOptions = {},
@@ -8003,6 +8087,16 @@ export const createGeometryStore = (
   });
   rawSetState({ withCopySources: follower.withCopySources });
   followHemieBundleHosts(store);
+  followContextShadingDwelling(store, schemaPort);
+  // A hovered Context Shading part cannot outlive what it points at: its row or pill unmounts under
+  // the pointer on a selection change, a delete or an undo, and no mouse-leave follows.
+  store.subscribe((state, previous) => {
+    const hovered = state.hoveredContextShadingPart;
+    if (!hovered) return;
+    const { selection } = state;
+    const moved = selection?.id !== previous.selection?.id || selection?.type !== previous.selection?.type;
+    if (moved || !state.elementsById[hovered.elementId]) rawSetState({ hoveredContextShadingPart: null });
+  });
   return store;
 };
 

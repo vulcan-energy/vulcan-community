@@ -47,6 +47,16 @@ describe("presetValueFor", () => {
     expect(ownFabricClear(columnU, "wall", {})).toEqual({ u_value: undefined, extra_json: {} });
   });
 
+  it("clears an existing wall's edited layers with its own values", () => {
+    const wall = element("BuildingElementOpaque", { u_value: 0.3, wall_layers: [{ material: "PIR", thickness_mm: 100 }] }, { pitch: 90 });
+    expect(ownFabricClear(wall, "wall", {})).toEqual({ extra_json: {} });
+  });
+
+  it("clears layers a typed U-value set aside, so the preset applies rather than bringing them back", () => {
+    const wall = element("BuildingElementOpaque", { u_value: 0.2, _vulcan_assembly_v1_overridden: { schemaVersion: 1 } }, { pitch: 90 });
+    expect(ownFabricClear(wall, "wall", {})).toEqual({ extra_json: {} });
+  });
+
   it("clears a build-up with the values it set, and keeps a value the user changed since", () => {
     const wall = element("BuildingElementOpaque", { vulcan_assembly_v1: {}, u_value: 0.2, areal_heat_capacity: "Medium", mass_distribution_class: "I: Mass concentrated on internal side", colour: "Light" }, { pitch: 90 });
     const buildUp = { u_value: 0.2, areal_heat_capacity: "Medium", mass_distribution_class: "E: Mass concentrated on external side" };

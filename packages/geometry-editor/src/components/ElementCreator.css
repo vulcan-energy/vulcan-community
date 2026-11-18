@@ -315,3 +315,52 @@
   color: var(--text-primary);
   margin: 2px 0 6px;
 }
+
+.context-shading-directions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 12px;
+  gap: 4px 6px;
+  align-items: center;
+  width: 100%;
+}
+.element-input--stacked { flex-direction: column; align-items: flex-start; }
+.context-shading-directions-row { display: contents; }
+.context-shading-directions-flag { display: flex; align-items: center; }
+.context-shading-directions-wrap { width: 100%; }
+/* Long tables keep their column headers while the form scrolls. */
+.context-shading-directions-head {
+  position: sticky;
+  /* Sticks at the scrolling form's edge, past its 8px top padding, so rows do not show above it. */
+  top: -8px;
+  z-index: 1;
+  background: color-mix(in srgb, #fff 4%, var(--surface-overlay));
+  display: flex;
+  align-items: flex-end;
+  align-self: stretch;
+  line-height: 1.25;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 12px 7px 4px;
+}
+/* A row scrolled into view clears the sticky header. */
+.context-shading-directions-row > * { scroll-margin-top: 46px; }
+.context-shading-directions-cell .standard-input[aria-invalid='true'],
+.context-shading-directions-cell .standard-input[aria-invalid='true']:focus { border-color: var(--validation-error); }
+.context-shading-directions-fixed {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.context-shading-directions-row.is-hovered .context-shading-directions-fixed,
+.context-shading-directions-row.is-hovered .context-shading-directions-cell {
+  background: var(--hover-bg);
+  border-radius: 6px;
+}
+/* A layer row's thickness: the box being typed in shows the focus ring. */
+.layer-row__thickness:focus,
+.layer-row__thickness:focus-visible {
+  outline: none;
+  border-color: var(--accent-primary) !important;
+  box-shadow: 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
+}

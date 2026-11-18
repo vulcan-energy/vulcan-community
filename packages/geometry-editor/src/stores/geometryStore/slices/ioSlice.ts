@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { survivingSelection } from './historySlice';
 import type { StateCreator } from 'zustand';
 import {
   deriveZoneProperties,
@@ -52,14 +53,14 @@ import {
   isWallLikeLineElement,
 } from '../../../lib/openingSegmentOutward';
 import { getParentOrientation360 } from '../../../lib/parentOrientation';
-import { rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
+import { CONTEXT_SHADING_JOIN_PARTS_METADATA_KEY, rederiveContextShadingFromDrawing } from '../../../lib/contextShadingGeometry';
 import {
   acceptsSuspendedShieldLocation,
   fillSuspendedFloorDefaults,
   missingSuspendedShieldLocations,
 } from '../../../lib/groundSuspendedFabricSync';
 import { deriveForExport } from '../../../lib/deriveForExport';
-import type { BuildingElementOpaque, BuildingElementTransparent, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
+import type { BuildingElementOpaque, BuildingElementTransparent, ContextShading, Element, Floor, OnSiteGeneration, SpaceLabel, Zone } from '../../../geometry/types';
 import { alignedArealHeatCapacity } from '../../../lib/assemblyAppliedUi';
 import type { GeometryState } from '../../geometryStore';
 import type { GeometryModelSchemaProfilePort } from '../../../../../geometry-editor-host/src/modelSchemaProfilePort';
@@ -100,7 +101,9 @@ import { createElementNameLookup } from '../../../lib/elementNameRemap';
 import { thermalBridgeExtraJsonForCsv } from '../../../geometry/thermalBridge/normalizeThermalBridgeSourceLinks';
 import {
   encodePromotedExtraJsonFields,
+  contextShadingSectionHeaders,
   EXPECTED_SECTION_HEADERS,
+  formatContextShadingPartsCell,
   ZONE_HEADERS_FHS,
 } from '../../../geometry/io/geometryCsvLayouts';
 import {
@@ -109,7 +112,7 @@ import {
 } from '../../../lib/workspacePaths';
 import { FLOOR_AREA_MATCH_EPSILON_M2, applySpaceLabelsToZonesAndCompliance } from '../../../lib/spaceLabelDerivation';
 import { analyzeZoneSpaceLabels } from '../../../lib/spaceLabelGeometry';
-import { normalizeDevelopmentContextShadingExtraJsonForCsv } from '../../../lib/developmentContextShading';
+import { isContextGeneratedElement, normalizeDevelopmentContextShadingExtraJsonForCsv } from '../../../lib/developmentContextShading';
 import {
   getMechanicalVentilationCsvFlatPositionValues,
   getMechanicalVentilationExtraJsonForCsv,
@@ -161,11 +164,13 @@ export interface IoSlice {
   resolveCsvUValueInterpretation: (ids: readonly string[], meaning: UValueInterpretation) => void;
   generateCSV: (options?: { allowUnresolvedMigration?: boolean }) => string;
   /** Returns non-fatal data-loss warnings from CSV parsing; load UIs must surface them.
+   * `notices`: values the load updated, which a Save keeps (not data loss); a row left out or a
+   * value made blank, which a Save deletes, is a warning.
    * `upgraded` means a load-time data upgrade left the model dirty against its baseline. */
   loadFromCSV: (
     csvContent: string,
     loadOptions?: { keepUnchangedDefaults?: boolean },
-  ) => { warnings: string[]; upgraded: boolean };
+  ) => { warnings: string[]; notices: string[]; upgraded: boolean };
   /**
    * Internal (Undo/Redo): make `csvContent` the document without resetting history,
    * the saved baseline or the viewport; surviving element and zone ids, the selection and the
@@ -780,25 +785,55 @@ const COLUMN_WORDS: Readonly<Record<string, string>> = { livingroom_area: 'livin
 /** A CSV column in the words a load notice uses. */
 const columnWords = (column: string): string => COLUMN_WORDS[column] ?? column.replace(/_/g, ' ');
 /**
- * One load notice listing every cell of a zone or element row, a column the file lacks included,
- * that the loaded document saves with a different value, such as a plan area, a labelled
- * living-room area or a Type the converter does not read, every row the save leaves out, and every
- * name the load brings up to date. An internal partition saved as both
+ * One load notice naming every External shading object whose stored values its drawing changed on
+ * open (rederiveContextShadingFromDrawing), with what changed, so no result moves silently.
+ */
+const rederivedShadingNotice = (before: readonly Element[], after: readonly Element[]): string[] => {
+  const value = (v: unknown, unit: string) => (typeof v === 'number' && Number.isFinite(v) ? `${v}${unit}` : 'blank');
+  const count = (shading: ContextShading) => shading.parts?.length ?? 1;
+  const changes = after.flatMap((element, index) => {
+    if (element === before[index] || element.type !== 'ContextShading') return [];
+    const was = before[index] as ContextShading;
+    const now = element as ContextShading;
+    const changed: string[] = [];
+    if (was.start_angle !== now.start_angle || was.end_angle !== now.end_angle) {
+      changed.push(`directions ${value(was.start_angle, '°')}–${value(was.end_angle, '°')} → ${value(now.start_angle, '°')}–${value(now.end_angle, '°')}`);
+    }
+    if (was.distance !== now.distance) changed.push(`distance ${value(was.distance, ' m')} → ${value(now.distance, ' m')}`);
+    if (JSON.stringify(was.parts ?? null) !== JSON.stringify(now.parts ?? null)) {
+      changed.push(count(was) === count(now) ? 'parts updated' : `parts ${count(was)} → ${count(now)}`);
+    }
+    return changed.length ? [`${now.name}: ${changed.join(', ')}`] : [];
+  });
+  const one = changes.length === 1;
+  return changes.length
+    ? [`Opening the model updated ${one ? '1 External shading object from its drawing' : `${changes.length} External shading objects from their drawings`}. Save to keep ${one ? 'it' : 'them'}.\n${changes.join('; ')}.`]
+    : [];
+};
+
+/**
+ * Two load messages. `updated`, a notice, lists every cell of a zone or element row, a column the
+ * file lacks included, that the loaded document saves with a different value, such as a plan area,
+ * a labelled living-room area or a Type the converter does not read, and every name the load brings
+ * up to date, a 0 saved blank included (the row's own geometry fixes it). `lost`, a data-loss
+ * warning, lists every row the save leaves out and every stated non-zero value it saves blank. An internal partition saved as both
  * faces at twice a legacy single-face area keeps its meaning, so it is not listed. The converter
  * works out only a blank pitch from the row's coords, so that is the one filled blank not listed.
  */
-const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: ReadonlyMap<string, string>): string[] => {
+const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: ReadonlyMap<string, string>): { lost: string[]; updated: string[] } => {
   const rows = (csv: string) => new Map(parseCsvSections(csv).flatMap((section) => section.rows
     .filter((row) => row.data.Name)
     .map((row): [string, Record<string, string>] => [`${section.name}|${row.data.Zone ?? ''}|${row.data.Name}`, row.data])));
   const loaded = rows(loadedCsv);
   // An auto-generated name the load brings up to date is a new key in the engine input.
   const replaced = [...renamed].map(([before, after]) => `${before} name → ${after}`);
+  // A row left out or a value made blank: Save deletes it, so it is data loss, not an update.
+  const lost: string[] = [];
   for (const [key, authored] of rows(authoredCsv)) {
     const newName = renamed.get(authored.Name);
     const saved = loaded.get(newName ? `${key.slice(0, -authored.Name.length)}${newName}` : key);
     if (!saved) {
-      replaced.push(`${authored.Name} row in ${key.split('|')[0]} → left out`);
+      lost.push(`${authored.Name} row in ${key.split('|')[0]} → left out`);
       continue;
     }
     const bothFaces = /both_faces/.test(saved.extra_json ?? '');
@@ -837,7 +872,9 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
       const same = Number.isFinite(a) && Number.isFinite(b) && after !== ''
         ? Math.abs(b - a) < 0.015 || (column === 'area' && bothFaces && Math.abs(b - 2 * a) < 0.015)
         : before.toLowerCase() === after.toLowerCase();
-      if (!same) replaced.push(`${authored.Name} ${columnWords(column)} ${before} → ${after || 'blank'}`);
+      // A stated non-zero value saved blank is lost; a 0 saved blank is one the row's own geometry fixes.
+      const lostValue = after === '' && !(Number.isFinite(a) && a === 0);
+      if (!same) (lostValue ? lost : replaced).push(`${authored.Name} ${columnWords(column)} ${before} → ${after || 'blank'}`);
     }
   }
   const metadata = (csv: string) => new Map(csv.split(/\r?\n/).map(parseCsvLine)
@@ -851,10 +888,16 @@ const replacedValuesNotice = (authoredCsv: string, loadedCsv: string, renamed: R
   }
   // A row the file lacks is listed by lateLoadNotice (absentMetadataRowFill).
   const one = replaced.length === 1;
-  return replaced.length
+  const oneLost = lost.length === 1;
+  return {
     // The first line is the summary users see; the list shows under Details.
-    ? [`Opening the model updated ${one ? '1 value' : `${replaced.length} values`}. Save to keep ${one ? 'it' : 'them'}.\n${replaced.join('; ')}.`]
-    : [];
+    lost: lost.length
+      ? [`Saving the model will delete ${oneLost ? '1 value' : `${lost.length} values`} this file holds. Check ${oneLost ? 'it' : 'them'} before you save.\n${lost.join('; ')}.`]
+      : [],
+    updated: replaced.length
+      ? [`Opening the model updated ${one ? '1 value' : `${replaced.length} values`}. Save to keep ${one ? 'it' : 'them'}.\n${replaced.join('; ')}.`]
+      : [],
+  };
 };
 
 /** The target's root schema for the defaults fill: null until it loads, undefined for a host with no schema. */
@@ -1135,6 +1178,9 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       if (key === 'General_storeys_in_dwelling' && exportRules.constructionBands) continue;
       const cell = value ?? unreadRows[key];
       if (cell !== undefined) lines.push(`${key},${escapeCSV(cell)},,,,,,,,,,,,,`);
+    }
+    if (compliance.ContextShadingJoinParts !== undefined) {
+      lines.push(`${CONTEXT_SHADING_JOIN_PARTS_METADATA_KEY},${compliance.ContextShadingJoinParts ? 'TRUE' : 'FALSE'},,,,,,,,,,,,,`);
     }
     // The air test report's envelope area, only when stated: the converter otherwise sums the drawing.
     if (compliance.AirPermeability_env_area !== undefined) lines.push(`AirPermeability_env_area,${compliance.AirPermeability_env_area},,,,,,,,,,,,,`);
@@ -1730,10 +1776,11 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     // 15. Context Shading section (headers from `geometryCsvLayouts`)
     const contextShadingElements = getElementsOfType(exportElements, 'ContextShading');
     if (contextShadingElements.length > 0) {
-      const contextHeader = [...EXPECTED_SECTION_HEADERS['Context Shading']];
+      const withParts = contextShadingElements.some((element) => (element.parts?.length ?? 0) > 0 || element.nonNumericCells?.parts !== undefined);
+      const contextHeader = contextShadingSectionHeaders(withParts);
       const contextColumnCount = contextHeader.length;
 
-      lines.push('Context Shading,,,,,,,,,,');
+      lines.push(`Context Shading${','.repeat(contextColumnCount - 1)}`);
       lines.push(ensureColumnCount(contextHeader, contextColumnCount));
       contextShadingElements.forEach(element => {
         const extraJson = normalizeDevelopmentContextShadingExtraJsonForCsv(element);
@@ -1744,6 +1791,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           escapeCSV(formatOptionalFiniteNumberForCsv(element.start_angle)),
           escapeCSV(formatOptionalFiniteNumberForCsv(element.end_angle)),
           escapeCSV(formatOptionalFiniteNumberForCsv(element.distance)),
+          ...(withParts ? [escapeCSV(formatContextShadingPartsCell(element.parts))] : []),
           escapeCSV(formatOptionalFiniteNumberForCsv(element.height)),
           escapeCSV(element.parent_element || ''),
           escapeCSV(formatViewerBaseHeightForCsv(element)),
@@ -1880,7 +1928,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     csvContent: string,
     loadOptions: { keepUnchangedDefaults?: boolean } | undefined,
     replace?: { currentFloorId: string | null; floors: Floor[] },
-  ): { warnings: string[]; upgraded: boolean } {
+  ): { warnings: string[]; notices: string[]; upgraded: boolean } {
     const { zones: newZones, elements: newElements, spaceLabels: newSpaceLabels, metadata, warnings: parseWarnings } =
       parseCsvToGeometry(csvContent, {
         hostDocumentMetadataKeys: options.hostDocumentMetadataKeys,
@@ -2484,19 +2532,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     }
     if (replace) {
       // Selection survives by id: reuseKnownIds kept the ids of surviving elements and zones.
-      set((current) => {
-        const sel = current.selection;
-        const selectionSurvives =
-          !sel ||
-          sel.type === 'global' ||
-          sel.type === 'dormer' ||
-          (sel.type === 'zone' ? current.zones.some((zone) => zone.id === sel.id) : sel.id in current.elementsById);
-        return {
-          selectedElementIds: current.selectedElementIds.filter((id) => id in current.elementsById),
-          selection: selectionSurvives ? sel : null,
-        };
-      });
-      return { warnings: [...parseWarnings, ...duplicateNameWarnings], upgraded: false };
+      set((current) => survivingSelection(current));
+      return { warnings: [...parseWarnings, ...duplicateNameWarnings], notices: [], upgraded: false };
     }
 
     // Defaults kept from before the load (keepUnchangedDefaults) fill the rows this file lacks now;
@@ -2529,10 +2566,12 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
         upgradePcdbProductReferences(groundUMarked),
         withEffectiveStoreyHeights(get().floors, loadedElements),
       ),
+      get().floors,
       get().globalOrientationOffset,
       options.schemaPort.availability === 'available'
         ? (element) => coerceElementToStrictestNumericTyping(element, options.schemaPort)
         : undefined,
+      isContextGeneratedElement,
     );
     const upgraded = upgradedElements !== loadedElements;
     if (upgraded) {
@@ -2543,7 +2582,13 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
     set({ lastSavedCsv: loadedCsvBaseline });
     get().seedHistory('loadFromCSV', upgraded ? undefined : loadedCsvBaseline);
 
-    return { warnings: [...parseWarnings, ...duplicateNameWarnings, ...replacedValuesNotice(csvContent, loadedCsvBaseline, renamed)], upgraded };
+    // Values the load updated are a notice; a value or row the save deletes is a data-loss warning.
+    const { lost, updated } = replacedValuesNotice(csvContent, loadedCsvBaseline, renamed);
+    return {
+      warnings: [...parseWarnings, ...duplicateNameWarnings, ...lost],
+      notices: [...updated, ...rederivedShadingNotice(loadedElements, upgradedElements)],
+      upgraded,
+    };
   }
 
   /**

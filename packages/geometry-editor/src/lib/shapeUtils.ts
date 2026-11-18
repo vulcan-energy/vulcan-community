@@ -110,6 +110,8 @@ export function getCompatibleElementTypes(shape: CanvasShape): ElementType[] {
         'WaterPipework',
         // Heating system distribution (radiator/fancoil)
         'WetEmitter',
+        // A neighbour's facing wall or a fence: one face, its distance and ends editable
+        'ContextShading',
       ] as ElementType[];
     case 'polygon':
       return [

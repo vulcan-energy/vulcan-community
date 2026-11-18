@@ -270,10 +270,19 @@ pub(super) fn distant(
         if wholly_stated {
             unused.push(name.to_string());
         }
-        let (Some(height), Some(distance)) = (
-            num(row, &["height"]),
-            num(row, &["distance"]).filter(|d| *d > 0.0),
-        ) else {
+        // Each part is its own object; a row whose parts do not fit it is the full-input
+        // converter's E027.
+        let arcs: Vec<(f64, f64, Option<f64>)> =
+            match crate::builder::context_shading_parts(row, name, start, end) {
+                Some(Err(_)) => continue,
+                Some(Ok(parts)) => parts
+                    .iter()
+                    .map(|p| (p.start, p.end, Some(p.distance)))
+                    .collect(),
+                None => vec![(start, end, num(row, &["distance"]))],
+            };
+        let distances: Option<Vec<f64>> = arcs.iter().map(|a| a.2.filter(|d| *d > 0.0)).collect();
+        let (Some(height), Some(distances)) = (num(row, &["height"]), distances) else {
             if wholly_stated {
                 continue;
             }
@@ -287,14 +296,16 @@ pub(super) fn distant(
             below = true;
             continue;
         }
-        objects.push(Object {
-            name,
-            start,
-            end,
-            angle: height.atan2(distance).to_degrees(),
-            overhang: kind == "overhang",
-            height,
-        });
+        for ((start, end, _), distance) in arcs.into_iter().zip(distances) {
+            objects.push(Object {
+                name,
+                start,
+                end,
+                angle: height.atan2(distance).to_degrees(),
+                overhang: kind == "overhang",
+                height,
+            });
+        }
     }
 
     // Each stated segment faces the front door it was stated against: warn on each one the
@@ -403,21 +414,32 @@ pub(super) fn distant(
             drawn_roof,
         });
     }
-    // One notice for every side: a side with nothing drawn or stated says so here.
-    let assumed = if quadrants.iter().any(|q| q.source == "none") {
-        " Where nothing is drawn, very light is assumed: draw what shades that side, or choose its band."
-    } else {
-        ""
-    };
     let nothing_anywhere = quadrants
         .iter()
         .all(|q| q.source == "none" && q.roof_source == "none");
-    // Nothing drawn or stated anywhere: no notice, as the Site read-out shows each side very
-    // light. Objects all below the dwelling are said to be left out, which nothing else shows.
+    // Objects all below the dwelling are said to be left out, which nothing else shows.
     if nothing_anywhere && below {
         notices.push(notice(SHADING_POINTER, "Distant shading: everything drawn sits below the dwelling and is left out, so each side takes the default, very light, and the roof is not shaded. Draw what shades a side, or choose its band.".into()));
     } else if !nothing_anywhere {
-        notices.push(notice(SHADING_POINTER, format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; "))));
+        notices.push(notice(SHADING_POINTER, format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.", described.join("; "))));
+    }
+    // The sides the assessor left unset (no band chosen, nothing drawn), on the Site row. A side
+    // chosen as very light is their answer and is not named.
+    let unset: Vec<String> = quadrants
+        .iter()
+        .filter(|q| q.source == "none")
+        .map(|q| q.name.to_lowercase())
+        .collect();
+    if let (Some((last, rest)), false) = (unset.split_last(), nothing_anywhere && below) {
+        let (sides, they) = if rest.is_empty() {
+            (format!("{last} side"), "it takes")
+        } else {
+            (format!("{} and {last} sides", rest.join(", ")), "they take")
+        };
+        notices.push(notice(
+            &format!("/Metadata/{SETTING}distant_shading"),
+            format!("Distant shading on the {sides} is not set, so {they} Very light (open sky)."),
+        ));
     }
     Some((
         json!({"model_type": "hemie", "DwellingShadingSegments": segments}),
@@ -538,6 +560,7 @@ mod tests {
         shading: HemieShading,
         errors: Vec<ValidationError>,
         notices: Vec<String>,
+        paths: Vec<String>,
     }
 
     impl Out {
@@ -590,6 +613,7 @@ mod tests {
             segments: value["DwellingShadingSegments"].clone(),
             shading,
             errors,
+            paths: notices.iter().map(|n| n.path.clone()).collect(),
             notices: notices.into_iter().map(|n| n.message).collect(),
         }
     }
@@ -806,8 +830,61 @@ mod tests {
     #[test]
     fn nothing_drawn_and_nothing_stated_assumes_very_light() {
         let out = derive(&[], 180.0);
-        // Every side very light. No notice: the Site read-out shows each side's band.
-        assert!(out.notices.is_empty(), "{:?}", out.notices);
+        // Every side very light, and one notice names the sides left unset, on the Site row.
+        assert_eq!(
+            out.notices,
+            ["Distant shading on the front, right, back and left sides is not set, so they take Very light (open sky)."]
+        );
+        assert_eq!(out.paths, ["/Metadata/HEMIE_distant_shading"]);
+    }
+
+    #[test]
+    fn a_side_chosen_as_very_light_is_not_named_as_unset() {
+        let very_light = |key: &str| {
+            format!(r#""{key}":{{"shading_fraction":"Very light","reference_orientation":180}}"#)
+        };
+        // Front and right chosen as very light; back and left left unset.
+        let stated = format!(
+            "{{{},{}}}",
+            very_light(SEGMENTS[0]),
+            very_light(SEGMENTS[1])
+        );
+        let out = derive_all(&[], 180.0, 0.0, &stated);
+        let unset: Vec<&String> = out
+            .notices
+            .iter()
+            .filter(|n| n.contains("is not set"))
+            .collect();
+        assert_eq!(
+            unset,
+            ["Distant shading on the back and left sides is not set, so they take Very light (open sky)."],
+            "{:?}",
+            out.notices
+        );
+        // Every side chosen: no notice says a side is unset.
+        let all = format!("{{{}}}", SEGMENTS.map(very_light).join(","));
+        let out = derive_all(&[], 180.0, 0.0, &all);
+        assert!(!out.notice("is not set"), "{:?}", out.notices);
+        // A drawn side is not unset either: one side left, named in the singular.
+        let stated = format!(
+            "{{{},{}}}",
+            very_light(SEGMENTS[1]),
+            very_light(SEGMENTS[2])
+        );
+        let out = derive_all(
+            &["Block,ContextShading,obstacle,135,225,10,10"],
+            180.0,
+            0.0,
+            &stated,
+        );
+        assert!(
+            out.notice(
+                "Distant shading on the left side is not set, so it takes Very light (open sky)."
+            ),
+            "{:?}",
+            out.notices
+        );
+        assert!(!out.notice("very light is assumed"), "{:?}", out.notices);
     }
 
     #[test]
@@ -827,6 +904,50 @@ mod tests {
         assert_eq!(out.errors.len(), 1, "{:?}", out.errors);
         assert!(out.errors[0].path.ends_with("/Zero"));
         assert_eq!(out.shading.unused_objects, vec!["NoHeight".to_string()]);
+    }
+
+    #[test]
+    fn each_part_of_an_object_is_its_own_object() {
+        let derive_parts = |row: &str| {
+            let text = format!(
+                "Context Shading\nName,Type,shading_type,start_angle,end_angle,distance,height,parts\n{row}\n"
+            );
+            let csv = crate::parser::CSVParser::new()
+                .parse_csv(&text)
+                .expect("csv");
+            let settings = Settings {
+                csv: &csv,
+                missing: Default::default(),
+            };
+            let (mut errors, mut notices) = (Vec::new(), Vec::new());
+            let (value, _) = distant(&settings, &geometry(180.0, 0.0), &mut errors, &mut notices)
+                .unwrap_or_default();
+            (
+                value["DwellingShadingSegments"][SEGMENTS[0]]["shading_fraction"].clone(),
+                errors,
+            )
+        };
+        // 135-225 at 10 m is 50% of the front's sky; with the right half 1000 m away it is about
+        // a quarter.
+        let (level, errors) = derive_parts("Block,ContextShading,obstacle,135,225,10,10,");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(level, "Moderate");
+        let (level, errors) =
+            derive_parts("Block,ContextShading,obstacle,135,225,10,10,135:180:10;180:225:1000");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(level, "Light");
+        // A part with no distance above 0 is one error for the row.
+        let (_, errors) =
+            derive_parts("Block,ContextShading,obstacle,135,225,0,10,135:180:0;180:225:0");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0]
+            .message
+            .contains("'Block' has no height, or no distance above 0"));
+        // Parts that do not fit the row are the full-input converter's E027: nothing here.
+        let (level, errors) =
+            derive_parts("Block,ContextShading,obstacle,135,225,10,10,135:180:10");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(level, "Very light");
     }
 
     #[test]

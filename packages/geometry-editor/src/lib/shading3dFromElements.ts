@@ -14,7 +14,7 @@ import { frameInsetFromFrameAreaFraction } from './geometryVentilationOverlay';
 import type { OrientedBoxPrimitive, PolygonPrismPrimitive } from './geometry3dPrimitivesTypes';
 import { segmentTangentAndOpeningOutwardModelXY } from './openingSegmentOutward';
 import { createParentElementLookup } from './elementNameRemap';
-import { getPlanCenter } from './contextShadingGeometry';
+import { getPlanCenter, resolveContextShadingCentre } from './contextShadingGeometry';
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -44,20 +44,6 @@ function findTransparentByNameOrId(
   for (const el of candidates) {
     if (el.type !== 'BuildingElementTransparent') continue;
     if (el.name === nameOrId && (!zoneId || el.zoneId === zoneId)) return el;
-  }
-  return null;
-}
-
-function findElementByNameOrId(
-  elementsById: Record<string, Element>,
-  nameOrId: string | null,
-): Element | null {
-  if (!nameOrId) return null;
-  for (const el of Object.values(elementsById)) {
-    if (el.id === nameOrId) return el;
-  }
-  for (const el of Object.values(elementsById)) {
-    if (el.name === nameOrId) return el;
   }
   return null;
 }
@@ -459,11 +445,10 @@ export function buildContextShadingSectorPrism(
   let ox: number;
   let oy: number;
 
-  const parent = shading.parent_element
-    ? findElementByNameOrId(elementsById, shading.parent_element)
-    : null;
-  if (parent?.coordinates && parent.coordinates.length >= 3) {
-    ({ x: ox, y: oy } = getPlanCenter(parent.coordinates)!);
+  // The model's shading centre, as the angles are measured from it.
+  const centre = resolveContextShadingCentre(Object.values(elementsById), [], shading.parent_element);
+  if (centre && 'point' in centre) {
+    ({ x: ox, y: oy } = centre.point);
   } else if (shading.coordinates?.length) {
     ({ x: ox, y: oy } = getPlanCenter(shading.coordinates)!);
   } else {

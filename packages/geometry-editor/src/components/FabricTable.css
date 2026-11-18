@@ -61,14 +61,15 @@
   color: var(--text-primary);
 }
 
-/* The build-up control keeps its label for assistive technology and focus requests only. */
-.fabric-table__dropdown .standard-dropdown-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
+/* The build-up picker keeps a fixed width; a long name ends in an ellipsis. */
+.fabric-table__dropdown {
+  display: block;
+  width: 190px;
+  max-width: 190px;
+}
+
+.fabric-table__dropdown .standard-dropdown {
   overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 /* A row that opens in place: its name reads as text, with a disclosure arrow. */

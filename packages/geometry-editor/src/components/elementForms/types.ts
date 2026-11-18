@@ -218,6 +218,8 @@ export interface ElementFormRenderCtx {
    * — unlike registerBaseFieldRefs, it does not also register a camelCase key. */
   registerBaseFieldRef: (fieldKey: string) => (node: HTMLDivElement | null) => void;
   getFieldValidationIssue: (fieldName: string, value: unknown) => string | null;
+  /** The field's error or warning (a local check first, then the element's own validation). */
+  getFieldValidationState: (fieldName: string, value: unknown) => { message: string; variant: 'error' | 'warning' } | null;
   /** Element/global-scoped source-comparison indicators for the CURRENT
    * selection, from `sourceComparisonPort.elementInfo(selection.id)`. Same
    * name as the orchestrator's own local (verbatim-greppability bias) —
@@ -306,7 +308,7 @@ export interface ElementFormRenderCtx {
   existingBuilding: boolean;
   /** Orchestrator-owned System<->WetEmitter cross-creation bridge (slice-5
    * brief decision (f).1, CONSERVATIVE option): renders WetEmitter's
-   * space-heat-system dropdown, including the "Create new SpaceHeatSystem..."
+   * space-heat-system dropdown, including the "Create a heating system…"
    * option and the edit-jump link to the selected System element. The six
    * underlying handlers stay in ElementCreator (they read/write allElements,
    * addElement, setSelection/setSelectedElementIds — none of which the generic

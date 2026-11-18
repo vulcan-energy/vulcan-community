@@ -20,13 +20,21 @@ import {
   type FabricPreset,
   type FabricRow,
 } from "../lib/fabricPreset";
-import type { CreationDefaultAssemblyIds } from "../lib/multiSelectAssemblyApply";
+import { libraryRowFigure, type CreationDefaultAssemblyIds } from "../lib/multiSelectAssemblyApply";
+import type { AssemblyElementMode, AssemblyExample } from "../lib/assemblyTypes";
 import { useGeometryStore } from "../stores/geometryStore";
 import { FabricTabCloseContext } from "./fabricTabCloseContext";
-import { StandardDropdown } from "./StandardDropdown";
+import { AssemblyLibraryPicker } from "./AssemblyLibraryPicker";
 import "./FabricTable.css";
 
 type BuildUpKey = keyof CreationDefaultAssemblyIds;
+
+/** The element a build-up's figure is for: as a new element of its type takes it. */
+const BUILD_UP_CONTEXT: Record<BuildUpKey, [AssemblyElementMode, number]> = {
+  wall: ["BuildingElementOpaque", 90],
+  roof: ["BuildingElementOpaque", 45],
+  ground_floor: ["BuildingElementGround", 180],
+};
 
 /** A user's saved fabric presets: one JSON file each (name, family, values, build-ups). */
 const FABRIC_PRESETS_DIR = "input/fabric_presets";
@@ -257,16 +265,10 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
     return Object.keys(rowValues).length ? [[row.key, rowValues]] : [];
   }));
 
-  const options = (buildUp: BuildUpKey) => {
-    const current = ids[buildUp] ?? "";
-    const base = library?.examples.filter((example) => example.elementType === buildUp)
-      .map((example) => ({ value: example.id, label: example.name || example.id })) ?? [];
-    return [
-      { value: "", label: "None" },
-      ...base,
-      ...(current && !base.some((option) => option.value === current) ? [{ value: current, label: `${current} (missing from library)` }] : []),
-    ];
-  };
+  /** A build-up's figure for a new element of its type: a wall's or a roof's U, a ground floor's R_f. */
+  const figure = (buildUp: BuildUpKey) => (row: AssemblyExample) => library
+    ? libraryRowFigure(row, library, ...BUILD_UP_CONTEXT[buildUp])
+    : null;
 
   // What "Apply to all" changes: the elements with fabric values of their own lose them, so they
   // take the table's values (the preset's, else the file's).
@@ -403,16 +405,21 @@ export function FabricTable({ workspaceResourcePort, family, fileLabel }: {
                 </td>
                 <td>
                   {row.buildUp ? (
-                    <StandardDropdown
-                      className="fabric-table__dropdown"
-                      label={<span data-field-key={row.fieldKey}>{row.label} build-up</span>}
-                      value={ids[row.buildUp] ?? ""}
-                      onChange={(next) => setIds({ [row.buildUp!]: next || undefined })}
-                      options={options(row.buildUp)}
-                      variant="ghost"
-                      size="sm"
-                      disabled={!library}
-                    />
+                    <span className="fabric-table__dropdown" data-field-key={row.fieldKey}>
+                      <AssemblyLibraryPicker
+                        library={library}
+                        elementType={row.buildUp}
+                        figure={figure(row.buildUp)}
+                        value={ids[row.buildUp] ?? ""}
+                        placeholder="None"
+                        none
+                        triggerVariant="standard"
+                        triggerSize="sm"
+                        menuZIndex={13000}
+                        aria-label={`Build-up, ${row.label}`}
+                        onPick={(picked) => setIds({ [row.buildUp!]: picked?.id })}
+                      />
+                    </span>
                   ) : "—"}
                 </td>
               </tr>

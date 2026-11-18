@@ -345,12 +345,20 @@ export interface HotWaterDemand extends BaseElement {
   zoneId?: string; // Not required for global objects
 }
 
+/** One HEM shading object of a Context Shading element: whole-degree arc and distance in metres. */
+export type ContextShadingPart = { start_angle: number; end_angle: number; distance: number };
+
 export interface ContextShading extends BaseElement {
   type: 'ContextShading';
   shading_type: 'obstacle' | 'overhang';
   start_angle: number;
   end_angle: number;
   distance: number;
+  /**
+   * One arc and distance per face the shading centre sees, clockwise; present only with two or
+   * more. The row's start_angle, end_angle and distance hold their envelope.
+   */
+  parts?: ContextShadingPart[];
   height: number;
   parent_element: string | null; // NEW: Reference to polygon element
   // Override zoneId to be optional for global objects

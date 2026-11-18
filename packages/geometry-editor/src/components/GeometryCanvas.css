@@ -1788,64 +1788,6 @@
   padding: 4px 0;
 }
 
-.assembly-action-control {
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--surface-control-active);
-  border-radius: 8px;
-  background: var(--surface-control);
-}
-
-.assembly-action-control__body {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.assembly-action-control__eyebrow,
-.assembly-action-control__name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.assembly-action-control__eyebrow {
-  color: var(--text-secondary);
-  font-size: var(--font-size-micro);
-  line-height: 1.2;
-}
-
-.assembly-action-control__name {
-  color: var(--text-primary);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-/* The assembly's result, read as a fact: "U-value  0.17 W/m²K". */
-.assembly-action-control__fact {
-  display: flex;
-  gap: 12px;
-  margin-top: 4px;
-  font-size: var(--font-size-xs);
-  color: var(--text-primary);
-}
-
-.assembly-action-control__fact > span:first-child {
-  color: var(--text-secondary);
-}
-
-.assembly-action-control__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
 .element-editor-full-row {
   grid-column: 1 / -1;
 }
@@ -3152,14 +3094,6 @@
 
 .multi-select-subgroup-count {
   opacity: 0.78;
-}
-
-.multi-select-assembly-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: stretch;
-  min-width: 0;
 }
 
 .multi-select-field-select {

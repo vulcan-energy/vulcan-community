@@ -99,7 +99,25 @@ describe('flat roof (pitch 0) bulk assembly apply', () => {
   });
 });
 
+describe('wall or roof from pitch', () => {
+  it('follows the calculator heat-flow rule: below 60° a roof, a steep mansard slope a wall', () => {
+    expect(libraryElementTypeForElement(opaque(35, square))).toBe('roof');
+    expect(libraryElementTypeForElement(opaque(59, square))).toBe('roof');
+    expect(libraryElementTypeForElement(opaque(60, square))).toBe('wall');
+    expect(libraryElementTypeForElement(opaque(80, square))).toBe('wall');
+    expect(libraryElementTypeForElement(opaque(90, wallLine))).toBe('wall');
+  });
+});
+
 describe('saved ventilated-cavity assembly', () => {
+  it('clears an existing wall\'s edited layers: the build-up replaces them', () => {
+    const comp = computePatchFromSavedAssembly(ventilatedWallRow, library, 'BuildingElementOpaque', 90);
+    expect(comp!.patch).toHaveProperty('wall_layers', undefined);
+    // The bulk apply merges the patch into extra_json (applyExtraJsonMergeBulk): the edited rows go.
+    const merged = { wall_layers: [{ material: 'PIR', thickness_mm: 100 }], ...comp!.patch };
+    expect(JSON.parse(JSON.stringify(merged))).not.toHaveProperty('wall_layers');
+  });
+
   it('writes an R that HEM turns back into the written U (no U/R mismatch warning)', () => {
     const comp = computePatchFromSavedAssembly(ventilatedWallRow, library, 'BuildingElementOpaque', 90);
     expect(comp!.errors).toEqual([]);

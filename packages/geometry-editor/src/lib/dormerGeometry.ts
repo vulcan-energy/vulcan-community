@@ -11,6 +11,7 @@ import { getOpaqueHostBaseElevationAlignedWith3D } from './geometry3dMapper';
 import { normalizeOrientation360Deg, roundToTwoDecimals } from '../geometry/constants';
 import { calculatePolygonArea } from './polygonSync';
 import { dropAssemblyEnvelopeOnFabricOverride } from './assemblyAppliedUi';
+import type { ArealHeatCapacityInput } from '../../../geometry-editor-host/src/schemaPort';
 import { reverseProfiledLineFace, type ProfileLineFace } from './profileLineFace';
 import {
   computeSlopedPolygonInwardNormal2D,
@@ -320,10 +321,11 @@ export function dormerThermalOverrideAfterEdit(
   currentOverride: Record<string, unknown> | undefined,
   representativeExtraJson: Record<string, unknown> | undefined,
   editedExtraJson: Record<string, unknown> | undefined,
+  arealHeatCapacity: ArealHeatCapacityInput,
 ): Record<string, unknown> | undefined {
   const edited = sanitizeDormerThermalExtraJson(editedExtraJson);
   const base = currentOverride ?? sanitizeDormerThermalExtraJson(representativeExtraJson);
-  return edited && dropAssemblyEnvelopeOnFabricOverride(elementType, base, edited);
+  return edited && dropAssemblyEnvelopeOnFabricOverride(elementType, base, edited, arealHeatCapacity);
 }
 
 function calculatePlanarFaceArea3D(points: Array<{ x: number; y: number; z: number }>): number {

@@ -16,11 +16,12 @@ import {
 } from '../stores/geometryStore';
 import { StandardInput } from './StandardInput';
 import { StandardDropdown } from './StandardDropdown';
-import { SearchableDescribedSelect, type SearchableDescribedOption } from './SearchableDescribedSelect';
+import { SearchableDescribedSelect } from './SearchableDescribedSelect';
+import { AssemblyLibraryPicker } from './AssemblyLibraryPicker';
 import { Tooltip } from './Tooltip';
 import { loadBundledAssemblyLibrary, type BundledAssemblyLibrary } from '../lib/assemblyLibrary';
-import type { AssemblyExample, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
-import { MASS_CLASS_LABELS, parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
+import type { AssemblyExample } from '../lib/assemblyTypes';
+import { ASSEMBLY_SET_ASIDE_KEY, MASS_CLASS_LABELS, parseVulcanAssemblyV1FromExtraJson, setAsideAssemblyEnvelope } from '../lib/assemblyAppliedUi';
 import { GROUND_FLOOR_TYPE_LABELS, type GroundFloorType } from '../lib/groundFloor';
 import { getElementTypeDisplayName } from '../lib/displayNames';
 import { isVulcanUiPartyFloorElement, getPartyWallFabricFields, getPartyWallCavityFields, readPartyWallFabricValue, partyWallFabricPatch, PARTY_WALL_LINING_CAVITY_TYPES, PARTY_WALL_LINING_OPTIONS } from '../lib/assemblyMaterialFabric';
@@ -59,7 +60,6 @@ import {
   pruneRadiatorEmitterExtraJson,
   type RadiatorThermalMode,
 } from '../lib/radiatorEmitterBranches';
-import { LazyModalFallback } from './LazyModuleFallback';
 import {
   unavailableGeometryWorkspaceResourcePort,
   type GeometryWorkspaceResourcePort,
@@ -72,7 +72,6 @@ import { hemieConstructionKeys, hemieConstructionSetting, hemieConstructionType,
 import { inferThermalMethod } from '../lib/thermalMethod';
 import { WINDOW_OPENING_TYPES, isConservatoryGlazing, windowSections, withWindowSections } from '../lib/hemieBundles';
 import { useTargetRules } from '../hooks/useTargetRules';
-import type { ExternalDetailCataloguePort } from '../geometry/thermalBridge/externalDetailContracts';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { buildLightingPatch, getLightingFieldValue } from './elementForms/lighting';
 import { projectWindowShadingPointToSegment } from './elementForms/windowShading';
@@ -93,23 +92,6 @@ import {
   type WindowOpeningSource,
   SECURITY_RISK_OPTIONS,
 } from '../lib/windowOpenings';
-
-const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
-
-const prefetchAssemblyCalculatorModal = () => {
-  void loadAssemblyCalculatorModal();
-};
-
-const intentPrefetchHandlers = (prefetch: () => void) => ({
-  onPointerEnter: prefetch,
-  onFocus: prefetch,
-  onMouseDown: prefetch,
-});
-
-const AssemblyCalculatorModal = React.lazy(async () => {
-  const module = await loadAssemblyCalculatorModal();
-  return { default: module.AssemblyCalculatorModal };
-});
 
 const LucideSvgIcon: React.FC<{ node: IconNode; size?: number; strokeWidth?: number }> = ({
   node,
@@ -141,15 +123,6 @@ function elementRowLabel(el: Element): string {
   const n = typeof el.name === 'string' ? el.name.trim() : '';
   if (n.length > 0) return n;
   return `${getElementTypeDisplayName(el.type)} (${el.id.slice(0, 8)})`;
-}
-
-function initialAssemblySnapshotFromElement(el: Element): VulcanAssemblyV1Envelope['assemblySnapshot'] | null {
-  const env = parseVulcanAssemblyV1FromExtraJson(el.extra_json);
-  const snap = env?.assemblySnapshot;
-  if (!snap || typeof snap !== 'object') return null;
-  const layers = (snap as { layers?: unknown }).layers;
-  if (!Array.isArray(layers) || layers.length === 0) return null;
-  return snap as VulcanAssemblyV1Envelope['assemblySnapshot'];
 }
 
 // Field name to schema parameter ID mapping for MultiSelectPanel
@@ -219,7 +192,6 @@ interface MultiSelectPanelProps {
   /** The host's element fields, shown when the selected elements of the active type share one construction. */
   inspectorContributions?: GeometryInspectorContributions;
   workspaceResourcePort?: GeometryWorkspaceResourcePort;
-  externalDetailCatalogue?: ExternalDetailCataloguePort;
 }
 
 type PropertyDistribution = {
@@ -935,35 +907,6 @@ const describeDistribution = (distribution: PropertyDistribution | null) => {
   };
 };
 
-const compactValueSummary = (values: unknown[]): string => {
-  if (values.length === 0) return '-';
-  const counts = new Map<string, number>();
-  for (const value of values) {
-    const label = formatScalarLabel(value);
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-  const entries = [...counts.entries()]
-    .map(([label, count]) => ({ label, count }))
-    .sort((a, b) => {
-      if (a.label === '-' && b.label !== '-') return 1;
-      if (b.label === '-' && a.label !== '-') return -1;
-      if (a.count !== b.count) return b.count - a.count;
-      return a.label.localeCompare(b.label);
-    });
-  const showCounts = values.length > 1;
-  return entries
-    .slice(0, 2)
-    .map((entry) => showCounts ? `${entry.label} (${entry.count})` : entry.label)
-    .join(', ') + (entries.length > 2 ? ', ...' : '');
-};
-
-const assemblyImpactValue = (currentValues: unknown[], nextValues: unknown[]): string => {
-  const current = compactValueSummary(currentValues);
-  const next = compactValueSummary(nextValues);
-  return current === next ? current : `${current} -> ${next}`;
-};
-
-
 const BOOLEAN_SELECT_OPTIONS = [
   { value: 'true', label: 'Yes' },
   { value: 'false', label: 'No' },
@@ -1065,23 +1008,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
   selectedElementIds,
   onDelete,
   workspaceResourcePort = unavailableGeometryWorkspaceResourcePort,
-  externalDetailCatalogue,
   inspectorContributions,
 }) => {
   const geometryStore = useGeometryStoreApi();
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = targetSchemaMode(schemaPort);
-
-
-  useEffect(() => {
-    const timer = globalThis.setTimeout(() => {
-      prefetchAssemblyCalculatorModal();
-    }, 500);
-
-    return () => {
-      globalThis.clearTimeout(timer);
-    };
-  }, []);
 
   const {
     elementsById,
@@ -1263,7 +1194,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
   const [assemblyLibrary, setAssemblyLibrary] = useState<BundledAssemblyLibrary | null>(null);
   const [assemblyLibraryError, setAssemblyLibraryError] = useState<string | null>(null);
-  const [libraryModalOpen, setLibraryModalOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1317,19 +1247,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     () => activeConstructionScopeGroup?.elements ?? [],
     [activeConstructionScopeGroup],
   );
-
-  const libraryModalRepresentative = useMemo(
-    () => (fabricElements.length > 0 ? fabricElements[0] : null),
-    [fabricElements],
-  );
-
-  const reloadAssemblyLibrary = useCallback(() => {
-    loadBundledAssemblyLibrary(workspaceResourcePort)
-      .then(setAssemblyLibrary)
-      .catch((e: unknown) => {
-        setAssemblyLibraryError(e instanceof Error ? e.message : 'Failed to reload assembly library');
-      });
-  }, [workspaceResourcePort]);
 
   const selectionKinds = useMemo(() => {
     const kinds = new Set<string>();
@@ -1673,6 +1590,17 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     return { element: { ...first!, extra_json: shared } as Element, mixed, oneRoof, oneRoofMixed: oneRoof && mixed.some((key) => roofFields.has(key)),
       thermalMethod, more: hemieMoreLabels(type, thermalMethod === 'band', location).length > 0 };
   }, [ElementFieldsRenderer, activeElements, buildType, constructionBands, elementsById, hemieSettings, inspectorContributions]);
+  // Under construction bands, selected fabric of several construction types (a building part):
+  // one age band for its walls, floors and roofs. Windows and doors follow their wall.
+  const sharedAgeBand = useMemo(() => {
+    if (!constructionBands || !ElementFieldsRenderer) return null;
+    const all = Object.values(elementsById) as Element[];
+    const fabric = selectedElements.filter((el) => el.type !== 'BuildingElementTransparent' && !('is_external_door' in el && el.is_external_door)
+      && inspectorContributions?.elementFields?.elementTypes.includes(el.type) && hemieConstructionType(el, all, buildType));
+    if (new Set(fabric.map((el) => hemieConstructionType(el, all, buildType))).size < 2) return null;
+    const { shared, mixed } = sharedExtraJson(fabric);
+    return { element: { ...fabric[0]!, extra_json: shared } as Element, mixed, elements: fabric };
+  }, [ElementFieldsRenderer, buildType, constructionBands, elementsById, inspectorContributions, selectedElements]);
   // One host patch applied to each of `targets`, as one undo step.
   const patchExtraJsonOf = useCallback((targets: readonly Element[]) => (update: (current: Record<string, unknown>,
     target?: Readonly<Record<string, unknown>>) => Record<string, unknown>) => {
@@ -1702,112 +1630,59 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     if (activeType === 'BuildingElementOpaque') return `opaque:${activeOpaqueSurfaceMode ?? 'all'}`;
     return activeConstructionScope ?? activeType ?? 'fabric';
   }, [activeConstructionScope, activeOpaqueSurfaceMode, activeType]);
-  const currentAssemblyId = useMemo(() => {
-    const ids = new Set<string>();
-    for (const el of constructionTargetElements) {
-      const id = parseVulcanAssemblyV1FromExtraJson(el.extra_json)?.assemblyId;
-      if (id) ids.add(id);
-    }
-    return ids.size === 1 ? [...ids][0]! : '';
+  /** The targets' layers: one id, '' for none, or mixed when they differ. */
+  const currentAssembly = useMemo(() => {
+    const ids = new Set(constructionTargetElements.map((el) => parseVulcanAssemblyV1FromExtraJson(el.extra_json)?.assemblyId ?? ''));
+    return ids.size === 1 ? { id: [...ids][0]!, mixed: false } : { id: '', mixed: true };
   }, [constructionTargetElements]);
-  const computeAssemblyPatchForTargets = useCallback((row: AssemblyExample) => {
-    if (!assemblyLibrary) {
-      return {
-        patches: {} as Record<string, Record<string, unknown>>,
-        appliedCount: 0,
-        skippedCount: constructionTargetElements.length,
-        description: 'Assembly library is not loaded.',
-      };
-    }
-
-    const patches: Record<string, Record<string, unknown>> = {};
-    const currentU: unknown[] = [];
-    const nextU: unknown[] = [];
-    const currentR: unknown[] = [];
-    const nextR: unknown[] = [];
-    const currentMass: unknown[] = [];
-    const nextMass: unknown[] = [];
-    const currentAreal: unknown[] = [];
-    const nextAreal: unknown[] = [];
-    let appliedCount = 0;
-    let skippedCount = 0;
-
-    for (const el of constructionTargetElements) {
-      if (row.elementType !== libraryElementTypeForElement(el)) {
-        skippedCount += 1;
-        continue;
+  /** The library type every target takes; null when they differ, so no row fits them all. */
+  const constructionLibraryType = useMemo(() => {
+    const types = new Set(constructionTargetElements.map(libraryElementTypeForElement));
+    const [only] = types;
+    return types.size === 1 && only ? only : null;
+  }, [constructionTargetElements]);
+  /**
+   * Each library row that fits every target, by id: its patch per target and the figure its option
+   * shows. A target whose typed U set its layers aside keeps the U, and the picked layers go aside, as
+   * in the element panel.
+   */
+  const assemblyPicks = useMemo(() => {
+    const picks = new Map<string, { patches: Record<string, Record<string, unknown>>; figure: string }>();
+    if (!assemblyLibrary || !constructionLibraryType || constructionTargetElements.length === 0) return picks;
+    rows: for (const row of assemblyLibrary.examples) {
+      if (row.elementType !== constructionLibraryType) continue;
+      const patches: Record<string, Record<string, unknown>> = {};
+      const figures: number[] = [];
+      for (const el of constructionTargetElements) {
+        const mode = assemblyElementMode(el);
+        if (!mode) continue rows;
+        const comp = computePatchFromSavedAssembly(
+          row,
+          assemblyLibrary,
+          mode,
+          assemblyPitchDegForElement(el),
+          {
+            arealHeatCapacity,
+            groundFloorType: el.type === 'BuildingElementGround' ? el.floor_type : null,
+          },
+        );
+        if (!comp || comp.errors.length > 0 || Object.keys(comp.patch).length === 0) continue rows;
+        figures.push(mode === 'BuildingElementGround' ? comp.preview.r : comp.preview.u);
+        patches[el.id] = setAsideAssemblyEnvelope(el.extra_json)
+          ? { [ASSEMBLY_SET_ASIDE_KEY]: comp.patch.vulcan_assembly_v1 }
+          : comp.patch;
       }
-      const mode = assemblyElementMode(el);
-      if (!mode) {
-        skippedCount += 1;
-        continue;
-      }
-      const comp = computePatchFromSavedAssembly(
-        row,
-        assemblyLibrary,
-        mode,
-        assemblyPitchDegForElement(el),
-        {
-          arealHeatCapacity,
-          groundFloorType: el.type === 'BuildingElementGround' ? el.floor_type : null,
-        },
-      );
-      if (!comp || comp.errors.length > 0 || Object.keys(comp.patch).length === 0) {
-        skippedCount += 1;
-        continue;
-      }
-
-      const current = effectiveFabricDisplayValues(el, arealHeatCapacity.classes, defaultsLookup);
-      currentU.push(current.u);
-      nextU.push(comp.preview.u);
-      currentR.push(current.r);
-      nextR.push(comp.preview.r);
-      currentMass.push(current.mass);
-      nextMass.push(comp.preview.mass);
-      currentAreal.push(current.arealHeat_kJ_m2K);
-      nextAreal.push(comp.preview.arealHeat_kJ_m2K);
-      patches[el.id] = comp.patch;
-      appliedCount += 1;
+      const lo = Math.min(...figures).toFixed(2);
+      const hi = Math.max(...figures).toFixed(2);
+      const range = lo === hi ? lo : `${lo}–${hi}`;
+      picks.set(row.id, { patches, figure: constructionLibraryType === 'ground_floor' ? `R_f ${range}` : range });
     }
-
-    const skipped = skippedCount > 0 ? `; skips ${skippedCount}` : '';
-    const description = appliedCount === 0
-      ? `No compatible selected elements${skippedCount > 0 ? `; skips ${skippedCount}` : ''}.`
-      : [
-          `Applies to ${countLabel(appliedCount, 'element')}${skipped}`,
-          `U ${assemblyImpactValue(currentU, nextU)}`,
-          `R ${assemblyImpactValue(currentR, nextR)}`,
-          `Mass ${assemblyImpactValue(currentMass, nextMass)}`,
-          `kappa ${assemblyImpactValue(currentAreal, nextAreal)}`,
-        ].join(' · ');
-
-    return { patches, appliedCount, skippedCount, description };
-  }, [arealHeatCapacity, assemblyLibrary, constructionTargetElements, defaultsLookup]);
-
-  const assemblyOptions = useMemo<SearchableDescribedOption[]>(() => {
-    if (!assemblyLibrary || constructionTargetElements.length === 0) return [];
-    const options: SearchableDescribedOption[] = [];
-    for (const row of assemblyLibrary.examples) {
-      const impact = computeAssemblyPatchForTargets(row);
-      if (impact.appliedCount === 0) continue;
-      options.push({
-        value: row.id,
-        label: row.name,
-        description: impact.description,
-        searchText: `${row.elementType} ${impact.description}`,
-      });
-    }
-    return options;
-  }, [assemblyLibrary, computeAssemblyPatchForTargets, constructionTargetElements.length]);
-
-  const handleAssemblySelect = useCallback((assemblyId: string) => {
-    if (!assemblyLibrary || !assemblyId) return;
-    const row = assemblyLibrary.examples.find((example) => example.id === assemblyId);
-    if (!row) return;
-    const { patches } = computeAssemblyPatchForTargets(row);
-    if (Object.keys(patches).length === 0) return;
-    applyExtraJsonMergeBulk(patches);
-  }, [applyExtraJsonMergeBulk, assemblyLibrary, computeAssemblyPatchForTargets]);
+    return picks;
+  }, [arealHeatCapacity, assemblyLibrary, constructionLibraryType, constructionTargetElements]);
+  const handleAssemblyPick = useCallback((row: AssemblyExample | null) => {
+    const pick = row ? assemblyPicks.get(row.id) : undefined;
+    if (pick) applyExtraJsonMergeBulk(pick.patches);
+  }, [applyExtraJsonMergeBulk, assemblyPicks]);
 
   // A shaped wall or window takes its height from its shape (set in the element editor).
   const SHAPED_HEIGHT_HINT = 'Some selected elements have a shape: set their height in the shape rows.';
@@ -2881,6 +2756,15 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       {/* Header – matches ElementCreator style */}
       <span className="controls-label multi-select-panel__title">Edit Multiple Elements</span>
 
+      {sharedAgeBand && ElementFieldsRenderer && (
+        <div className="multi-select-field-group" data-shared-age-band>
+          <ElementFieldsRenderer multiple section="age_band" mixed={sharedAgeBand.mixed}
+            elements={sharedAgeBand.elements as unknown as Readonly<Record<string, unknown>>[]}
+            element={sharedAgeBand.element as unknown as Readonly<Record<string, unknown>>}
+            onPatchExtraJson={patchExtraJsonOf(sharedAgeBand.elements)} />
+        </div>
+      )}
+
       {typeGroups.length > 0 && (
         <div className="multi-select-type-rail" aria-label="Selected element types">
           {typeGroups.map((group) => {
@@ -3837,39 +3721,39 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             {/* Under construction bands the age band and its thermal method (the host's fields below) set the
                 fabric, as in the one-element form: no assembly, U-value or resistance here. */}
             {!constructionBands && <>
+            {/* One picker for the selection: only layers that fit every selected element, so none when nothing fits. */}
+            {(!assemblyLibrary || assemblyPicks.size > 0) && (
             <div className="batch-row multi-select-row">
-              <div className="multi-select-row__label">Assembly</div>
+              <div className="multi-select-row__label">Layers</div>
               <div className="multi-select-row__control">
-                <div className="multi-select-assembly-control">
-                  <SearchableDescribedSelect
-                    value={currentAssemblyId}
-                    placeholder={assemblyLibrary ? 'Search assemblies…' : 'Loading assemblies…'}
-                    searchPlaceholder="Search assemblies…"
-                    disabled={!assemblyLibrary || assemblyOptions.length === 0}
-                    minWidth="100%"
-                    sections={[{ options: assemblyOptions }]}
+                {assemblyLibrary && constructionLibraryType ? (
+                  <AssemblyLibraryPicker
+                    library={assemblyLibrary}
+                    elementType={constructionLibraryType}
+                    figure={(row) => assemblyPicks.get(row.id)?.figure ?? null}
+                    offeredOnly
+                    value={currentAssembly.id}
+                    placeholder={currentAssembly.mixed ? 'Mixed' : 'Search assemblies…'}
                     triggerVariant="standard"
-                    onChange={handleAssemblySelect}
+                    onPick={handleAssemblyPick}
                   />
-                  <button
-                    type="button"
-                    className="btn editor-action-btn editor-action-btn--secondary element-editor-input-action"
-                    disabled={!libraryModalRepresentative || !assemblyElementMode(libraryModalRepresentative)}
-                    {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
-                    onClick={() => {
-                      prefetchAssemblyCalculatorModal();
-                      setLibraryModalOpen(true);
-                    }}
-                    title="Open the assembly calculator to edit layers and save new assemblies to the library (uses the first selected fabric element for preview)."
-                  >
-                    Library
-                  </button>
-                </div>
+                ) : (
+                  <SearchableDescribedSelect
+                    value=""
+                    placeholder="Loading assemblies…"
+                    disabled
+                    minWidth="100%"
+                    sections={[]}
+                    triggerVariant="standard"
+                    onChange={() => undefined}
+                  />
+                )}
                 {assemblyLibraryError && (
                   <div className="multi-select-error">{assemblyLibraryError}</div>
                 )}
               </div>
             </div>
+            )}
             {activeType === 'BuildingElementPartyWall' ? getPartyWallFabricFields(schemaPort, schemaMode).map((field) => (
               <React.Fragment key={field.key}>
                 {renderManualNumberRow(
@@ -3940,7 +3824,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
             )}
             <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} mustMatch={sharedFabricElement.oneRoof} elements={activeElements as unknown as Readonly<Record<string, unknown>>[]}
               element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
-              thermalMethod={sharedFabricElement.thermalMethod} onPatchExtraJson={patchActiveExtraJson} />
+              thermalMethod={sharedFabricElement.thermalMethod} omitAgeBand={!!sharedAgeBand} onPatchExtraJson={patchActiveExtraJson} />
             {sharedFabricElement.more && (
               <GroupAccordion label="More" openInitially={sharedFabricElement.oneRoofMixed}>
                 <ElementFieldsRenderer multiple section="more" mixed={sharedFabricElement.mixed} mustMatch={sharedFabricElement.oneRoof}
@@ -4119,37 +4003,6 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           </div>
         </div>
       </div>
-
-      {libraryModalOpen && libraryModalRepresentative && assemblyElementMode(libraryModalRepresentative) ? (
-        <React.Suspense fallback={<LazyModalFallback label="Opening assembly calculator..." />}>
-          <AssemblyCalculatorModal
-            isOpen={libraryModalOpen}
-            onClose={() => {
-              setLibraryModalOpen(false);
-              reloadAssemblyLibrary();
-            }}
-            elementMode={assemblyElementMode(libraryModalRepresentative)!}
-            elementPitchDeg={assemblyPitchDegForElement(libraryModalRepresentative)}
-            initialAssemblySnapshot={initialAssemblySnapshotFromElement(libraryModalRepresentative)}
-            appliedEnvelope={parseVulcanAssemblyV1FromExtraJson(libraryModalRepresentative.extra_json)}
-            groundFloorType={
-              libraryModalRepresentative.type === 'BuildingElementGround'
-                ? ((libraryModalRepresentative as { floor_type?: GroundFloorType }).floor_type ?? null)
-                : null
-            }
-            workspaceResourcePort={workspaceResourcePort}
-            externalDetailCataloguePort={externalDetailCatalogue}
-            onApply={(patch) => {
-              const el = libraryModalRepresentative;
-              const prev =
-                el.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
-                  ? (el.extra_json as Record<string, unknown>)
-                  : {};
-              updateElement(el.id, { extra_json: { ...prev, ...patch } });
-            }}
-          />
-        </React.Suspense>
-      ) : null}
     </div>
   );
 };

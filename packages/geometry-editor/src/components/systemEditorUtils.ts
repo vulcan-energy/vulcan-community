@@ -311,3 +311,32 @@ export function newBuildPickerOwnsProductId(
   return !existing && !!slots?.some((slot) => slot.row === name && !!slot.candidates?.length);
 }
 
+/** The default supplies' names as an assessor reads them; a supply the user named stays as named. */
+const SUPPLY_LABELS: Readonly<Record<string, string>> = {
+  'mains elec': 'Mains electricity',
+  'mains gas': 'Mains gas',
+  'LPG bulk': 'LPG, bulk',
+  'LPG bottled': 'LPG, bottled',
+  'LPG condition 11F': 'LPG, special condition 11F',
+  'wood logs': 'Wood logs',
+  'wood pellets': 'Wood pellets',
+  'wood chips': 'Wood chips',
+  'house coal': 'House coal',
+  anthracite: 'Anthracite',
+  'smokeless fuel': 'Smokeless fuel',
+};
+
+/** An energy supply's name as the editor shows it. */
+export const energySupplyLabel = (name: string): string => SUPPLY_LABELS[name] ?? name;
+
+/** A heating circuit's less common inputs: flow limits and rates, thermal mass and the weather curve. */
+const COLLAPSED_HEATING_FIELDS: ReadonlySet<string> = new Set([
+  'bypass_fraction_recirculated', 'design_flow_rate', 'max_flow_rate', 'min_flow_rate', 'variable_flow', 'temp_flow_limit_upper',
+  'thermal_mass', 'min_flow_temp', 'min_outdoor_temp', 'max_outdoor_temp', 'product_id', 'weather_compensation_curve_id',
+  'weather_comp_a', 'weather_comp_b', 'weather_comp_c', 'load_comp_a', 'load_comp_b', 'load_comp_c', 'dispatch_mode',
+]);
+/** An existing building's radiators take no default thermal mass on the circuit: it stays in view. */
+const COLLAPSED_EXISTING_HEATING_FIELDS: ReadonlySet<string> = new Set([...COLLAPSED_HEATING_FIELDS].filter((field) => field !== 'thermal_mass'));
+/** What a heating circuit puts under "More". */
+export const collapsedHeatingFields = (existingBuildingProducts: boolean): ReadonlySet<string> =>
+  existingBuildingProducts ? COLLAPSED_EXISTING_HEATING_FIELDS : COLLAPSED_HEATING_FIELDS;

@@ -246,6 +246,10 @@ export function getDrawModeTooltipText(
     return 'Click a sloped roof where the dormer window centre should go';
   }
 
+  if (drawMode === 'door') {
+    return drawPoints.length === 0 ? 'Click where the door starts, on a wall' : 'Click where the door ends';
+  }
+
   if (drawMode === 'bay' || drawMode === 'conservatory') {
     if (drawPoints.length === 0) return 'Click where the opening starts';
     if (drawPoints.length === 1) return 'Click where the opening ends';

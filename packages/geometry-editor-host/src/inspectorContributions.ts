@@ -212,8 +212,15 @@ export type GeometryInspectorElementFieldsContext = Readonly<{
    * Absent: no method applies, so all show.
    */
   thermalMethod?: 'band' | 'calculation' | 'u_value';
-  /** 'more': render only the fields that go under the editor's "More" group. Absent: the others. */
-  section?: 'more';
+  /**
+   * 'more': render only the fields that go under the editor's "More" group. 'age_band': only the
+   * age band, for selected elements of several construction types. Absent: the others.
+   */
+  section?: 'more' | 'age_band';
+  /** Shown directly under the element's age band (an existing building's "Select this part"). */
+  ageBandNote?: ReactNode;
+  /** The age band shows once elsewhere (one for selected elements of several construction types): leave it out. */
+  omitAgeBand?: boolean;
 }>;
 
 export type GeometryInspectorElementFieldsContribution = Readonly<{

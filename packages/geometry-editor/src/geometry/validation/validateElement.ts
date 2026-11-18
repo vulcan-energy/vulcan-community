@@ -9,7 +9,14 @@ import { resolveBuildingElementPitch } from '../derivePitchFromGeometry';
 import { ecaasOnlyProductLabels, ecaasOnlyProductMessage } from './ecaasOnlyProducts';
 import { getElementShape } from '../../lib/shapeUtils';
 import { calculatePolygonArea } from '../../lib/polygonSync';
-import { contextShadingDistanceDetails } from '../../lib/contextShadingGeometry';
+import {
+  CONTEXT_SHADING_DEFAULT_CENTRE,
+  CONTEXT_SHADING_RESERVED_NAME,
+  deriveContextShading,
+  generatedNeighbourDerivation,
+  resolveContextShadingCentre,
+} from '../../lib/contextShadingGeometry';
+import { isContextGeneratedElement } from '../../lib/developmentContextShading';
 import { elementSchemaTakesField, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import { isConservatoryGlazing, windowSections } from '../../lib/hemieBundles';
 import { HEM_UNHEATED_PITCHED_ROOF_MAX_PITCH_DEG } from '../../lib/elementArea';
@@ -491,7 +498,6 @@ export interface ValidationContext {
    */
   elementIds?: readonly string[];
   numberOfBedrooms?: number;
-  calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
   /** Context Shading names the target's conversion does not use (wholly in stated quadrants). */
   unusedContextShading?: readonly string[];
   defaultsLoading?: boolean;
@@ -1319,7 +1325,10 @@ export const validateElementCore = (
 
   const issues: ValidationIssue[] = ((context.sourceCsvVersion ?? 3) >= 3 || context.csvUpgradeRequested ? csvMigrationIssues([element], context.sourceCsvVersion) : []).map(issue => ({ source: 'geometry', fieldKey: 'u_value', message: `CSV_U_VALUE_MEANING_REQUIRED: ${issue.elementName} has legacy U-value ${issue.value}; choose its meaning in the migration review before saving.` }));
   // First, so it is the issue kept for its field.
-  issues.push(...nonNumericCellIssues(element.nonNumericCells));
+  issues.push(...nonNumericCellIssues(element.nonNumericCells).map((issue) => (issue.fieldKey === 'parts'
+    ? { ...issue, message: `Parts is '${element.nonNumericCells!.parts}'. Write start:end:distance for each part, separated by semicolons.` }
+    : issue)));
+  if (element.name === CONTEXT_SHADING_DEFAULT_CENTRE) issues.push(geoIssue(CONTEXT_SHADING_RESERVED_NAME, 'name'));
   const wallFaceIssue = profiledWallFaceIssue(element);
   if (wallFaceIssue) issues.push(geoIssue(wallFaceIssue, 'height'));
   // A bay or conservatory whose host wall moved or went: named on its anchor.
@@ -1750,7 +1759,7 @@ export const validateElementCore = (
         if (typeof ru !== 'number' || !Number.isFinite(ru) || ru <= 0) {
           issues.push(
             schema(
-              'R_u (thermal resistance of unheated space) must be set — use Advanced → R_u calculator or enter a value',
+              'Enter R_u (the thermal resistance of the unheated space), or work it out with Calculate R_u',
               'thermal_resistance_unconditioned_space',
             ),
           );
@@ -2064,7 +2073,7 @@ export const validateElementCore = (
           ? emitterElement.space_heat_system.trim()
           : '';
       if (!linkedSpaceHeatSystemName) {
-        issues.push(geo('SpaceHeatSystem link is required', 'space_heat_system'));
+        issues.push(geo('Choose its heating system', 'space_heat_system'));
       } else if (elementsById) {
         const linkedSystemExists = Object.values(elementsById).some((candidate) =>
           candidate.type === 'System'
@@ -2072,7 +2081,7 @@ export const validateElementCore = (
           && candidate.name === linkedSpaceHeatSystemName
         );
         if (!linkedSystemExists) {
-          issues.push(geo('Linked SpaceHeatSystem was not found', 'space_heat_system'));
+          issues.push(geo(`Its heating system '${linkedSpaceHeatSystemName}' was not found`, 'space_heat_system'));
         }
       }
       break;
@@ -2209,25 +2218,56 @@ export const validateElementCore = (
         if (unused && field === 'distance') continue;
         if (!Number.isFinite(contextElement[field])) issues.push(geo(enterFieldMessage(label), field));
       }
-      // Distance is derived from geometry - calculate it rather than checking stored value
-      if (contextElement.parent_element && elementsById) {
-        const parent = Object.values(elementsById).find(e => e.name === contextElement.parent_element);
-        if (parent && contextElement.coordinates && parent.coordinates && context.calculateContextShadingDistance) {
-          const derivedDistance = context.calculateContextShadingDistance(contextElement, parent);
-          if (!(derivedDistance > 0) && !unused) {
-            issues.push(geo(`Distance is ${derivedDistance} m: the object is level with or behind the facade of the dwelling's closest external wall (for example beside it, or beyond a party wall), not in front of it. HEM needs a distance above 0. Vulcan measures it at right angles from the nearest external wall to the obstacle's nearest face.`, 'distance'));
-          }
-          // A warning, never blocking: before the thickness rule the distance ran from the internal line.
-          // A thickness the model gives (wall layers, floor, ground floor) needs no message.
-          const thickness = contextShadingDistanceDetails(contextElement, parent, Object.values(elementsById))?.thickness;
-          if (thickness?.source === 'none' && !unused) {
-            warnings.push(geo('The model gives no wall thickness, so the distance is measured from the inside of the wall. Add construction layers to the closest external wall, or a wall thickness to the ground floor.', 'distance'));
-          }
-        } else {
-          issues.push(geo('Missing parent or coordinates', 'parent_element'));
+      const others = Object.values(elementsById ?? {}).filter((other) =>
+        other.type === 'ContextShading' && other.id !== contextElement.id && !other.isPlaceholder);
+      if (others.some((other) => ((other as ContextShading).parent_element || null) !== (contextElement.parent_element || null))) {
+        warnings.push(geo('External shading objects use different shading centres. Choose one centre for all of them.', 'parent_element'));
+      }
+      const touches = "The object touches or overlaps the dwelling's closest wall. HEM needs a distance above 0.";
+      const partTouches = (part: { start_angle: number; end_angle: number; distance: number }, fix: string) =>
+        `Direction ${part.start_angle}°–${part.end_angle}°: distance is ${part.distance} m. ${touches} ${fix}`;
+      // A row with no drawing is its typed values, which the converter takes as written (hand-written
+      // files): the field checks above cover it, with its parts.
+      if (!contextElement.coordinates?.length) {
+        contextElement.parts?.forEach((part, index) => {
+          if (!(part.distance > 0) && !unused) issues.push(geo(partTouches(part, 'Enter a distance above 0.'), `parts.${index}.distance`));
+        });
+        break;
+      }
+      const elements = Object.values(elementsById ?? {});
+      const centre = resolveContextShadingCentre(elements, context.floors ?? [], contextElement.parent_element);
+      if (!centre) {
+        issues.push(geo(contextElement.parent_element ? 'The default shading centre needs a floor of the dwelling. Draw a floor.' : 'Choose a shading centre.', 'parent_element'));
+        break;
+      }
+      if ('issue' in centre) {
+        issues.push(geo(centre.issue, 'parent_element'));
+        break;
+      }
+      const drawnDerivation = deriveContextShading(contextElement, centre, elements, context.globalOrientationOffset ?? 0);
+      if (!drawnDerivation) break;
+      if ('issue' in drawnDerivation) {
+        issues.push(geo(drawnDerivation.issue, 'coordinates'));
+        break;
+      }
+      // A generated neighbour is checked on the parts it keeps, as the sync writes it; one with
+      // none left is removed by the next sync.
+      const derived = isContextGeneratedElement(contextElement) ? generatedNeighbourDerivation(drawnDerivation) : drawnDerivation;
+      if (!derived) break;
+      if (!unused) {
+        if (derived.parts.length === 1 && !(derived.distance > 0)) {
+          issues.push(geo(`Distance is ${derived.distance} m. ${touches} Move it away from the wall.`, 'distance'));
         }
-      } else {
-        issues.push(geo('Parent required', 'parent_element'));
+        if (derived.parts.length > 1) {
+          derived.parts.forEach((part, index) => {
+            if (!(part.distance > 0)) issues.push(geo(partTouches(part, 'Move it away from the wall.'), `parts.${index}.distance`));
+          });
+        }
+        // A warning, never blocking: before the thickness rule the distance ran from the internal line.
+        // A thickness the model gives (wall layers, floor, ground floor) needs no message.
+        if (derived.parts.some((part) => part.thickness.source === 'none')) {
+          warnings.push(geo('The model gives no wall thickness, so the distance is measured from the inside of the wall. Add construction layers to the closest wall, or a wall thickness to the ground floor.', 'distance'));
+        }
       }
       break;
     }
@@ -2463,7 +2503,7 @@ export const validateElementCore = (
         ZONE_UNCONDITIONED,
       ];
       if (!sysElement.subcategory || !validSubcategories.includes(sysElement.subcategory)) {
-        issues.push(geo('System target root must be a supported FHS family', 'subcategory'));
+        issues.push(geo('Choose a category', 'subcategory'));
       }
       if (sysElement.subcategory === ZONE_UNCONDITIONED && !sysElement.isPlaceholder) {
         const root = rootSchemaFor(context);
@@ -2619,7 +2659,8 @@ export const validateElementCore = (
       let allRequiredFields = [...new Set([...requiredFields, ...conditionalRequiredFields])];
       if (takesUOrR) {
         allRequiredFields = allRequiredFields.filter((field) => field !== 'thermal_resistance_construction');
-        const both = stated('u_value') && stated('thermal_resistance_construction');
+        // Layers write both, and the converter keeps their R: one stated value.
+        const both = stated('u_value') && stated('thermal_resistance_construction') && !parseVulcanAssemblyV1FromExtraJson(extraJson);
         const neither = !stated('u_value') && !stated('thermal_resistance_construction') && !hiddenFields.has('u_value')
           && !(context.defaultsLookup?.hasDefaultValue ?? hasDefaultValue)('u_value', element.type, activeSubschema as unknown as { properties?: Record<string, { default?: unknown } | undefined> }, undefined, opaqueFabricVariant);
         if (both || neither) issues.push(issueFactory('State the U-value or the thermal resistance (one, not both).', 'u_value'));
@@ -3156,7 +3197,6 @@ export const collectGeometryValidation = (
     spaceLabels?: SpaceLabel[];
     partOActiveCoolingRequired?: boolean;
     partFContext?: PartFDetectionContext;
-    calculateContextShadingDistance?: (contextElement: ContextShading, parent: Element) => number;
     defaultsLoading?: boolean;
     junctionPsiWorkspaceByType?: Record<string, number>;
     complianceSettings?: GlobalSettingsShape;
@@ -3194,7 +3234,6 @@ export const collectGeometryValidation = (
       ...flags,
       complianceSettings: options.complianceSettings,
       numberOfBedrooms: options.complianceSettings?.NumberOfBedrooms,
-      calculateContextShadingDistance: options.calculateContextShadingDistance,
       defaultsLoading: options.defaultsLoading,
       junctionPsiWorkspaceByType: options.junctionPsiWorkspaceByType,
       linearThermalBridgeIssues,

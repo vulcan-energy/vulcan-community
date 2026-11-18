@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! A cylinder heater's positions left blank on HEM:EPC: an existing building takes the default
-//! (HEMIE applies it), and a new build is asked for the heater position. The editor leaves both
-//! blank on HEM:EPC models (`DhwStorageHeatSourcePicker`).
+//! A cylinder heater's positions left blank on HEM:EPC: an existing building takes the heater
+//! position's default (HEMIE applies it), and a new build is asked for it. The thermostat position
+//! has no default on either: its tank control is required, so both are asked for it. The editor
+//! leaves both blank on HEM:EPC models (`DhwStorageHeatSourcePicker`).
 
 use vulcan_model_transform::{
     transform_geometry_csv, ConversionProfile, ModelProfile, TransformOutput, TransformRequest,
@@ -53,24 +54,26 @@ fn position_errors(output: &TransformOutput) -> Vec<String> {
         .collect()
 }
 
+const THERMOSTAT: &str = "/HotWaterSource/hw cylinder/HeatSource/immersion/thermostat_position: Cylinder 'hw cylinder': enter its immersion heater's thermostat position (how far up the cylinder the thermostat sits, as a fraction of its height). There is no default.";
+
 #[test]
 fn an_existing_building_leaves_a_blank_heater_position_to_the_default() {
     let output = convert("epc_existing_building.csv");
+    assert_eq!(position_errors(&output), [THERMOSTAT]);
     assert!(
-        position_errors(&output).is_empty(),
-        "{:?}",
-        position_errors(&output)
+        !output.model.to_string().contains("heater_position"),
+        "no position is sent"
     );
-    let text = output.model.to_string();
-    assert!(!text.contains("heater_position"), "no position is sent");
-    assert!(!text.contains("thermostat_position"), "no position is sent");
 }
 
 #[test]
-fn a_new_build_is_asked_for_a_blank_heater_position_only() {
+fn a_new_build_is_asked_for_both_blank_positions() {
     let output = convert("epc_new_build.csv");
     assert_eq!(
         position_errors(&output),
-        ["/HotWaterSource/hw cylinder/HeatSource/immersion/heater_position: 'immersion' (ImmersionHeater) needs its heater position. A new build states it: there is no default."],
+        [
+            THERMOSTAT,
+            "/HotWaterSource/hw cylinder/HeatSource/immersion/heater_position: 'immersion' (ImmersionHeater) needs its heater position. A new build states it: there is no default.",
+        ],
     );
 }

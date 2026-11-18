@@ -107,7 +107,7 @@ describe('geometry editor authoring-control radius contract', () => {
   });
 
   it('uses the shared authoring-field radius and height for native assembly controls', () => {
-    const assemblyPath = join(componentDirectory, 'AssemblyCalculatorModal.tsx');
+    const assemblyPath = join(componentDirectory, 'AssemblyLayers.tsx');
     const { source: assemblyText, openings: selects } = jsxOpenings(
       assemblyPath,
       new Set(['select']),
@@ -119,18 +119,20 @@ describe('geometry editor authoring-control radius contract', () => {
       expect(select.text).toContain("height: 'var(--form-input-height)'");
     }
 
-    expect(assemblyText).toMatch(
-      /const assemblyStackNumberInputStyle:[\s\S]*?borderRadius:\s*'var\(--form-input-radius\)'/,
-    );
-    expect(assemblyText).toMatch(
-      /const assemblyStackNumberInputStyle:[\s\S]*?height:\s*'var\(--form-input-height\)'/,
-    );
+    // The layer rows' number style (LayerRow.tsx), which the calculator's other inputs share.
+    const styleText = readFileSync(join(componentDirectory, 'layerRowStyle.ts'), 'utf8');
+    expect(styleText).toMatch(/const layerNumberInputStyle:[\s\S]*?borderRadius:\s*'var\(--form-input-radius\)'/);
+    expect(styleText).toMatch(/const layerNumberInputStyle:[\s\S]*?height:\s*'var\(--form-input-height\)'/);
+    expect(assemblyText).toContain('const assemblyStackNumberInputStyle = layerNumberInputStyle;');
+    const { openings: rowInputs } = jsxOpenings(join(componentDirectory, 'LayerRow.tsx'), new Set(['DraftSafeNumberInput']));
+    expect(rowInputs).toHaveLength(1);
+    expect(rowInputs[0]!.text).toContain('layerNumberInputStyle');
 
     const { openings: numberInputs } = jsxOpenings(
       assemblyPath,
       new Set(['DraftSafeNumberInput']),
     );
-    expect(numberInputs).toHaveLength(9);
+    expect(numberInputs).toHaveLength(7);
     for (const input of numberInputs) {
       const usesSharedStyle = input.text.includes('assemblyStackNumberInputStyle');
       const usesSharedTokens =
@@ -138,7 +140,7 @@ describe('geometry editor authoring-control radius contract', () => {
         input.text.includes("height: 'var(--form-input-height)'");
       expect(
         usesSharedStyle || usesSharedTokens,
-        `AssemblyCalculatorModal.tsx:${input.line}`,
+        `AssemblyLayers.tsx:${input.line}`,
       ).toBe(true);
     }
   });
@@ -153,12 +155,7 @@ describe('geometry editor authoring-control radius contract', () => {
   });
 
   it('matches field-adjacent actions to the authoring-field radius and height', () => {
-    const multiSelectPath = join(componentDirectory, 'MultiSelectPanel.tsx');
-    const { openings: multiSelectButtons } = jsxOpenings(multiSelectPath, new Set(['button']));
-    const libraryButton = multiSelectButtons.find((opening) => opening.text.includes('prefetchAssemblyCalculatorModal'));
-    expect(libraryButton?.text).toContain('element-editor-input-action');
-
-    const assemblyPath = join(componentDirectory, 'AssemblyCalculatorModal.tsx');
+    const assemblyPath = join(componentDirectory, 'AssemblyLayers.tsx');
     const { openings: assemblyButtons } = jsxOpenings(assemblyPath, new Set(['button']));
     const fieldActions = assemblyButtons.filter(
       (opening) =>

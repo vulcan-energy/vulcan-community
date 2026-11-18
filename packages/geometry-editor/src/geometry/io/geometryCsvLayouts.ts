@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { BaseElement, Element, ElementType } from '../types';
+import type { BaseElement, ContextShadingPart, Element, ElementType } from '../types';
 
 /**
  * Canonical column headers for each tabular geometry CSV section.
@@ -235,6 +235,7 @@ export const EXPECTED_SECTION_HEADERS: Record<string, readonly string[]> = {
     'start_angle',
     'end_angle',
     'distance',
+    'parts',
     'height',
     'parent_element',
     'base_height',
@@ -308,7 +309,7 @@ const ADDITIVE_OPTIONAL_COLUMNS: Record<string, ReadonlySet<string>> = {
   'Wet Emitters': new Set(['space_heat_system', 'base_height']),
   Appliances: new Set(['base_height', 'coords', 'extra_json']),
   'Hot Water Outlets': new Set(['allow_low_flowrate', 'base_height', 'coords', 'extra_json']),
-  'Context Shading': new Set(['shading_type', 'start_angle', 'end_angle', 'parent_element', 'base_height', 'coords', 'extra_json']),
+  'Context Shading': new Set(['shading_type', 'start_angle', 'end_angle', 'parts', 'parent_element', 'base_height', 'coords', 'extra_json']),
   'Water Pipework': new Set(['pipework_type']),
   'Thermal Bridging Elements': new Set(['heat_transfer_coeff', 'parent_element', 'coords']),
   Systems: new Set(['Zone', 'Type', 'subcategory', 'system_preset', 'base_height', 'coords', 'extra_json']),
@@ -374,4 +375,26 @@ export function validateGeometrySectionHeaders(sectionName: string, columnHeader
   if (missing.length > 0) {
     throw new Error(`${sectionName}: missing required columns: ${missing.join(', ')}`);
   }
+}
+
+/** A Context Shading `parts` cell: `start:end:distance` per part, separated by semicolons. */
+export function formatContextShadingPartsCell(parts: readonly ContextShadingPart[] | undefined): string {
+  return (parts ?? []).map((part) => `${part.start_angle}:${part.end_angle}:${part.distance}`).join(';');
+}
+
+/** The parts a `parts` cell states; undefined for a blank cell, null for one that cannot be read. */
+export function parseContextShadingPartsCell(cell: string): ContextShadingPart[] | undefined | null {
+  if (cell.trim() === '') return undefined;
+  const parts = cell.split(';').map((text) => {
+    const values = text.split(':').map((value) => (value.trim() === '' ? NaN : Number(value)));
+    return values.length === 3 && values.every(Number.isFinite)
+      ? { start_angle: values[0], end_angle: values[1], distance: values[2] }
+      : null;
+  });
+  return parts.every((part) => part !== null) ? parts as ContextShadingPart[] : null;
+}
+
+/** The Context Shading header: `parts` only when an object has parts, so files without them are unchanged. */
+export function contextShadingSectionHeaders(withParts: boolean): string[] {
+  return EXPECTED_SECTION_HEADERS['Context Shading'].filter((column) => withParts || column !== 'parts');
 }

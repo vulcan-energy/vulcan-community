@@ -106,31 +106,33 @@ export function inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema(
   if (!isRecord(subschema.properties)) return;
   const hw = (subschema.properties as UnknownRec).HotWaterSource;
   if (!isRecord(hw) || !isRecord(hw.properties)) return;
-  const cyl = hw.properties[HW_CYL];
-  if (!isRecord(cyl) || !isRecord(cyl.properties)) return;
-  const hswField = cyl.properties.HeatSourceWet;
-  if (!isRecord(hswField) || hswField.type !== 'string') return;
-  if (hswField.const) return;
-  const names = new Set(definedNames.map((s) => s.trim()).filter(Boolean));
-  const cur = typeof currentCombiLink === 'string' ? currentCombiLink.trim() : '';
-  const currentIsDefined = cur ? names.has(cur) : false;
-  if (cur) {
-    names.add(cur);
-  }
-  const enumList = Array.from(names).sort();
-  const baseDesc = typeof hswField.description === 'string' ? hswField.description.trim() : '';
-  const hint
-    = enumList.length === 0
-      ? 'No heat sources defined yet. Add a heat source, then link it here.'
-      : 'Only names that already exist on a heat source in this project are allowed (plus the current value, if any). This link does not copy combi DHW test values; use the PCDB DHW action when linking to a PCDB combi boiler.';
-  const description = [baseDesc, hint].filter(Boolean).join(' ');
+  // Each hot water system, whatever the user named it ('hw cylinder' in shipped files, 'Hot water' in the editor).
+  for (const cyl of Object.values(hw.properties)) {
+    if (!isRecord(cyl) || !isRecord(cyl.properties)) continue;
+    const hswField = cyl.properties.HeatSourceWet;
+    if (!isRecord(hswField) || hswField.type !== 'string') continue;
+    if (hswField.const) continue;
+    const names = new Set(definedNames.map((s) => s.trim()).filter(Boolean));
+    const cur = typeof currentCombiLink === 'string' ? currentCombiLink.trim() : '';
+    const currentIsDefined = cur ? names.has(cur) : false;
+    if (cur) {
+      names.add(cur);
+    }
+    const enumList = Array.from(names).sort();
+    const baseDesc = typeof hswField.description === 'string' ? hswField.description.trim() : '';
+    const hint
+      = enumList.length === 0
+        ? 'No heat sources defined yet. Add a heat source, then link it here.'
+        : 'Only names that already exist on a heat source in this project are allowed (plus the current value, if any). This link does not copy combi DHW test values; use the PCDB DHW action when linking to a PCDB combi boiler.';
+    const description = [baseDesc, hint].filter(Boolean).join(' ');
 
-  cyl.properties.HeatSourceWet = {
-    ...hswField,
-    oneOf: enumList.map((name) => ({
-      const: name,
-      title: labels[name] ?? (name === cur && !currentIsDefined ? `${name} (current, unresolved)` : name),
-    })),
-    description,
-  };
+    cyl.properties.HeatSourceWet = {
+      ...hswField,
+      oneOf: enumList.map((name) => ({
+        const: name,
+        title: labels[name] ?? (name === cur && !currentIsDefined ? `${name} (current, unresolved)` : name),
+      })),
+      description,
+    };
+  }
 }

@@ -139,6 +139,7 @@ export function checkGeometryCsv(csvArg: string) {
       elementsById: byId,
       zones: parsed.zones,
       floors,
+      globalOrientationOffset: parsed.metadata.globalOrientationOffset ?? 0,
       complianceValidationEnabled,
       linearThermalBridgeIssues,
       partFFindings: partFData?.findings ?? [],

@@ -22,7 +22,9 @@ export type DrawMode =
   | 'dormer'
   | 'bay'
   | 'conservatory'
-  | 'roof';
+  | 'roof'
+  // An external door: a line on an external wall, hosted by that wall.
+  | 'door';
 
 export type OrthogonalRoomEditingState = {
   isOpen: boolean;

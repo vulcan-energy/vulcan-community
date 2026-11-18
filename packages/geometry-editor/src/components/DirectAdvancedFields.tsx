@@ -27,6 +27,8 @@ import {
 } from '../lib/windowOpenings';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { Element } from '../geometry/types';
+import type { ArealHeatCapacityScale } from '../../../geometry-editor-host/src/schemaPort';
+import { arealHeatCapacityBandFromJPerM2K } from '../lib/assemblyCalculator';
 import { resolveSchemaPointer } from '../lib/schemaRefResolver';
 import {
   getAtPath,
@@ -595,26 +597,44 @@ function bandsOrNumberShape(resolved: Record<string, unknown>): { bands: unknown
 
 const NUMBER_CHOICE = 'number';
 
-/** A dropdown of the bands plus a number choice, which opens a number input; a number is saved as a number. */
+/**
+ * A dropdown of the bands plus a number choice, which opens a number input; a number is saved as a
+ * number. A number the layers give reads in the dropdown as its class and value ("Very light ·
+ * 230 kJ/m²K"), marked "from the layers": no number field. A stated number keeps its field, which
+ * carries the row's source; the dropdown's choice ("Number") has no value to compare.
+ */
 function BandsOrNumberControl(props: DirectControlProps & { shape: { bands: unknown[]; number: Record<string, unknown> } }): React.ReactElement {
   const { shape, data, handleChange, schema, errors, ...rest } = props;
   const [numberChosen, setNumberChosen] = React.useState(false);
   const number = data;
-  const isNumber = numberChosen || typeof number === 'number';
+  const config = (rest.config ?? {}) as { assemblySourceValues?: Record<string, unknown>; arealHeatCapacityClasses?: ArealHeatCapacityScale };
+  const fromLayers = !numberChosen && typeof number === 'number' && config.assemblySourceValues?.[rest.propKey] === number;
+  const isNumber = !fromLayers && (numberChosen || typeof number === 'number');
   const { description, title } = schema as { description?: unknown; title?: unknown };
+  const layersLabel = () => {
+    const kJ = `${Math.round((number as number) / 1000)} kJ/m²K`;
+    const band = config.arealHeatCapacityClasses && arealHeatCapacityBandFromJPerM2K(number as number, config.arealHeatCapacityClasses);
+    return band ? `${band} · ${kJ}` : kJ;
+  };
   return (
     <>
       <EnumControl
         {...rest}
+        config={isNumber ? { ...config, hideSource: true } : rest.config}
         errors={errors}
         data={isNumber ? NUMBER_CHOICE : data}
         schema={{
           type: 'string',
-          oneOf: [...shape.bands.map((band) => ({ const: band, title: String(band) })), { const: NUMBER_CHOICE, title: 'Number (J/m²·K)' }],
+          oneOf: [
+            ...(fromLayers ? [{ const: String(number), title: layersLabel() }] : []),
+            ...shape.bands.map((band) => ({ const: band, title: String(band) })),
+            { const: NUMBER_CHOICE, title: 'Number (J/m²·K)' },
+          ],
           ...(typeof description === 'string' ? { description } : {}),
           ...(typeof title === 'string' ? { title } : {}),
         }}
         handleChange={(path, value) => {
+          if (fromLayers && value === String(number)) return;
           setNumberChosen(value === NUMBER_CHOICE);
           handleChange(path, value === NUMBER_CHOICE ? undefined : value);
         }}

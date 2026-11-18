@@ -959,6 +959,6 @@ describe('where a value comes from (one source treatment)', () => {
 
   it('a value from the applied assembly says so', () => {
     const { container } = renderControl(NumberControl, { data: 0.18, path: 'u_value', config: { assemblySourceValues: { u_value: 0.18 } } });
-    expect(sourceOf(container)).toHaveTextContent('from the assembly');
+    expect(sourceOf(container)).toHaveTextContent('from the layers');
   });
 });

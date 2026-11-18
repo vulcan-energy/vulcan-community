@@ -294,12 +294,22 @@ export function flattenIfThenAllOfProperties(
         const profiles = isRecord(profile) ? { M: profile, L: profile } : readRecord(v.properties);
         next[k] = flattenIfThenAllOfProperties({ ...v, required: ['M'], properties: Object.fromEntries(Object.entries(profiles).map(([name, schema]) => [name, unwrapNullableSchema(readRecord(schema))])) }, childInstance, fullRoot);
       } else if (k === 'HeatSource' && isRecord(v) && isRecord(v.additionalProperties) && isRecord(childInstance)) {
+        // A target whose heaters' thermostats sit in the cylinder's tank controls: each heater but
+        // a solar one (it has its own control) shows the position, and the converter moves it
+        // into the heater's tank control, so the user never types the heater's key.
+        const tankControl = isRecord(pr.tank_controls) ? readRecord(dereferenceSchemaNodeInRoot(pr.tank_controls.items, fullRoot)) : {};
+        const thermostat = readRecord(tankControl.properties).thermostat_position;
         next[k] = {
           ...v,
           'x-vulcan-heater-map': true,
-          properties: Object.fromEntries(Object.entries(childInstance).map(([name, heater]) => [
-            name, { ...readRecord(flattenIfThenAllOfProperties(selectPlantVariant(v.additionalProperties, heater), heater, fullRoot)), 'x-vulcan-cylinder-heater': true },
-          ])),
+          properties: Object.fromEntries(Object.entries(childInstance).map(([name, heater]) => {
+            const flat = readRecord(flattenIfThenAllOfProperties(selectPlantVariant(v.additionalProperties, heater), heater, fullRoot));
+            const own = readRecord(flat.properties);
+            const withThermostat = isRecord(thermostat) && readRecord(heater).type !== 'SolarThermalSystem' && !own.thermostat_position
+              ? { ...flat, properties: { ...own, thermostat_position: thermostat } }
+              : flat;
+            return [name, { ...withThermostat, 'x-vulcan-cylinder-heater': true }];
+          })),
         };
       } else {
         // An optional object (`anyOf [object, null]`) gets its fields, not one JSON box.

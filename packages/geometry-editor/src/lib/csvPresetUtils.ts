@@ -52,6 +52,8 @@ export const EXTRA_JSON_UI_KEYS = [
   '_ground_line_height_m',
   'psi_source',
   'vulcan_assembly_v1',
+  /** The layers a typed fabric value overrides, kept to bring back (`ASSEMBLY_SET_ASIDE_KEY`). */
+  '_vulcan_assembly_v1_overridden',
   /** ISO 6946 R_u calculator fields (incl. optional exposed-wall assembly id for split mode) */
   'ru_calculator_state_v1',
   /** Window treatment simplified UI snapshot (paired with `treatment` in extra_json) */

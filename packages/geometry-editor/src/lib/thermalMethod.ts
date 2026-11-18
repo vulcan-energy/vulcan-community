@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Element } from '../geometry/types';
-import { parseVulcanAssemblyV1FromExtraJson } from './assemblyAppliedUi';
+import { ASSEMBLY_SET_ASIDE_KEY, parseVulcanAssemblyV1FromExtraJson, setAsideAssemblyEnvelope } from './assemblyAppliedUi';
 import { GROUND_U_VALUE_MANUAL_KEY } from './groundSuspendedFabricSync';
 import { HEMIE_DETAIL_FIELDS } from './hemieFabric';
 
@@ -45,7 +45,8 @@ export function thermalMethods(
   const entered = { value: 'u_value' as const, label: 'U-value' };
   const calculation = {
     value: 'calculation' as const,
-    label: constructionBands || elementType === 'BuildingElementGround' ? 'Calculation' : 'Layers',
+    // A ground floor's calculation is its ground calculation; every other element's is its layers.
+    label: elementType === 'BuildingElementGround' ? 'Calculation' : 'Layers',
   };
   // A window's band method is its glazing description; entered, it takes U and g.
   if (elementType === 'BuildingElementTransparent') return constructionBands ? [{ ...band, label: 'Glazing description' }, { ...entered, label: 'U and g' }] : [];
@@ -71,7 +72,8 @@ export function inferThermalMethod(
   groundComputedU?: number | null,
 ): ThermalMethod {
   const extra = (element.extra_json ?? {}) as Record<string, unknown>;
-  if (parseVulcanAssemblyV1FromExtraJson(extra)) return 'calculation';
+  // Layers a typed value overrides stay the element's layers: they show, and the reset brings them back.
+  if (parseVulcanAssemblyV1FromExtraJson(extra) || setAsideAssemblyEnvelope(extra)) return 'calculation';
   const u = stated(element, 'u_value');
   if (element.type === 'BuildingElementGround') {
     if (!constructionBands) return extra[GROUND_U_VALUE_MANUAL_KEY] === true ? 'u_value' : 'calculation';
@@ -123,9 +125,11 @@ export function thermalMethodSwitchPatch(
   const ground = element.type === 'BuildingElementGround';
   // A door's "insulated" is taken only with its U-value (HEM:EPC), so it goes with it.
   const uKeys = element.type === PARTY_WALL ? PARTY_WALL_U_KEYS : ['u_value', 'thermal_resistance_construction', 'is_insulated'];
-  if (from === 'calculation') clear(['vulcan_assembly_v1', ...uKeys]);
+  // A typed U-value over layers set aside is already the U-value method's: only the layers go.
+  if (from === 'calculation') clear(to === 'u_value' && extra[ASSEMBLY_SET_ASIDE_KEY] !== undefined ? [ASSEMBLY_SET_ASIDE_KEY] : ['vulcan_assembly_v1', ASSEMBLY_SET_ASIDE_KEY, ...uKeys]);
   if (from === 'u_value') clear(uKeys);
-  if (from === 'band') clear(bandOnlyFields(options.constructionType));
+  // A wall's edited layers (`wall_layers`) are the age band's rows: a U-value or build-up replaces them.
+  if (from === 'band') clear([...bandOnlyFields(options.constructionType), 'wall_layers']);
   if (ground) {
     delete extra[GROUND_U_VALUE_MANUAL_KEY];
     // Without construction bands the floor's U-value follows its calculation unless entered.

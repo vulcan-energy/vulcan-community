@@ -432,6 +432,16 @@ export const EPC_GLOBAL_VALUES_TITLES = {
   ventilation: "Site",
 } as const;
 
+/** The HEM:EPC form's labels where they differ from REQUIRED_SETTINGS_LABELS; the form and its Build Errors both use them. */
+export const EPC_FORM_LABELS: Readonly<Record<string, string>> = {
+  HeatingControlType: "Heating controls",
+  HasElectricitySmartMeter: "Smart electricity meter",
+  Ventilation_terrain_class: "Terrain",
+  Ventilation_shield_class: "Shelter",
+  Ventilation_cross_vent_possible: "Cross ventilation",
+  AirPermeability_ventilation_zone_height: "Zone height",
+};
+
 /** The HEM:EPC form's Property rows; the other dwelling rows are under Rooms and services. */
 export const EPC_PROPERTY_ROWS: ReadonlySet<string> = new Set(["Postcode", "General_build_type", "General_storeys_in_dwelling", "General_storey_of_dwelling", "General_storeys_in_building"]);
 
@@ -470,6 +480,8 @@ export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSect
   if (key === "DefaultsPath" || key.startsWith("DefaultAssembly") || key.startsWith("FabricRow_") || key === "HEMIE_age_band" || key.startsWith("HEMIE_construction_")) return "fabric";
   // The nation goes under the Postcode, a dwelling field.
   if (key === "HEMIE_nation") return "dwelling";
+  // Distant shading is read out under Site.
+  if (key === "HEMIE_distant_shading") return "ventilation";
   if (key === "TargetBundleId" || key === "IsExistingBuilding" || key.startsWith("HEMIE_")) return "target";
   if (key.startsWith("AirPermeability_test_")) return "airTightness";
   if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";

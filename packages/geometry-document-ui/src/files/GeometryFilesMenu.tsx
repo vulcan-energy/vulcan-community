@@ -838,27 +838,24 @@ export function GeometryFilesMenu({
         <>
           <div className="files-dropdown-divider" />
           {onNewDocument && startsShown && newDocumentStarts ? (
-            <>
-              <div className="files-dropdown-footer" style={{ gridTemplateColumns: `repeat(${newDocumentStarts.length}, minmax(0, 1fr))` }}>
-                {newDocumentStarts.map((start) => (
-                  <button
-                    key={start.id}
-                    type="button"
-                    className="files-dropdown-new-btn files-dropdown-new-btn--start"
-                    disabled={isBusy}
-                    onClick={() => {
-                      if (isBusy) return;
-                      onNewDocument(start.id);
-                      closeMenu();
-                    }}
-                  >
-                    <span className="files-dropdown-start-label">{start.label}</span>
-                    {start.detail ? <span className="files-dropdown-start-detail">{start.detail}</span> : null}
-                  </button>
-                ))}
-              </div>
-              <p className="files-dropdown-start-note">The HEM version and defaults can be changed later in Global Settings.</p>
-            </>
+            <div className="files-dropdown-footer files-dropdown-footer--starts">
+              {newDocumentStarts.map((start) => (
+                <button
+                  key={start.id}
+                  type="button"
+                  className="files-dropdown-new-btn files-dropdown-new-btn--start"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (isBusy) return;
+                    onNewDocument(start.id);
+                    closeMenu();
+                  }}
+                >
+                  <span className="files-dropdown-start-label">{start.label}</span>
+                  {start.detail ? <span className="files-dropdown-start-detail">{start.detail}</span> : null}
+                </button>
+              ))}
+            </div>
           ) : null}
           <div className="files-dropdown-footer">
             {onNewDocument ? (

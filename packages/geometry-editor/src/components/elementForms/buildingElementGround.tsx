@@ -23,9 +23,9 @@
 // needs `widthInput` (the other five consumers never did), so
 // ElementFormSharedCtx gained that one field — see types.ts.
 //
-// No assembly-calculator bridge was needed. Ground's own attribute panel has
-// no assembly-calculator-modal interaction at all: the "Edit Assembly" badge
-// used by Opaque/Ground/PartyWall/AdjacentUnconditioned is rendered
+// No layers bridge was needed. Ground's own attribute panel has no layers
+// interaction at all: the inline layers used by
+// Opaque/Ground/PartyWall/AdjacentUnconditioned are rendered
 // generically in ElementCreator's own JSX body (outside any per-family
 // case), reading only `elementType` — untouched by this move. The
 // "Use Assembly" wall-thickness sync feature inside Ground's own panel
@@ -34,10 +34,9 @@
 // (selection/getElementById/elementsById/updateElement), already exposed.
 //
 // A handful of ElementCreator's OWN still-inline, orchestrator-retained code
-// (elementFieldPresentation's `floorType` prop, the three
-// assemblyModalPitchDeg/ElementMode/GroundFloorType helpers that feed the
-// still-orchestrator-owned <AssemblyCalculatorModal> per decision 10, the
-// two elementSupportsGenericElevationControl call sites, and the assembly modal's onApply Ground
+// (elementFieldPresentation's `floorType` prop, the orchestrator-owned
+// inline layers' floor type and pitch per decision 10, the
+// two elementSupportsGenericElevationControl call sites, and the layers' apply Ground
 // branch) reads floorType/thicknessWallsInput/
 // derivedGroundPerimeter. Rather than inventing a bridge for these, this
 // module reuses the existing "read the module's own useFormState return

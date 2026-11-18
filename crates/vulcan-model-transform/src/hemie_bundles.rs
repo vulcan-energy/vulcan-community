@@ -383,6 +383,34 @@ pub(super) fn over_bay(bays: &[Bay], plane: &El) -> bool {
     bays.iter().any(|b| inside(centroid(&plane.pts), &b.poly))
 }
 
+/// Each bay's walls and the roof planes over it (element paths), with the building part of the
+/// wall it projects from.
+pub(super) fn bay_members(
+    bays: &[Bay],
+    walls: &[HemieWall],
+    planes: &[&El],
+) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    for bay in bays {
+        let Some(w) = walls.iter().find(|w| {
+            w.source.name == bay.parent
+                && w.storey as i64 == bay.level
+                && seg_dist(bay.a, w.a, w.b) <= TOL
+                && seg_dist(bay.b, w.a, w.b) <= TOL
+        }) else {
+            continue;
+        };
+        out.extend(bay.facets.iter().map(|f| (w.part, f.path())));
+        out.extend(
+            planes
+                .iter()
+                .filter(|p| inside(centroid(&p.pts), &bay.poly))
+                .map(|p| (w.part, p.path())),
+        );
+    }
+    out
+}
+
 /// Each bay on the HEMIE wall it projects from (`bay_window`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn attach_bays(
@@ -1666,6 +1694,38 @@ mod tests {
         .flat_map(|k| room[*k].as_array().unwrap())
         .any(|d| d["age_band"] == "K");
         assert!(banded, "{room:#}");
+    }
+
+    #[test]
+    fn a_dormer_pitch_is_sent_only_when_stated() {
+        let dormer = |parameters: &str| {
+            let mut exposed = heated_roof();
+            exposed.push(format!(r#"D front,Z,BuildingElementOpaque,2.4,90,2,1.2,180,6.0,FALSE,FALSE,,"3,1,2|5,1,2","{{""dormer_bundle"":{{""role"":""front-wall-anchor"",""host_element_name"":""Roof S"",""window_name"":""DW"",""parameters"":{{""dormerType"":""mono-pitch"",""frontWallHeight"":1.2{parameters}}}}}}}""#));
+            exposed.push(opening(
+                "DW",
+                "D front",
+                2,
+                [3.5, 1.0],
+                [4.5, 1.0],
+                1.0,
+                1.0,
+                SECTIONS,
+            ));
+            let (model, errors, _) = run(&room_in_roof(exposed));
+            assert!(errors.is_empty(), "{errors:#?}");
+            let room = &model["Zone"]["building_parts"]["Main"]["roof"];
+            [
+                "dormers_in_slope_orientation",
+                "dormers_opposite_slope_orientation",
+            ]
+            .iter()
+            .flat_map(|k| room[*k].as_array().unwrap().clone())
+            .next()
+            .unwrap_or_else(|| panic!("{room:#}"))
+        };
+        // Left blank: HEM:EPC applies its own default.
+        assert!(dormer("").get("roof_pitch").is_none());
+        assert_eq!(dormer(r#",""dormerRoofPitch"":30"#)["roof_pitch"], 30.0);
     }
 
     /// A roof room with heated slopes south and north (y extents) and a flat plane, drawn with

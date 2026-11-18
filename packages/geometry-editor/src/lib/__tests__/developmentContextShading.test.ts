@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import type { Element, Zone } from '../../geometry/types';
+import { CONTEXT_SHADING_DEFAULT_CENTRE } from '../contextShadingGeometry';
+import type { ContextShading, Element, Zone } from '../../geometry/types';
 import {
   DEVELOPMENT_CONTEXT_SHADING_META_KEY,
   isDevelopmentContextGeneratedShading,
@@ -149,7 +150,7 @@ describe('developmentContextShading', () => {
     expect(first.generatedCount).toBe(1);
     const generated = Object.values(first.elementsById).find((element) => element.type === 'ContextShading') as any;
     expect(generated).toBeDefined();
-    expect(generated.parent_element).toBe('Active Ground');
+    expect(generated.parent_element).toBe(CONTEXT_SHADING_DEFAULT_CENTRE);
     expect(generated.distance).toBe(4);
     expect(generated.height).toBe(2.7);
     expect(generated.extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceStem).toBe('plot-b');
@@ -363,7 +364,7 @@ describe('developmentContextShading', () => {
     expect(sharedContext).toBeDefined();
     expect(sharedContext.name).toBe('Project context - plot-b - Tree belt');
     expect(sharedContext.shading_type).toBe('overhang');
-    expect(sharedContext.parent_element).toBe('Active Ground');
+    expect(sharedContext.parent_element).toBe(CONTEXT_SHADING_DEFAULT_CENTRE);
     expect(sharedContext.height).toBe(6.5);
     expect(sharedContext.distance).toBe(16);
     expect(sharedContext.start_angle).not.toBe(0);
@@ -534,5 +535,50 @@ describe('developmentContextShading', () => {
     expect(result.generatedCount).toBe(1);
     expect(generated).toHaveLength(1);
     expect(generated[0].extra_json?.[DEVELOPMENT_CONTEXT_SHADING_META_KEY]?.sourceKind).toBe('model_footprint');
+  });
+
+  it('leaves out the parts of a shared object that touch the dwelling and keeps the rest', () => {
+    const activeGround = ground('active-ground', 'Active Ground', 0, 0, 4, 4);
+    // An L: its east arm stands against the dwelling's east wall (0 m), its north arm 1 m off the north wall.
+    const block = {
+      ...contextShading('source-l', 'L block', 0, 0, 1, 1),
+      coordinates: [[4, 0], [5, 0], [5, 6], [-2, 6], [-2, 5], [4, 5]].map(([x, y]) => ({ x, y, z: 0 })),
+    } as Element;
+    const sourceElements = [ground('source-ground', 'Source Ground', 20, 0, 24, 4), block];
+    const result = syncDevelopmentContextShadingElements({
+      projectId: 'project',
+      activeStem: 'plot-a',
+      elementsById: { [activeGround.id]: activeGround },
+      elementIds: [activeGround.id],
+      zones: [zone],
+      floors: deriveFloorsFromElements([activeGround]),
+      contextModels: [{ stem: 'plot-b', elements: sourceElements, zones: [zone], floors: deriveFloorsFromElements(sourceElements) }],
+    });
+    const shared = Object.values(result.elementsById).find((element) => element.name.endsWith('L block')) as any;
+    expect(shared).toMatchObject({ start_angle: 307, end_angle: 34, distance: 1 });
+    expect(shared.parts).toBeUndefined();
+  });
+
+  it('gives a shared line that crosses the dwelling no distance above 0', () => {
+    // A line has no area, so the footprint overlap check passes it; it runs from inside the house across the north wall.
+    const activeGround = { ...ground('active-ground', 'Active Ground', 0, 0, 8, 6), thickness_walls: 0.3 } as Element;
+    const line = {
+      ...contextShading('source-line', 'Fence', 0, 0, 1, 1),
+      coordinates: [[2, 5], [2, 9]].map(([x, y]) => ({ x, y, z: 0 })),
+    } as Element;
+    const sourceElements = [ground('source-ground', 'Source Ground', 20, 0, 24, 4), line];
+    const result = syncDevelopmentContextShadingElements({
+      projectId: 'project',
+      activeStem: 'plot-a',
+      elementsById: { [activeGround.id]: activeGround },
+      elementIds: [activeGround.id],
+      zones: [zone],
+      floors: deriveFloorsFromElements([activeGround]),
+      contextModels: [{ stem: 'plot-b', elements: sourceElements, zones: [zone], floors: deriveFloorsFromElements(sourceElements) }],
+    });
+    // Nothing above 0 is left, so the line is not copied.
+    const shared = Object.values(result.elementsById).filter((element) => element.name.endsWith('Fence')) as ContextShading[];
+    expect(shared.flatMap((element) => [element.distance, ...(element.parts ?? []).map((part) => part.distance)])
+      .filter((distance) => distance > 0)).toEqual([]);
   });
 });

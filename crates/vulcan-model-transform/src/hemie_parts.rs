@@ -205,6 +205,8 @@ pub(super) fn party_ceiling_roof(ctx: &mut Ctx, ceilings: &[&El], planes: &[&El]
 }
 
 pub(super) struct PartFloor<'p> {
+    /// The part's index, which its floor elements join (`Ctx::part_member`).
+    pub index: usize,
     pub name: &'p str,
     pub bottom: usize,
     /// The drawn floor of the part's lowest storey.
@@ -235,6 +237,9 @@ pub(super) fn part_floor<'e>(
         })
         .collect();
     used.extend(under.iter().map(|e| e.name));
+    for e in &under {
+        ctx.part_member(part.index, e.path());
+    }
     let name = part.name;
     let e = match under.as_slice() {
         [e] => *e,
@@ -830,5 +835,65 @@ Basement floor,Z,BuildingElementGround,48,,,,,Heated_basement,2.5,,,,"0.000,0.00
         assert!(messages
             .iter()
             .any(|m| m.contains("has no roof or party ceiling drawn over it")));
+    }
+
+    /// The editor's "Select this part" selects each part's elements as the converter gives them.
+    #[test]
+    fn each_part_lists_its_walls_floor_roof_and_openings() {
+        let parts = run_parts(include_str!("../tests/fixtures/hemie_rear_extension.csv"));
+        let names = |list: &[&str]| list.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            parts,
+            vec![
+                (
+                    "Main".to_string(),
+                    names(&[
+                        "Front",
+                        "Main E",
+                        "Main N",
+                        "Main S",
+                        "Main W",
+                        "Main floor",
+                        "Roof N",
+                        "Roof S",
+                        "Up E",
+                        "Up N",
+                        "Up S",
+                        "Up W"
+                    ])
+                ),
+                (
+                    "Extension 1".to_string(),
+                    names(&[
+                        "Ext E",
+                        "Ext N",
+                        "Ext W",
+                        "Ext floor",
+                        "Ext roof",
+                        "Ext window"
+                    ])
+                ),
+            ]
+        );
+    }
+
+    /// A later stop leaves the parts found, so the editor still offers them.
+    #[test]
+    fn the_parts_survive_a_later_error() {
+        let text = include_str!("../tests/fixtures/hemie_rear_extension.csv").replacen(
+            "Metadata,,\n",
+            "Metadata,,\nGlobalOrientationOffset,north\n",
+            1,
+        );
+        let (_, errors, _) = run(&text);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.path == "/Metadata/GlobalOrientationOffset"),
+            "{errors:#?}"
+        );
+        let parts = run_parts(&text);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[1].1.contains(&"Ext window".to_string()), "{parts:#?}");
     }
 }

@@ -130,6 +130,7 @@ import {
 } from '../lib/parentControlledFloor';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { inferThermalMethod, thermalMethodElementType, thermalMethods, thermalMethodSwitchPatch, type ThermalMethod } from '../lib/thermalMethod';
+import { assemblyPitchDegForElement, inferOpaqueSubtype } from '../lib/multiSelectAssemblyApply';
 import { ThermalMethodControl } from './ThermalMethodControl';
 import { UndoToast } from './UndoToast';
 import { changeWithUndo } from '../lib/undoToast';
@@ -382,59 +383,6 @@ const EDITOR_FIELD_ACTION_FIELD_STYLE: React.CSSProperties = {
 // MVHR_MANAGER_* styles and LucideSvgIcon moved to MvhrDuctTerminalManager.tsx
 // with the manager cluster itself — see that file's header comment.
 
-function assemblyLayerToken(layer: unknown, library: BundledAssemblyLibrary | null): string {
-  if (!layer || typeof layer !== 'object') return 'layer';
-  const layerRecord = layer as Record<string, unknown>;
-  const kind = layerRecord.kind;
-  if (kind === 'solid') {
-    const materialId = typeof layerRecord.materialId === 'string' ? layerRecord.materialId : '';
-    if (!materialId) return 'solid';
-    const material = library?.materialsById?.get(materialId);
-    return material?.shortName?.trim() || material?.name?.trim() || materialId;
-  }
-  if (kind === 'cavity') {
-    if (layerRecord.ventilation === 'well_ventilated') return 'ventilated cavity';
-    const cavityType = typeof layerRecord.cavityType === 'string' ? layerRecord.cavityType : '';
-    return cavityType ? cavityType.replace(/_/g, ' ') : 'cavity';
-  }
-  return 'layer';
-}
-
-function assemblyDisplayName(
-  envelope: VulcanAssemblyV1Envelope | null | undefined,
-  library: BundledAssemblyLibrary | null,
-): string {
-  const assemblyId = envelope?.assemblyId;
-  if (typeof assemblyId !== 'string' || assemblyId.trim() === '') return 'Applied assembly';
-  const id = assemblyId.trim();
-  if (id !== 'calculator:layered') {
-    const fromLibrary = library?.examples?.find((row) => row.id === id)?.name?.trim();
-    return fromLibrary || id;
-  }
-  const layers = Array.isArray(envelope?.assemblySnapshot?.layers) ? envelope.assemblySnapshot.layers : [];
-  if (layers.length === 0) return 'Layered assembly';
-  const parts = layers.slice(0, 2).map((layer) => assemblyLayerToken(layer, library));
-  const summary = parts.join(' + ');
-  return layers.length > 2 ? `${summary} + ${layers.length - 2} more` : summary;
-}
-
-function assemblyTypeLabelFromMode(mode: unknown): string {
-  switch (mode) {
-    case 'BuildingElementOpaque':
-      return 'Opaque element';
-    case 'BuildingElementGround':
-      return 'Ground floor';
-    case 'BuildingElementAdjacentUnconditionedSpace_Simple':
-      return 'Adjacent unconditioned';
-    case 'BuildingElementAdjacentConditionedSpace':
-      return 'Adjacent conditioned';
-    case 'BuildingElementPartyWall':
-      return 'Party wall';
-    default:
-      return 'Assembly';
-  }
-}
-
 // parseLiveDecimalInput moved to elementForms/formPrimitives.ts (slice-6
 // brief STAGE 6 constants dedup — imported above); see that file's comment.
 
@@ -492,10 +440,10 @@ import { StandardDropdown } from './StandardDropdown';
 import { ElementTypePicker } from './ElementTypePicker';
 import { PresetDropdown } from './PresetDropdown';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
-import { LazyInlineFallback, LazyModalFallback } from './LazyModuleFallback';
-import type { AssemblyElementMode, VulcanAssemblyV1Envelope } from '../lib/assemblyTypes';
-import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
-import type { BundledAssemblyLibrary } from '../lib/assemblyLibrary';
+import { LazyInlineFallback } from './LazyModuleFallback';
+import type { AssemblyElementMode } from '../lib/assemblyTypes';
+import { ASSEMBLY_SET_ASIDE_KEY, parseVulcanAssemblyV1FromExtraJson, setAsideAssemblyEnvelope } from '../lib/assemblyAppliedUi';
+import type { GroundFloorType } from '../lib/groundFloor';
 import { Tooltip } from './Tooltip';
 import { createElementCreatorFieldPresentationResolver } from './elementCreatorFieldPresentation';
 import { onlyHeatingCircuit, syncSpaceHeatSystemZoneNameInExtraJson } from '../lib/spaceHeatSystemSync';
@@ -520,21 +468,11 @@ import type { GeometryCanvasRemoteSelection } from './canvas/RemotePresenceLayer
 import type { Selection } from '../stores/geometryStore/slices/selectionSlice';
 
 const loadAdvancedFieldsEditor = () => import('./AdvancedFieldsEditor');
-const loadAssemblyCalculatorModal = () => import('./AssemblyCalculatorModal');
+const loadAssemblyLayers = () => import('./AssemblyLayers');
 
 const prefetchAdvancedFieldsEditor = () => {
   void loadAdvancedFieldsEditor();
 };
-
-const prefetchAssemblyCalculatorModal = () => {
-  void loadAssemblyCalculatorModal();
-};
-
-const intentPrefetchHandlers = (prefetch: () => void) => ({
-  onPointerEnter: prefetch,
-  onFocus: prefetch,
-  onMouseDown: prefetch,
-});
 
 /** A window's U- and g-value, shown with its other thermal values. */
 const WINDOW_THERMAL_FIELDS = ['u_value', 'g_value'] as const;
@@ -549,9 +487,9 @@ const AdvancedFieldsEditor = React.lazy(async () => {
   return { default: module.AdvancedFieldsEditor };
 });
 
-const AssemblyCalculatorModal = React.lazy(async () => {
-  const module = await loadAssemblyCalculatorModal();
-  return { default: module.AssemblyCalculatorModal };
+const AssemblyLayers = React.lazy(async () => {
+  const module = await loadAssemblyLayers();
+  return { default: module.AssemblyLayers };
 });
 
 // PendingSystemAction moved to elementForms/system.tsx with the rest of
@@ -907,6 +845,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const { hemDatabaseProducts, constructionBands, zoneAreaSplit } = targetRulesNow;
   const wholeBasement = groundUWholeBasement(targetRulesNow);
   const existingBuilding = useGeometryStore(isExistingBuilding);
+  const setBundledAssemblyLibrary = useGeometryStore((s) => s.setBundledAssemblyLibrary);
   // On a target whose systems take HEM Database products, the product slot picker is the only
   // product source: the host's sample/catalogue source switch does not apply.
   const productCatalogue = hemDatabaseProducts ? null : inspectorContributions.productCatalogue;
@@ -920,13 +859,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   }, []);
 
   // Geometry store: data via shallow selector, stable function refs individually
-  const { zones, elementsById, elementIds, floors, bundledAssemblyLibrary } = useGeometryStore(
+  const { zones, elementsById, elementIds, floors } = useGeometryStore(
     useShallow((s) => ({
       zones: s.zones,
       elementsById: s.elementsById,
       elementIds: s.elementIds,
       floors: s.floors,
-      bundledAssemblyLibrary: s.bundledAssemblyLibrary,
     }))
   );
   const addZone = useGeometryStore((s) => s.addZone);
@@ -1474,11 +1412,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // buildingElementOpaqueFormState.isExternalDoor directly (same
   // "read the module's own useFormState return value directly" precedent
   // documented in buildingElementGround.tsx's header).
-  const [assemblyCalculatorOpen, setAssemblyCalculatorOpen] = useState(false);
-  // "Change assembly" opens the calculator at its library list; "Edit layers" at the layers.
-  const [assemblyFromLibrary, setAssemblyFromLibrary] = useState(false);
-  /** When set, assembly modal edits this dormer thermal part (see `assemblyInitialSnapshot` after dormer helpers). */
-  const [dormerAssemblySection, setDormerAssemblySection] = useState<DormerThermalSectionKey | null>(null);
+  /** A junction's host element to open on its layers, once it is selected. */
+  const [layersRequestedFor, setLayersRequestedFor] = useState<string | null>(null);
   // selectedParentElementValue/parentElement/setParentElement now live in
   // elementForms/wallShared.tsx (wallShared.parentElement/setParentElement).
   // selectedDormerType/dormerDepth/dormerRoofIsUnheatedPitchedRoof moved to
@@ -1517,23 +1452,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       if (!el || (el.type !== 'BuildingElementOpaque' && el.type !== 'BuildingElementGround')) {
         return;
       }
-      setDormerAssemblySection(null);
       const selectionType = isGlobalObject(el) ? ('global' as const) : ('element' as const);
       setSelection({ type: selectionType, id: action.elementId });
       setSelectedElementIds([action.elementId]);
-      if (action.kind === 'assembly_calculator') {
-        setAssemblyCalculatorOpen(false);
-        requestAnimationFrame(() => {
-          setAssemblyCalculatorOpen(true);
-        });
-      } else {
-        setAssemblyCalculatorOpen(false);
-      }
+      setLayersRequestedFor(action.kind === 'assembly_calculator' ? action.elementId : null);
     },
     [
       elementsById,
-      setAssemblyCalculatorOpen,
-      setDormerAssemblySection,
       setSelection,
       setSelectedElementIds,
     ],
@@ -1625,7 +1550,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // by the module's own renderPanel.
   const [spaceHeatSystem, setSpaceHeatSystem] = useState<string>('');
   const spaceHeatSystemOptions = useMemo(() => {
-    const options = [{ value: '', label: 'Select a SpaceHeatSystem' }];
+    const options = [{ value: '', label: 'Select a heating system' }];
     for (const element of allElements) {
       if (
         element.type === 'System'
@@ -1639,7 +1564,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     if (spaceHeatSystem && !options.some((option) => option.value === spaceHeatSystem)) {
       options.push({ value: spaceHeatSystem, label: `${spaceHeatSystem} (missing)` });
     }
-    options.push({ value: CREATE_SPACE_HEAT_SYSTEM_OPTION, label: 'Create new SpaceHeatSystem...' });
+    options.push({ value: CREATE_SPACE_HEAT_SYSTEM_OPTION, label: 'Create a heating system…' });
     return options;
   }, [allElements, spaceHeatSystem]);
   const selectedSpaceHeatSystemForEmitter = useMemo(() => {
@@ -3164,7 +3089,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     ? thermalMethods(thermalElement.type, constructionBands,
       (thermalGroundU != null && thermalGroundU > 0) || !!parseVulcanAssemblyV1FromExtraJson(thermalElement.extra_json))
     : [];
-  const [thermalMethodChosen, setThermalMethodChosen] = useKeyedState<ThermalMethod | null>(thermalElement?.id ?? '', null);
+  // A junction that needs its host's layers selects the host on Layers.
+  const [thermalMethodChosen, setThermalMethodChosen] = useKeyedState<ThermalMethod | null>(thermalElement?.id ?? '',
+    thermalElement && thermalElement.id === layersRequestedFor ? 'calculation' : null);
   const thermalMethod: ThermalMethod | undefined = !thermalElement ? undefined
     : thermalMethodChosen && thermalMethodOptions.some((option) => option.value === thermalMethodChosen)
       ? thermalMethodChosen
@@ -3176,6 +3103,27 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // A roof plane that shares its construction with others: their stated values must match.
   const sharedRoof = useMemo(() => (constructionBands && thermalElement ? sharedRoofPlanes(thermalElement, allElements, buildType) : []),
     [constructionBands, thermalElement, allElements, buildType]);
+  // The building part the target's conversion gives the element, on a drawing of more than one:
+  // its elements' ids, from their paths. None before a check, on another target, or when the
+  // conversion stops before it finds the parts.
+  const buildingParts = useGeometryStore((s) => s.targetValidation?.buildingParts);
+  const setHoveredElementIds = useGeometryStore((s) => s.setHoveredElementIds);
+  const thermalPart = useMemo(() => {
+    if (!thermalElement || !buildingParts || buildingParts.length < 2) return null;
+    const model = { zones, elements: allElements };
+    const idOf = (path: string) => resolveIssueTarget(path, model).elementId;
+    // An element listed by two parts (a ground floor under both, a party wall along both) is in
+    // neither part's selection, so setting one part's age band never re-bands the other's.
+    const counts = new Map<string, number>();
+    for (const part of buildingParts) {
+      for (const id of new Set(part.elements.flatMap((path) => idOf(path) ?? []))) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    const own = (path: string) => { const id = idOf(path); return id && counts.get(id) === 1 ? [id] : []; };
+    const part = buildingParts.find((candidate) => candidate.elements.some((path) => own(path)[0] === thermalElement.id));
+    return part ? part.elements.flatMap(own) : null;
+  }, [thermalElement, buildingParts, zones, allElements]);
+  // A hover highlight never outlives the link.
+  useEffect(() => () => setHoveredElementIds([]), [thermalPart, setHoveredElementIds]);
   const switchThermalMethod = (to: ThermalMethod) => {
     if (!thermalElement || !thermalMethod || to === thermalMethod) return;
     setThermalMethodChosen(to);
@@ -3306,6 +3254,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       currentOverride,
       representative?.extra_json as Record<string, unknown> | undefined,
       updatedData.extra_json,
+      targetRulesNow.arealHeatCapacity,
     );
     if (areDormerThermalOverridesEqual(currentOverride, nextOverride)) {
       return;
@@ -3321,184 +3270,83 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     } catch { /* swallow: best-effort */ }
   };
 
-  const dormerAssemblyRepresentative = useMemo((): Element | null => {
-    if (!dormerAssemblySection) return null;
-    switch (dormerAssemblySection) {
-      case 'front_wall':
-        return dormerThermalRepresentatives.frontWall;
-      case 'cheek_walls':
-        return dormerThermalRepresentatives.cheekWalls;
-      case 'roofs':
-        return dormerThermalRepresentatives.roofs;
-      case 'window':
-        return dormerThermalRepresentatives.window;
-      default:
-        return null;
-    }
-  }, [dormerAssemblySection, dormerThermalRepresentatives]);
+  /**
+   * An element's layers, inline under its thermal fields: each edit applies at once, with undo.
+   * Layers a typed U-value set aside take the edit and stay aside (`ASSEMBLY_SET_ASIDE_KEY`).
+   */
+  const renderAssemblyLayers = (target: {
+    element: Element;
+    extra: unknown;
+    pitchDeg: number;
+    subtype: 'wall' | 'roof';
+    groundFloorType?: GroundFloorType;
+    apply: (patch: Record<string, unknown>, setAsideOnly: boolean) => void;
+  }) => {
+    const envelope = parseVulcanAssemblyV1FromExtraJson(target.extra);
+    const setAside = envelope ? null : setAsideAssemblyEnvelope(target.extra);
+    return (
+      <React.Suspense fallback={<LazyInlineFallback label="Opening layers..." />}>
+        <AssemblyLayers
+          key={target.element.id}
+          elementMode={target.element.type as AssemblyElementMode}
+          elementPitchDeg={target.pitchDeg}
+          appliedEnvelope={envelope ?? setAside}
+          opaqueSubtype={target.subtype}
+          groundFloorType={target.element.type === 'BuildingElementGround' ? target.groundFloorType : undefined}
+          workspaceResourcePort={workspaceResourcePort}
+          externalDetailCataloguePort={externalDetailCataloguePort}
+          onLibrarySaved={setBundledAssemblyLibrary}
+          onApply={(patch) => target.apply(setAside ? { [ASSEMBLY_SET_ASIDE_KEY]: patch.vulcan_assembly_v1 } : patch, !!setAside)}
+        />
+      </React.Suspense>
+    );
+  };
 
-  const assemblyInitialSnapshot = useMemo((): VulcanAssemblyV1Envelope['assemblySnapshot'] | null => {
-    void selectedElementV;
-    if (selection?.type !== 'element') return null;
-    if (selectedIsDormerAnchor && dormerAssemblySection && dormerAssemblyRepresentative && selectedDormerMetadata) {
-      const metadataOverride = selectedDormerMetadata.thermal_overrides[dormerAssemblySection];
-      const fallbackOverride = getDormerThermalOverrideExtraJson(
-        dormerAssemblyRepresentative.extra_json as Record<string, unknown> | undefined,
-      );
-      const ex = metadataOverride ?? fallbackOverride ?? {};
-      const v = (ex as Record<string, unknown>).vulcan_assembly_v1;
-      if (!v || typeof v !== 'object' || v === null) return null;
-      const snap = (v as { assemblySnapshot?: unknown }).assemblySnapshot;
-      if (!snap || typeof snap !== 'object') return null;
-      const layers = (snap as { layers?: unknown }).layers;
-      if (!Array.isArray(layers) || layers.length === 0) return null;
-      return snap as VulcanAssemblyV1Envelope['assemblySnapshot'];
-    }
+  /** The selected element's own layers: a ground floor's U-value follows its build-up's resistance. */
+  const applySelectedElementLayers = (patch: Record<string, unknown>, setAsideOnly: boolean) => {
+    if (selection?.type !== 'element') return;
     const el = getElementById(selection.id);
-    const ex = el?.extra_json;
-    if (!ex || typeof ex !== 'object' || Array.isArray(ex)) return null;
-    const v = (ex as Record<string, unknown>).vulcan_assembly_v1;
-    if (!v || typeof v !== 'object' || v === null) return null;
-    const snap = (v as { assemblySnapshot?: unknown }).assemblySnapshot;
-    if (!snap || typeof snap !== 'object') return null;
-    const layers = (snap as { layers?: unknown }).layers;
-    if (!Array.isArray(layers) || layers.length === 0) return null;
-    return snap as VulcanAssemblyV1Envelope['assemblySnapshot'];
-  }, [
-    selection,
-    selectedElementV,
-    getElementById,
-    selectedIsDormerAnchor,
-    dormerAssemblySection,
-    dormerAssemblyRepresentative,
-    selectedDormerMetadata,
-  ]);
-
-  const appliedAssemblyEnvelope = useMemo(() => {
-    void selectedElementV;
-    if (selection?.type !== 'element') return null;
-    if (selectedIsDormerAnchor && dormerAssemblySection && dormerAssemblyRepresentative && selectedDormerMetadata) {
-      const metadataOverride = selectedDormerMetadata.thermal_overrides[dormerAssemblySection];
-      const fallbackOverride = getDormerThermalOverrideExtraJson(
-        dormerAssemblyRepresentative.extra_json as Record<string, unknown> | undefined,
-      );
-      const ex = metadataOverride ?? fallbackOverride ?? {};
-      return parseVulcanAssemblyV1FromExtraJson(ex);
-    }
-    const el = getElementById(selection.id);
-    return parseVulcanAssemblyV1FromExtraJson(el?.extra_json);
-  }, [
-    selection,
-    selectedElementV,
-    getElementById,
-    selectedIsDormerAnchor,
-    dormerAssemblySection,
-    dormerAssemblyRepresentative,
-    selectedDormerMetadata,
-  ]);
-
-  const renderAssemblyActionControl = useCallback(
-    (
-      envelope: VulcanAssemblyV1Envelope | null | undefined,
-      onEdit: () => void,
-    ): React.ReactNode => {
-      if (!envelope) {
-        return (
-          <button
-            type="button"
-            className="btn editor-action-btn editor-action-btn--secondary"
-            {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
-            onClick={() => {
-              prefetchAssemblyCalculatorModal();
-              onEdit();
-            }}
-          >
-            Assembly calculator
-          </button>
-        );
+    const nextExtra = { ...readExtraJsonRecord(el?.extra_json), ...patch };
+    if (!setAsideOnly && el?.type === 'BuildingElementGround' && !constructionBands) {
+      // The converter works the U-value out from the build-up's resistance and the drawing.
+      delete nextExtra.u_value;
+      delete nextExtra[GROUND_U_VALUE_MANUAL_KEY];
+    } else if (!setAsideOnly && el?.type === 'BuildingElementGround') {
+      const depthBasementFloor = readFiniteNumber(el.depth_basement_floor);
+      const thicknessWalls =
+        typeof buildingElementGroundFormState.thicknessWallsInput.value === 'number' && Number.isFinite(buildingElementGroundFormState.thicknessWallsInput.value)
+          ? buildingElementGroundFormState.thicknessWallsInput.value
+          : readFiniteNumber(el.thickness_walls);
+      const floorTypeForApply = el.floor_type ?? buildingElementGroundFormState.floorType ?? undefined;
+      const needsBasementDepth =
+        floorTypeForApply === 'Heated_basement' || floorTypeForApply === 'Unheated_basement';
+      const uComputed = computeGroundUValueFromElementModel(el, nextExtra, floorTypeForApply, {
+        wholeBasement,
+        totalArea: buildingElementGroundFormState.groundTotalAreaManual
+          ? readFiniteNumber(buildingElementGroundFormState.totalAreaInput.value)
+            ?? buildingElementGroundFormState.autoDerivedTotalArea
+          : buildingElementGroundFormState.autoDerivedTotalArea,
+        perimeter: buildingElementGroundFormState.derivedGroundPerimeter,
+        ...(thicknessWalls != null ? { thicknessWalls } : {}),
+        ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
+      });
+      if (uComputed != null && Number.isFinite(uComputed) && uComputed > 0) {
+        // With construction bands the build-up states the U-value: it replaces the age band.
+        nextExtra.u_value = Number(uComputed.toFixed(4));
+        nextExtra[GROUND_U_VALUE_MANUAL_KEY] = true;
       }
-
-      const assemblyName = assemblyDisplayName(envelope, bundledAssemblyLibrary);
-      const assemblyType = assemblyTypeLabelFromMode(envelope.assemblySnapshot?.elementMode);
-      const compactLabel = `${assemblyName} · ${assemblyType}`;
-      // The U-value the layers give, as a fact; a ground floor's U is its floor calculation's, not the layers'.
-      const u = envelope.correctedU_W_m2K;
-      const showsU = envelope.assemblySnapshot?.elementMode !== 'BuildingElementGround';
-      const open = (fromLibrary: boolean) => {
-        prefetchAssemblyCalculatorModal();
-        setAssemblyFromLibrary(fromLibrary);
-        onEdit();
-      };
-      return (
-        <div
-          className="assembly-action-control"
-          title={compactLabel}
-        >
-          <div className="assembly-action-control__body">
-            <div className="assembly-action-control__eyebrow">
-              {assemblyType}
-            </div>
-            <div className="assembly-action-control__name">
-              {assemblyName}
-            </div>
-            {showsU && (
-              <div className="assembly-action-control__fact">
-                <span>U-value</span>
-                <span>{Number.isFinite(u) && u > 0 ? `${formatToTwoDecimals(u)} W/m²K` : 'Calculation incomplete'}</span>
-              </div>
-            )}
-          </div>
-          <div className="assembly-action-control__actions">
-            <button
-              type="button"
-              className="btn editor-action-btn editor-action-btn--secondary"
-              {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
-              onClick={() => open(false)}
-            >
-              Edit layers
-            </button>
-            <button
-              type="button"
-              className="btn editor-action-btn editor-action-btn--secondary"
-              {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
-              onClick={() => open(true)}
-            >
-              Change assembly
-            </button>
-          </div>
-        </div>
-      );
-    },
-    [bundledAssemblyLibrary, setAssemblyFromLibrary],
-  );
-
-  const assemblyModalElementMode: AssemblyElementMode = (() => {
-    if (selectedIsDormerAnchor && dormerAssemblyRepresentative) {
-      return dormerAssemblyRepresentative.type as AssemblyElementMode;
     }
-    return elementType as AssemblyElementMode;
-  })();
+    updateElement(selection.id, { extra_json: nextExtra });
+  };
 
-  const assemblyModalPitchDeg = (() => {
-    if (selectedIsDormerAnchor && dormerAssemblyRepresentative) {
-      if (dormerAssemblyRepresentative.type === 'BuildingElementGround') return 180;
-      const rep = dormerAssemblyRepresentative as Element & { pitch?: number };
-      const p = rep.pitch;
-      return typeof p === 'number' && Number.isFinite(p) ? p : 90;
-    }
-    return elementType === 'BuildingElementGround' ? 180 : wallShared.pitch;
-  })();
-
-  const assemblyModalGroundFloorType = (() => {
-    if (assemblyModalElementMode !== 'BuildingElementGround') return undefined;
-    if (selectedIsDormerAnchor && dormerAssemblyRepresentative?.type === 'BuildingElementGround') {
-      const ft = (dormerAssemblyRepresentative as { floor_type?: typeof buildingElementGroundFormState.floorType }).floor_type;
-      return ft || buildingElementGroundFormState.floorType || undefined;
-    }
-    if (elementType === 'BuildingElementGround') return buildingElementGroundFormState.floorType || undefined;
-    return undefined;
-  })();
-
+  const selectedElementLayers = () => selectedElement ? renderAssemblyLayers({
+    element: selectedElement,
+    extra: selectedElement.extra_json,
+    pitchDeg: elementType === 'BuildingElementGround' ? 180 : wallShared.pitch,
+    subtype: inferOpaqueSubtype(selectedElement),
+    groundFloorType: buildingElementGroundFormState.floorType || undefined,
+    apply: applySelectedElementLayers,
+  }) : null;
 
   const selectedShape = useMemo(() => {
     return selectedElement ? getElementShape(selectedElement) : null;
@@ -3725,13 +3573,18 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 element.type === 'BuildingElementGround' ||
                 ADJACENT_LIKE_ELEMENT_TYPES.includes(element.type)) && (
               <div className="dormer-editor-section__action">
-                {renderAssemblyActionControl(
-                  parseVulcanAssemblyV1FromExtraJson(currentData.extra_json),
-                  () => {
-                    setDormerAssemblySection(sectionKey);
-                    setAssemblyCalculatorOpen(true);
+                {renderAssemblyLayers({
+                  element,
+                  extra: currentData.extra_json,
+                  pitchDeg: assemblyPitchDegForElement(element),
+                  subtype: sectionKey === 'roofs' ? 'roof' : 'wall',
+                  groundFloorType: (element as { floor_type?: GroundFloorType }).floor_type || buildingElementGroundFormState.floorType || undefined,
+                  apply: (patch) => {
+                    const prev = selectedDormerMetadata?.thermal_overrides[sectionKey]
+                      ?? getDormerThermalOverrideExtraJson(element.extra_json as Record<string, unknown> | undefined) ?? {};
+                    commitDormerThermalSectionChanges(sectionKey, { type: element.type, extra_json: { ...prev, ...patch } }, element);
                   },
-                )}
+                })}
               </div>
             )}
           {sectionKey === 'window' && element?.type === 'BuildingElementTransparent' && (
@@ -3991,7 +3844,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
 
   // Host fields for the selected element (EPC: age band and construction); under a thermal
   // method they show only what that method uses.
-  const renderHostElementFields = (method?: ThermalMethod, section?: 'more') => (
+  const renderHostElementFields = (method?: ThermalMethod, section?: 'more', ageBandNote?: React.ReactNode) => (
     selection?.type === 'element' &&
     selectedElement &&
     ElementFieldsRenderer &&
@@ -4001,6 +3854,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           element={selectedElement as unknown as Readonly<Record<string, unknown>>}
           thermalMethod={method}
           section={section}
+          ageBandNote={ageBandNote}
           onPatchExtraJson={(update) => {
             const currentElement = getElementById(selection.id);
             const currentExtra = readExtraJsonRecord(currentElement?.extra_json);
@@ -4023,8 +3877,15 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       </button>
     </div>
   ) : null;
-  const hostElementFieldsForMethod = thermalMethod ? renderHostElementFields(thermalMethod) : null;
-  const hostElementFieldsPlain = thermalMethod ? null : renderHostElementFields();
+  const selectPartLink = thermalPart ? (
+    <div className="field-source-note" data-select-part>
+      <button type="button" className="field-source-note__link" style={{ color: 'var(--accent-primary)' }} onClick={() => { setHoveredElementIds([]); setSelectedElementIds(thermalPart); }}
+        onMouseEnter={() => setHoveredElementIds(thermalPart)} onMouseLeave={() => setHoveredElementIds([])}
+        onFocus={() => setHoveredElementIds(thermalPart)} onBlur={() => setHoveredElementIds([])}>Select this part</button>
+    </div>
+  ) : null;
+  const hostElementFieldsForMethod = thermalMethod ? renderHostElementFields(thermalMethod, undefined, selectPartLink) : null;
+  const hostElementFieldsPlain = thermalMethod ? null : renderHostElementFields(undefined, undefined, selectPartLink);
   // Under More: the details and outside surface, open when the element states one. Under a
   // U-value or calculation the details do not apply (`bandOnlyFields`); a roof shows the beams
   // its insulation location reads. Nothing to show, no More.
@@ -4146,6 +4007,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       registerBaseFieldRefs,
       registerBaseFieldRef,
       getFieldValidationIssue,
+      getFieldValidationState,
       comparisonFieldIndicators,
       globalComparisonFieldIndicators,
       commitExistingElementDraft,
@@ -5206,10 +5068,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       selectedShape === 'polygon' && (
                       <div className="element-editor-stack element-editor-section-spacer">
                         <div>
-                          {renderAssemblyActionControl(appliedAssemblyEnvelope, () => {
-                            setDormerAssemblySection(null);
-                            setAssemblyCalculatorOpen(true);
-                          })}
+                          {selectedElementLayers()}
                         </div>
                         <label
                           className="element-editor-checkbox-row"
@@ -5251,10 +5110,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       !selectedIsDormerAnchor &&
                       thermalMethod === 'calculation' && (
                       <div className="element-editor-section-spacer">
-                        {renderAssemblyActionControl(appliedAssemblyEnvelope, () => {
-                          setDormerAssemblySection(null);
-                          setAssemblyCalculatorOpen(true);
-                        })}
+                        {selectedElementLayers()}
                       </div>
                     )}
                     {selectedIsDormerAnchor ? (
@@ -5395,95 +5251,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               )}
             </div>
           </div>
-        )}
-      {assemblyCalculatorOpen &&
-        selection.type === 'element' &&
-        ((!selectedIsDormerAnchor &&
-          (elementType === 'BuildingElementOpaque' ||
-            elementType === 'BuildingElementGround' ||
-            ADJACENT_LIKE_ELEMENT_TYPES.includes(elementType))) ||
-          (selectedIsDormerAnchor &&
-            dormerAssemblySection &&
-            dormerAssemblyRepresentative &&
-            dormerAssemblyRepresentative.type !== 'BuildingElementTransparent')) && (
-          <React.Suspense fallback={<LazyModalFallback label="Opening assembly calculator..." />}>
-            <AssemblyCalculatorModal
-              isOpen={assemblyCalculatorOpen}
-              onClose={() => {
-                setAssemblyCalculatorOpen(false);
-                setAssemblyFromLibrary(false);
-                setDormerAssemblySection(null);
-              }}
-              elementMode={assemblyModalElementMode}
-              elementPitchDeg={assemblyModalPitchDeg}
-              initialAssemblySnapshot={assemblyInitialSnapshot}
-              appliedEnvelope={appliedAssemblyEnvelope}
-              openLibrary={assemblyFromLibrary}
-              initialOpaqueSubtype={
-                selectedIsDormerAnchor && dormerAssemblySection
-                  ? dormerAssemblySection === 'roofs'
-                    ? 'roof'
-                    : 'wall'
-                  : null
-              }
-              groundFloorType={assemblyModalGroundFloorType}
-              workspaceResourcePort={workspaceResourcePort}
-              externalDetailCataloguePort={externalDetailCataloguePort}
-              onApply={(patch) => {
-                if (selection.type !== 'element') return;
-                if (selectedIsDormerAnchor && dormerAssemblySection && dormerAssemblyRepresentative) {
-                  const metadataOverride = selectedDormerMetadata?.thermal_overrides[dormerAssemblySection];
-                  const fallbackOverride = getDormerThermalOverrideExtraJson(
-                    dormerAssemblyRepresentative.extra_json as Record<string, unknown> | undefined,
-                  );
-                  const prev = { ...(metadataOverride ?? fallbackOverride ?? {}) } as Record<string, unknown>;
-                  commitDormerThermalSectionChanges(dormerAssemblySection, {
-                    type: dormerAssemblyRepresentative.type,
-                    extra_json: { ...prev, ...patch },
-                  }, dormerAssemblyRepresentative);
-                  return;
-                }
-                const el = getElementById(selection.id);
-                const prev =
-                  el?.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
-                    ? (el.extra_json as Record<string, unknown>)
-                    : {};
-                const nextExtra = { ...prev, ...patch };
-                if (el?.type === 'BuildingElementGround' && !constructionBands) {
-                  // The converter works the U-value out from the build-up's resistance and the drawing.
-                  delete nextExtra.u_value;
-                  delete nextExtra[GROUND_U_VALUE_MANUAL_KEY];
-                } else if (el?.type === 'BuildingElementGround') {
-                  const depthBasementFloor = readFiniteNumber(el.depth_basement_floor);
-                  const thicknessWalls =
-                    typeof buildingElementGroundFormState.thicknessWallsInput.value === 'number' && Number.isFinite(buildingElementGroundFormState.thicknessWallsInput.value)
-                      ? buildingElementGroundFormState.thicknessWallsInput.value
-                      : readFiniteNumber(el.thickness_walls);
-                  const floorTypeForApply = el.floor_type ?? assemblyModalGroundFloorType ?? undefined;
-                  const needsBasementDepth =
-                    floorTypeForApply === 'Heated_basement' || floorTypeForApply === 'Unheated_basement';
-                  const uComputed = computeGroundUValueFromElementModel(el, nextExtra, floorTypeForApply, {
-                    wholeBasement,
-                    totalArea: buildingElementGroundFormState.groundTotalAreaManual
-                      ? readFiniteNumber(buildingElementGroundFormState.totalAreaInput.value)
-                        ?? buildingElementGroundFormState.autoDerivedTotalArea
-                      : buildingElementGroundFormState.autoDerivedTotalArea,
-                    perimeter: buildingElementGroundFormState.derivedGroundPerimeter,
-                    ...(thicknessWalls != null ? { thicknessWalls } : {}),
-                    ...(needsBasementDepth && depthBasementFloor != null ? { depthBasementFloorM: depthBasementFloor } : {}),
-                  });
-                  if (uComputed != null && Number.isFinite(uComputed) && uComputed > 0) {
-                    // With construction bands the build-up states the U-value: it replaces the age band.
-                    nextExtra.u_value = Number(uComputed.toFixed(4));
-                    nextExtra[GROUND_U_VALUE_MANUAL_KEY] = true;
-                  }
-                }
-                updateElement(selection.id, {
-                  extra_json: nextExtra,
-                });
-              }}
-            />
-          </React.Suspense>
         )}
       {/* pendingSystemAction lives in elementForms/system.tsx's module state now
           (slice-5 brief item 8) — this modal stays orchestrator-tail-rendered

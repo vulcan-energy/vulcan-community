@@ -12,8 +12,9 @@ const IMMERSION_VALUE = '__dhw_immersion__';
 const HEATER_KINDS: Readonly<Record<string, string>> = { ImmersionHeater: 'Immersion heater', HeatPump_HWOnly: 'Hot-water-only heat pump', HeatSourceWet: 'Coil', SolarThermalSystem: 'Solar thermal' };
 const HWOHP_VALUE = '__dhw_hwonly_heat_pump__';
 
-// FHS states a heater's and its thermostat's positions in the tank. HEM:EPC leaves them blank for
-// the default (DESNZ-defined), shown on the field.
+// FHS states a heater's and its thermostat's positions in the tank. HEM:EPC leaves them blank: the
+// heater position takes its default, shown on the field, and the thermostat position has none, so
+// the converter asks for it on the heater.
 const FHS_POSITIONS = { heater_position: 0.1, thermostat_position: 0.33 };
 
 function defaultImmersionHeater(powerKw: number, epcDefaulted: boolean): Record<string, unknown> {

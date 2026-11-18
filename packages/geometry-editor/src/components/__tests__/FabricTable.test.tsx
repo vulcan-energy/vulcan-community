@@ -1,13 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GeometryWorkspaceResourcePort } from "../../../../geometry-editor-host/src/index";
 import { FabricTable } from "../FabricTable";
 import { FabricTabCloseContext } from "../fabricTabCloseContext";
 import { BUILT_IN_FABRIC_PRESETS, presetValueFor } from "../../lib/fabricPreset";
+import type { BundledAssemblyLibrary } from "../../lib/assemblyLibrary";
+import { computePatchFromSavedAssembly } from "../../lib/multiSelectAssemblyApply";
 import { createGeometryStore, GeometryStoreProvider } from "../../stores/geometryStore";
 
 const FABRIC_FILE = {
@@ -83,7 +85,47 @@ describe("FabricTable", () => {
     expect(cell("Doors U-value").value).toBe("1");
     // The file's two adjacent walls differ: both show.
     expect(cell("Adjacent walls U-value").value).toBe("0.15 / 0.18");
-    expect(within(row("wall")).getByLabelText("External walls build-up")).toBeInTheDocument();
+    expect(within(row("wall")).getByLabelText("Build-up, External walls")).toBeInTheDocument();
+  });
+
+  it("picks a build-up from the library picker, grouped like the element's, with each option's U", async () => {
+    const user = userEvent.setup();
+    const board = { id: "board", name: "Board", shortName: "board", lambda_W_mK: 0.04, density_kg_m3: 500, specific_heat_J_kg_K: 1500 };
+    const sample = { id: "example.wall", name: "Sample wall", elementType: "wall", layers: [{ kind: "solid", materialId: "board", thickness_m: 0.2 }] };
+    const ours = { id: "user:asm:wall", name: "Our wall", elementType: "wall", sourceType: "user", layers: [{ kind: "solid", materialId: "board", thickness_m: 0.1 }] };
+    const roof = { id: "example.roof", name: "Sample roof", elementType: "roof", layers: [{ kind: "solid", materialId: "board", thickness_m: 0.3 }] };
+    const library = {
+      materialsById: new Map([["board", board]]), cavityResistanceByType: new Map(), cavityRows: [],
+      examples: [sample, ours, roof], materialCategories: [],
+    } as unknown as BundledAssemblyLibrary;
+    const { store, row } = setup({});
+    act(() => store.setState({ bundledAssemblyLibrary: library }));
+    await user.click(within(row("wall")).getByRole("button", { name: "Build-up, External walls" }));
+    const listbox = screen.getByRole("listbox");
+    await waitFor(() => expect(listbox.parentElement).toHaveStyle({ pointerEvents: "auto" }));
+    expect(within(listbox).getAllByRole("group").map((group) => group.getAttribute("aria-label"))).toEqual(["Your library", "Sample library · Walls"]);
+    expect(within(listbox).queryByText("Sample roof")).not.toBeInTheDocument();
+    const u = computePatchFromSavedAssembly(sample as never, library, "BuildingElementOpaque", 90)!.preview.u;
+    const option = within(listbox).getByRole("option", { name: /Sample wall/ });
+    expect(within(option).getByText(u.toFixed(2))).toBeInTheDocument();
+    await user.click(option);
+    expect(store.getState().creationDefaultAssemblyIds.wall).toBe("example.wall");
+    expect(within(row("wall")).getByRole("button", { name: "Build-up, External walls" })).toHaveTextContent("Sample wall");
+    await user.click(within(row("wall")).getByRole("button", { name: "Build-up, External walls" }));
+    await waitFor(() => expect(screen.getByRole("listbox").parentElement).toHaveStyle({ pointerEvents: "auto" }));
+    await user.click(screen.getByRole("option", { name: "None" }));
+    expect(store.getState().creationDefaultAssemblyIds.wall).toBeUndefined();
+  });
+
+  it("names a stored build-up the library does not hold as missing, not None", () => {
+    const board = { id: "board", name: "Board", shortName: "board", lambda_W_mK: 0.04, density_kg_m3: 500, specific_heat_J_kg_K: 1500 };
+    const library = { materialsById: new Map([["board", board]]), cavityResistanceByType: new Map(), cavityRows: [], examples: [], materialCategories: [] } as unknown as BundledAssemblyLibrary;
+    const { store, row } = setup({});
+    act(() => store.setState({ bundledAssemblyLibrary: library, creationDefaultAssemblyIds: { wall: "gone.wall" } }));
+    expect(within(row("wall")).getByRole("button", { name: "Build-up, External walls" })).toHaveTextContent("gone.wall (missing from library)");
+    fireEvent.click(within(row("wall")).getByRole("button", { name: "Build-up, External walls" }));
+    fireEvent.click(screen.getByRole("option", { name: "gone.wall (missing from library)" }));
+    expect(store.getState().creationDefaultAssemblyIds.wall).toBe("gone.wall");
   });
 
   it("stores a preset once and leaves the elements as they are, in one undo step", async () => {

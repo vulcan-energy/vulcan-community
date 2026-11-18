@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { getHemieBundle, hemieBundleDeletion } from '../hemieBundles';
+import { getHemieBundle, hemieBundleDeletion, hemieBundleParts } from '../hemieBundles';
 import {
   drawRoofPart,
   fitRoofPart,
@@ -176,5 +176,129 @@ describe('roof part', () => {
     expect((window as { base_height?: number }).base_height).toBeCloseTo(3, 1);
     expect((window as { orientation360?: number }).orientation360).toBe((host as { orientation360?: number }).orientation360);
     expect(Object.values(store.getState().elementsById).some((e) => e.name.startsWith('Hand '))).toBe(false);
+  });
+
+  describe('room in the roof', () => {
+    // Detached, 8 × 5 and square.
+    const detached = () => [wall('Front', [0, 0], [8, 0]), wall('East', [8, 0], [8, 5]), wall('Rear', [8, 5], [0, 5]), wall('Party', [0, 5], [0, 0])];
+    const gables = { East: 'gable', Party: 'gable' } as const;
+    const room = (walls: Element[], p: Partial<RoofParameters>) => {
+      const store = createGeometryStore();
+      store.getState().addElements(walls.map((e) => ({ ...e, id: undefined })) as never);
+      const placed = drawRoofPart(store.getState(), { level: 0, at, use: 'room', ...p } as RoofParameters);
+      if ('problem' in placed) throw new Error(placed.problem);
+      const all = () => Object.values(store.getState().elementsById);
+      const members = () => all().filter((e) => getHemieBundle(e)?.kind === 'roof');
+      const role = (m: Element) => getHemieBundle(m)!.role.split(':')[0];
+      const of = (r: string) => members().filter((m) => role(m) === r);
+      return { store, placed, all, members, of };
+    };
+    const num = (e: Element, key: string) => (e as unknown as Record<string, number>)[key];
+
+    it('set in: pitch from the measurements; room, void and ceiling slopes, sheltered knee walls, gables between them', () => {
+      // w 5, wᵢ 2.8, h_v 2.1, w_c 0.8, h_w 1.1: tan θ = 2(2.1 − 1.1)/(2.8 − 0.8) = 1.
+      // The physical pitch the measurements give, not HEM:EPC's (which adds its 0.25 m floor gap): HEM:EPC accepts this room.
+      const { of, all } = room(detached(), { edges: gables, roomWalls: 'set-in', roomWidth: 2.8, maxCeilingHeight: 2.1, ceilingWidth: 0.8, kneeWallHeight: 1.1 });
+      expect(of('slope').map((m) => num(m, 'pitch'))).toEqual([45, 45]);
+      expect(of('slope').every((m) => (m as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof === false)).toBe(true);
+      expect(of('void')).toHaveLength(2);
+      expect(of('over')).toHaveLength(2);
+      expect([...of('void'), ...of('over')].every((m) => (m as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof)).toBe(true);
+      // The slope rises from the eaves on the walls (1.1 m in, at 45°, it is 1.1 m up).
+      expect(of('void').map((m) => num(m, 'base_height'))).toEqual([2.5, 2.5]);
+      expect(of('slope').map((m) => num(m, 'base_height'))).toEqual([3.6, 3.6]);
+      expect(of('over').map((m) => num(m, 'base_height'))).toEqual([4.6, 4.6]);
+      const knees = of('knee');
+      expect(knees.map((k) => [k.type, num(k, 'height'), num(k, 'base_height'), k.coordinates[0].z])).toEqual([
+        ['BuildingElementAdjacentUnconditionedSpace_Simple', 1.1, 2.5, 1],
+        ['BuildingElementAdjacentUnconditionedSpace_Simple', 1.1, 2.5, 1],
+      ]);
+      const gable = of('gable');
+      expect(gable).toHaveLength(2);
+      // Between the knee walls (2.8 m), up to the flat ceiling at 2.1 m.
+      expect(gable.map((g) => num(g, 'width'))).toEqual([2.8, 2.8]);
+      const profile = (gable[0].extra_json as { geometry_face: { top_profile: Array<{ h: number }> } }).geometry_face.top_profile;
+      expect(Math.max(...profile.map((q) => q.h))).toBeCloseTo(2.1, 6);
+      expect(Math.min(...profile.map((q) => q.h))).toBeCloseTo(1.1, 6);
+      // The room's walls do not change the outline under the roof.
+      expect(storeyOutline(all(), 0, at)!.edges.every((e) => e.fixed === null)).toBe(true);
+    });
+
+    it('set in, the slope meeting the floor short of the storey walls: the eaves stay, and the void runs from them to the knee wall tops', () => {
+      // A 7 m deep semi; wᵢ 4.0, h_v 2.4, h_w 1.0, w_c 1.0: tan θ = 2(1.4)/3, so a slope from the
+      // eaves would pass 0.4 m over the knee wall tops, 1.5 m in.
+      const deep = () => [wall('Front', [0, 0], [8, 0]), wall('East', [8, 0], [8, 7]), wall('Rear', [8, 7], [0, 7]), wall('Party', [0, 7], [0, 0])];
+      const { of } = room(deep(), { at: { x: 4, y: 3.5 }, edges: gables, roomWalls: 'set-in', roomWidth: 4, maxCeilingHeight: 2.4, ceilingWidth: 1, kneeWallHeight: 1 });
+      const pitch = (Math.atan(2.8 / 3) * 180) / Math.PI;
+      expect(of('slope').map((m) => num(m, 'pitch'))).toEqual([pitch, pitch].map((x) => Math.round(x * 100) / 100));
+      // The room's slope from the knee wall tops to the max height; the void from the eaves, at atan(1.0/1.5).
+      expect(of('void').map((m) => [num(m, 'base_height'), num(m, 'pitch')])).toEqual([[2.5, 33.69], [2.5, 33.69]]);
+      expect(of('slope').map((m) => num(m, 'base_height'))).toEqual([3.5, 3.5]);
+      expect(of('over').map((m) => num(m, 'base_height'))).toEqual([4.9, 4.9]);
+      expect(of('knee').map((k) => [num(k, 'height'), k.coordinates[0].y])).toEqual([[1, 1.5], [1, 5.5]]);
+      const profile = (of('gable')[0].extra_json as { geometry_face: { top_profile: Array<{ h: number }> } }).geometry_face.top_profile;
+      expect([Math.min(...profile.map((q) => q.h)), Math.max(...profile.map((q) => q.h))]).toEqual([1, 2.4]);
+    });
+
+    it('common: the storey walls run on up as external knee walls; the eaves rise by the knee height', () => {
+      const { of } = room(detached(), { edges: gables, roomWalls: 'common', maxCeilingHeight: 2.1, kneeWallHeight: 1.1 });
+      // tan θ = 2(2.1 − 1.1)/5.
+      expect(num(of('slope')[0], 'pitch')).toBeCloseTo((Math.atan(0.4) * 180) / Math.PI, 1);
+      expect(of('void')).toHaveLength(0);
+      expect(of('over')).toHaveLength(0);
+      expect(of('slope').map((m) => num(m, 'base_height'))).toEqual([3.6, 3.6]);
+      expect(of('knee').map((k) => [k.type, num(k, 'width')])).toEqual([['BuildingElementOpaque', 8], ['BuildingElementOpaque', 8]]);
+      expect(of('gable').map((g) => num(g, 'width'))).toEqual([5, 5]);
+    });
+
+    it('set in, then common: the knee walls become external walls', () => {
+      const p = { edges: gables, roomWalls: 'set-in' as const, roomWidth: 2.8, maxCeilingHeight: 2.1, kneeWallHeight: 1.1 };
+      const { store, placed, of } = room(detached(), p);
+      drawRoofPart(store.getState(), { level: 0, at, use: 'room', ...p, roomWalls: 'common', roomWidth: undefined }, store.getState().elementsById[placed.anchorId]);
+      expect(of('knee').map((k) => k.type)).toEqual(['BuildingElementOpaque', 'BuildingElementOpaque']);
+    });
+
+    it('a hipped semi: a party gable, a knee wall under the hip, drawn as a loft until the measurements are given', () => {
+      const blank = room(semi(), { roomWalls: 'set-in' });
+      expect(blank.of('knee')).toHaveLength(0);
+      expect(roofBlankNotice('Roof 1', storeyOutline(blank.all(), 0, at)!, roofParameters(blank.store.getState().elementsById[blank.placed.anchorId])!))
+        .toBe('Give Roof 1 a width and a max ceiling height.');
+      const { of } = room(semi(), { roomWalls: 'set-in', roomWidth: 2.8, maxCeilingHeight: 2.1, kneeWallHeight: 1.1 });
+      expect(of('knee')).toHaveLength(3);
+      expect(of('gable').map((g) => g.type)).toEqual(['BuildingElementPartyWall']);
+    });
+
+    it('common walls need a knee wall height: until given, a hipped roof is a loft and the notice names it', () => {
+      const blank = room(detached(), { maxCeilingHeight: 2.1 });
+      expect(blank.of('knee')).toHaveLength(0);
+      expect(blank.of('slope').every((m) => (m as { is_unheated_pitched_roof?: boolean }).is_unheated_pitched_roof)).toBe(true);
+      expect(roofBlankNotice('Roof 1', storeyOutline(blank.all(), 0, at)!, roofParameters(blank.store.getState().elementsById[blank.placed.anchorId])!))
+        .toBe('Give Roof 1 a knee wall height.');
+      // Hipped all round, its knee walls are the room's only walls.
+      const { of } = room(detached(), { maxCeilingHeight: 2.1, kneeWallHeight: 1.1 });
+      expect(of('knee').map((k) => k.type)).toEqual(Array(4).fill('BuildingElementOpaque'));
+      expect(of('gable')).toHaveLength(0);
+      // With no knee walls and no gable the room would have no walls at all.
+      expect(fitRoofPart(storeyOutline(detached(), 0, at)!, { level: 0, at, use: 'room', maxCeilingHeight: 2.1, kneeWallHeight: 0 }))
+        .toEqual({ problem: 'A room under a hipped roof needs knee walls: give a knee wall height above 0.' });
+    });
+
+    it('a party and an external gable in one row are not Mixed', () => {
+      const { members } = room(semi(), { edges: { East: 'gable' }, maxCeilingHeight: 2.1, kneeWallHeight: 1.1 });
+      const gableRow = hemieBundleParts(members()).find((part) => part.label === '2 gables')!;
+      expect(gableRow.mixed).toBe(false);
+    });
+
+    it('measurements that do not fit are a problem, and draw nothing', () => {
+      const outline = storeyOutline(detached(), 0, at)!;
+      // No knee wall, and the slope reaches the floor short of the storey walls: the void would be flat.
+      const p: RoofParameters = { level: 0, at, edges: gables, use: 'room', roomWalls: 'set-in', roomWidth: 2.8, maxCeilingHeight: 2.1, kneeWallHeight: 0 };
+      const short = { problem: 'The slope from these measurements meets the floor between the room and the storey walls: give a knee wall height of at least 0.3 m, or check the width.' };
+      expect(fitRoofPart(outline, p)).toEqual(short);
+      // A knee wall under 0.3 m would leave the void from the eaves to it near flat.
+      expect(fitRoofPart(outline, { ...p, kneeWallHeight: 0.2 })).toEqual(short);
+      expect('problem' in fitRoofPart(outline, { ...p, kneeWallHeight: 0.3 })).toBe(false);
+      expect(fitRoofPart(outline, { ...p, kneeWallHeight: 2.5 })).toEqual({ problem: 'Make the max ceiling height more than the knee wall height.' });
+    });
   });
 });

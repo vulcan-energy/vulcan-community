@@ -166,4 +166,67 @@ describe('SearchableDescribedSelect positioning', () => {
     expect(trigger).not.toHaveAttribute('aria-invalid');
     expect(trigger).toHaveClass('standard-dropdown-error');
   });
+
+  it('keeps the menu inside its bounding container: at most as wide and as tall as it, aligned to a trigger edge', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    vi.spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect({ left: 450, right: 650, top: 100, bottom: 140, width: 200, height: 40 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect({ left: 400, right: 700, top: 0, bottom: 400, width: 300, height: 400 }),
+    );
+    render(
+      <div className="modal-container">
+        <SearchableDescribedSelect value="" onChange={vi.fn()} placeholder="Choose…" menuMinWidth={360}
+          menuBoundsSelector=".modal-container" sections={[{ options: [{ value: '1', label: 'One' }] }]} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose…' }));
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('listbox').parentElement!).toHaveStyle({ left: '400px', width: '300px', top: '148px', maxHeight: '252px' });
+  });
+
+  it('right-aligns a menu to its trigger when it would run past the container', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    vi.spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect({ left: 1100, right: 1380, top: 100, bottom: 140, width: 280, height: 40 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect({ left: 1080, right: 1400, top: 0, bottom: 800, width: 320, height: 800 }),
+    );
+    render(
+      <div className="element-creator">
+        <SearchableDescribedSelect value="" onChange={vi.fn()} placeholder="Choose…" menuMinWidth={360}
+          menuBoundsSelector=".element-creator" sections={[{ options: [{ value: '1', label: 'One' }] }]} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose…' }));
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('listbox').parentElement!).toHaveStyle({ left: '1080px', width: '320px' });
+  });
+
+  it('keeps a container that runs past the window inside the window', () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+    vi.spyOn(HTMLButtonElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect({ left: 700, right: 980, top: 100, bottom: 140, width: 280, height: 40 }),
+    );
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect({ left: 600, right: 1100, top: 0, bottom: 800, width: 500, height: 800 }),
+    );
+    render(
+      <div className="element-creator">
+        <SearchableDescribedSelect value="" onChange={vi.fn()} placeholder="Choose…" menuMinWidth={360}
+          menuBoundsSelector=".element-creator" sections={[{ options: [{ value: '1', label: 'One' }] }]} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Choose…' }));
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.getByRole('listbox').parentElement!).toHaveStyle({ left: '620px', width: '360px' });
+  });
 });

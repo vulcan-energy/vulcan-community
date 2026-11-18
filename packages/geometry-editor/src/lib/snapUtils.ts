@@ -752,12 +752,43 @@ type CachedWallProjectionOptions = {
   isCandidate?: (segment: SnapWallSegmentTarget) => boolean;
 };
 
+/** A window's host: an external wall. */
+const WINDOW_HOST_TYPES: ReadonlySet<string> = new Set(['BuildingElementOpaque']);
+const PARTY_OR_SHELTERED_DOOR_HOST_TYPES: ReadonlySet<string> = new Set([
+  'BuildingElementOpaque',
+  'BuildingElementPartyWall',
+  'BuildingElementAdjacentUnconditionedSpace_Simple',
+]);
+/**
+ * A door's host walls. Every target takes a door on an external wall; HEM:EPC's existing-building
+ * converter also takes one on a party or sheltered wall (a flat's front door onto a corridor). FHS
+ * does not: it would export that door as external and leave the host wall's area un-netted.
+ */
+export const doorHostTypes = (partyOrShelteredDoors: boolean): ReadonlySet<string> =>
+  partyOrShelteredDoors ? PARTY_OR_SHELTERED_DOOR_HOST_TYPES : WINDOW_HOST_TYPES;
+
+/** What the Door tool says when the drawn line is not on a wall a door can go in. */
+export const doorOffWallMessage = (partyOrShelteredDoors: boolean): string => (partyOrShelteredDoors
+  ? 'Draw the door along an outside, party or sheltered wall. A door between two rooms is not drawn.'
+  : 'Draw the door along an outside wall. Leave out a door onto a corridor or between two rooms: it counts as part of that wall.');
+
+/**
+ * The preset or carried values a drawn line starts from. The Door tool keeps the External surface
+ * type, so a wall preset picked for it would give the door the wall's height, U-value and heat
+ * capacity: a door starts from none.
+ */
+export const lineDrawPresetProps = (
+  drawMode: string,
+  drawPresetProps: Record<string, unknown>,
+): Record<string, unknown> => (drawMode === 'door' ? {} : drawPresetProps);
+
 function isOpaqueLineWallParent(
   hit: OpeningParentHit | null,
   elementsById: Record<string, Element>,
+  hostTypes: ReadonlySet<string>,
 ): hit is OpeningParentHit {
   const parent = hit ? elementsById[hit.parentId] : undefined;
-  return !!parent && parent.type === 'BuildingElementOpaque' && parent.coordinates?.length === 2;
+  return !!parent && hostTypes.has(parent.type as string) && parent.coordinates?.length === 2;
 }
 
 function floorStoreyIndex(value: unknown): number | null {
@@ -778,10 +809,11 @@ function isOpeningParentCandidate(
   segment: SnapWallSegmentTarget,
   childCoords: Array<{x:number,y:number,z:number}>,
   elementsById: Record<string, Element>,
+  hostTypes: ReadonlySet<string>,
 ): boolean {
   const parent = elementsById[segment.elementId];
   return !!parent &&
-    parent.type === 'BuildingElementOpaque' &&
+    hostTypes.has(parent.type as string) &&
     parent.coordinates?.length === 2 &&
     isSameOpeningStorey(childCoords, parent);
 }
@@ -792,6 +824,7 @@ export const resolveOpeningSegmentParentFromCache = (
   elementsById: Record<string, Element>,
   excludeElementId: string,
   tolerance: number,
+  hostTypes: ReadonlySet<string> = WINDOW_HOST_TYPES,
 ): { parentId: string; parentName: string; coordinates: Array<{x:number,y:number,z:number}> } | null => {
   if (childCoords.length !== 2) return null;
   const [A, B] = childCoords;
@@ -800,7 +833,7 @@ export const resolveOpeningSegmentParentFromCache = (
     y: (A.y + B.y) / 2,
   };
   const projectionOptions = {
-    isCandidate: (segment: SnapWallSegmentTarget) => isOpeningParentCandidate(segment, childCoords, elementsById),
+    isCandidate: (segment: SnapWallSegmentTarget) => isOpeningParentCandidate(segment, childCoords, elementsById, hostTypes),
   };
 
   const midpointHit = findNearestWallProjectionFromCache(midpoint, snapCache, excludeElementId, tolerance, projectionOptions);
@@ -808,11 +841,11 @@ export const resolveOpeningSegmentParentFromCache = (
   const endHit = findNearestWallProjectionFromCache(B, snapCache, excludeElementId, tolerance, projectionOptions);
 
   let chosen: OpeningParentHit | null = null;
-  if (isOpaqueLineWallParent(midpointHit, elementsById)) {
+  if (isOpaqueLineWallParent(midpointHit, elementsById, hostTypes)) {
     chosen = midpointHit;
   } else if (
-    isOpaqueLineWallParent(startHit, elementsById) &&
-    isOpaqueLineWallParent(endHit, elementsById) &&
+    isOpaqueLineWallParent(startHit, elementsById, hostTypes) &&
+    isOpaqueLineWallParent(endHit, elementsById, hostTypes) &&
     startHit.parentId === endHit.parentId
   ) {
     chosen = startHit;

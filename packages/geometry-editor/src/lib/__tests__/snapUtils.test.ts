@@ -18,6 +18,8 @@ import {
   type SnapWallSegmentTarget,
   planConnectedDrag,
   resolveOpeningSegmentParentFromCache,
+  doorHostTypes,
+  lineDrawPresetProps,
   resolveDrawSnapPoint,
   getExactSnappedVertices,
   getWallSupportedSnappedVertices,
@@ -475,6 +477,30 @@ describe('resolveOpeningSegmentParentFromCache', () => {
     );
 
     expect(result).toBeNull();
+  });
+
+  it('hosts a flat\'s front door on its corridor wall and a door on a party wall on HEM:EPC only, never on an internal wall', () => {
+    const wall = (id: string, type: string, y: number) => ({
+      id, type, name: id, coordinates: [{ x: 0, y, z: 0 }, { x: 10, y, z: 0 }],
+    });
+    const elementsById = {
+      corridor: { ...wall('Corridor Wall', 'BuildingElementAdjacentUnconditionedSpace_Simple', 0), id: 'corridor' },
+      party: { ...wall('Party Wall', 'BuildingElementPartyWall', 5), id: 'party' },
+      internal: { ...wall('Hall Partition', 'BuildingElementAdjacentConditionedSpace', 10), id: 'internal' },
+    } as any;
+    const cache = buildGeometrySnapCache(elementsById);
+    const door = (y: number, hostTypes?: ReadonlySet<string>) => resolveOpeningSegmentParentFromCache(
+      [{ x: 2, y: y + 0.03, z: 0 }, { x: 3, y: y + 0.03, z: 0 }], cache, elementsById, '__draw__', 0.05, hostTypes);
+
+    // HEM:EPC (existing building): a party or sheltered wall hosts a door.
+    expect(door(0, doorHostTypes(true))?.parentName).toBe('Corridor Wall');
+    expect(door(5, doorHostTypes(true))?.parentName).toBe('Party Wall');
+    expect(door(10, doorHostTypes(true))).toBeNull();
+    // FHS: an external wall only.
+    expect(door(0, doorHostTypes(false))).toBeNull();
+    expect(door(5, doorHostTypes(false))).toBeNull();
+    // A window still takes only an external wall.
+    expect(door(0)).toBeNull();
   });
 
   it('prefers an eligible opaque wall on the opening storey when walls overlap in plan', () => {
@@ -1261,5 +1287,21 @@ describe('vertex coincidence over many elements', () => {
           elements.filter((other) => other.id !== element.id && other.coordinates!.some((q) => pointsConnected(element, coord, other, q))));
       }
     }
+  });
+});
+
+describe('lineDrawPresetProps', () => {
+  const wallPreset = {
+    height: 2.4,
+    u_value: 0.18,
+    extra_json: { areal_heat_capacity: 'Medium', _element_preset: 'cavity_wall' },
+  };
+
+  it('gives a door none of the wall preset picked for External surface', () => {
+    expect(lineDrawPresetProps('door', wallPreset)).toEqual({});
+  });
+
+  it('keeps the preset for a drawn wall', () => {
+    expect(lineDrawPresetProps('line', wallPreset)).toBe(wallPreset);
   });
 });

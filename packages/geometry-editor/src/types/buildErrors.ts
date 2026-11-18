@@ -34,7 +34,12 @@ export type TargetValidation = {
   systemDefaults?: TargetSystemDefaults;
   /** The built form the conversion sends (an HEM:EPC `General.build_type`), worked out from the party walls. */
   builtForm?: string;
+  /** An existing building's parts as the target's conversion found them (EPC), each with its elements' paths (`/Zone/<zone>/BuildingElement/<name>`). */
+  buildingParts?: readonly BuildingPartElements[];
 };
+
+/** A building part the conversion found, and the elements it gives it. */
+export type BuildingPartElements = Readonly<{ name: string; elements: readonly string[] }>;
 
 /** What the target's conversion offers or derives for system fields. */
 export type TargetSystemDefaults = Readonly<{

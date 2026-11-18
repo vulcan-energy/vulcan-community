@@ -34,6 +34,7 @@ import { unavailableGeometryWorkspaceResourcePort } from '../../../../geometry-e
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
+import { sentenceCaseLabel } from '../../lib/fieldPresentation';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -238,13 +239,13 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
     // A/B GREEN run (before R4.4 deleted the JsonForms comparator). Ordering is
     // load-bearing (see the project convention noted throughout this file).
     expect(fieldKeys(container)).toEqual(CORE_ADVANCED_FIELD_KEYS);
-    expect(CORE_ADVANCED_FIELD_KEYS.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual([
+    expect(CORE_ADVANCED_FIELD_KEYS.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual(([
       'Battery Age',
       'Grid Charging Possible',
       'Maximum Charge Rate One Way Trip',
       'Maximum Discharge Rate One Way Trip',
       'Minimum Charge Rate One Way Trip',
-    ]);
+    ]).map(sentenceCaseLabel));
 
     const batteryAgeInput = within(fieldRow(container, 'battery_age')).getByRole('textbox');
     fireEvent.change(batteryAgeInput, { target: { value: '9' } });
@@ -315,11 +316,11 @@ describe('AdvancedFieldsEditor: ElectricBattery direct-render (R4.2 spike / R4.3
       'maximum_discharge_rate_one_way_trip',
     ];
     expect(fieldKeys(container)).toEqual(orderedKeys);
-    expect(orderedKeys.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual([
+    expect(orderedKeys.map((key) => fieldLabelText(fieldRow(container, key)))).toEqual(([
       'Minimum Charge Rate One Way Trip',
       'Maximum Charge Rate One Way Trip',
       'Maximum Discharge Rate One Way Trip',
-    ]);
+    ]).map(sentenceCaseLabel));
 
     // minimum_charge_rate_one_way_trip: schema declares `minimum: 0` (not exclusive).
     const minInput = within(fieldRow(container, 'minimum_charge_rate_one_way_trip')).getByRole('textbox');
