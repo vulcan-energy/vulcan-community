@@ -496,7 +496,8 @@ export function derivedFieldDefaults(derived: TargetSystemDefaults['derived'] | 
 /**
  * Field defaults for an element's systems on an existing building: the DESNZ-defined
  * defaults the conversion states for a direct feed's maximum power (15 kW), a mixer shower's
- * flow rate without a product (9 L/min) and a direct electric boiler's manufacture year (unknown).
+ * flow rate without a product (9 L/min), a direct electric boiler's manufacture year (unknown) and
+ * a cylinder heater's position (0.2 of the tank height).
  */
 export function systemFieldDefaults(
   extraJson: unknown,
@@ -519,6 +520,8 @@ export function systemFieldDefaults(
       const has = (key: string) => tank[key] !== undefined && tank[key] !== null && tank[key] !== '';
       if (!['volume', 'external_diameter', 'external_height', 'tank_volume_category'].some(has)) out.tank_volume_category ??= 'Inaccessible';
       if (!['daily_losses', 'energy_efficiency_class', 'installation_year', 'pump_power_at_flow_rate'].some(has)) out.installation_year ??= 'unknown';
+      // A cylinder's heater sits at 0.2 of the tank height unless stated (DESNZ-defined; HEMIE applies it).
+      if (Object.values(readRecord(tank.HeatSource)).length) out.heater_position ??= 0.2;
     }
     const showers = Object.values(readRecord(readRecord(extra.HotWaterDemand).Shower)).map(readRecord);
     if (showers.some((shower) => shower.type === 'MixerShower' && shower.product_id === undefined)) out.flowrate ??= 9;

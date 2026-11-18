@@ -437,6 +437,28 @@
   border-color: var(--border-hover);
 }
 
+/* A New Model start: its name, then what it sets. */
+.geometry-files-menu .files-dropdown-new-btn--start {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2px;
+  text-align: left;
+}
+
+.geometry-files-menu .files-dropdown-start-detail {
+  font-size: var(--font-size-xxs, 11px);
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.geometry-files-menu .files-dropdown-start-note {
+  margin: 0;
+  padding: 0 12px 8px;
+  font-size: var(--font-size-xxs, 11px);
+  color: var(--text-secondary);
+}
+
 .geometry-files-menu .files-dropdown-new-btn--primary {
   background: var(--accent-primary);
   border-color: var(--accent-primary);

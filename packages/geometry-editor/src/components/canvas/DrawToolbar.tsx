@@ -12,7 +12,7 @@ import { useGeometryStore } from '../../stores/geometryStore';
 import { useTargetRules } from '../../hooks/useTargetRules';
 import { CANVAS_CONSTANTS } from '../../lib/canvasConstants';
 import { StandardDropdown } from '../StandardDropdown';
-import { ElementTypePicker } from '../ElementTypePicker';
+import { ElementTypePicker, type ElementTypePickerExtra } from '../ElementTypePicker';
 import { FloorPickerDropdown } from './FloorPickerDropdown';
 import { isServiceLineDrawMode, isServiceLineElementType } from '../../lib/serviceLineDrawModes';
 import {
@@ -61,10 +61,12 @@ function getDrawModeOptionsForElementType(type: ElementType, hemieBundles: boole
   }
   if (type === 'BuildingElementOpaque') {
     options.push({ value: 'dormer', label: '⌂ Dormer' });
-    if (hemieBundles) {
-      options.push({ value: 'bay', label: '⌓ Bay window' });
-      options.push({ value: 'conservatory', label: '▤ Conservatory' });
-    }
+    // A roof part: one click inside a storey outline fits its roof.
+    options.push({ value: 'roof', label: '⌂ Roof' });
+    // A bay is ordinary walls, windows, floor and roof: every target takes it. HEM:EPC alone has
+    // a conservatory form.
+    options.push({ value: 'bay', label: '⌓ Bay window' });
+    if (hemieBundles) options.push({ value: 'conservatory', label: '▤ Conservatory' });
   }
   if (drawingTypeIncludes(CANVAS_CONSTANTS.DRAWING_ELEMENT_TYPES.POINT, type)) {
     options.push({ value: 'point', label: '• Point [O]' });
@@ -209,6 +211,24 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
     resetDraftForMode(nextMode);
   }, [resetDraftForMode, setDrawMode]);
 
+  // A bay and a conservatory are parts, not element types: the type picker lists them after
+  // External surface and picks that type with the part's tool.
+  const partOptions = useMemo((): ElementTypePickerExtra[] => {
+    const pick = (mode: DrawMode) => () => {
+      setDrawElementType('BuildingElementOpaque');
+      setDrawMode(in3D ? 'none' : mode);
+      resetDraftForMode(in3D ? 'none' : mode);
+    };
+    return [
+      { key: 'roof', label: 'Roof', subtitle: 'Click inside a storey outline to fit it', after: 'BuildingElementOpaque', selected: drawMode === 'roof', onSelect: pick('roof') },
+      { key: 'bay', label: 'Bay window', subtitle: 'Opening on a wall, then its projection', after: 'BuildingElementOpaque', selected: drawMode === 'bay', onSelect: pick('bay') },
+      ...(hemieBundles
+        ? [{ key: 'conservatory', label: 'Conservatory', subtitle: 'On a ground-floor wall', after: 'BuildingElementOpaque' as const, selected: drawMode === 'conservatory', onSelect: pick('conservatory') }]
+        : []),
+    ];
+  }, [drawMode, hemieBundles, in3D, resetDraftForMode, setDrawElementType, setDrawMode]);
+  const partLabel = partOptions.find((option) => option.selected)?.label;
+
   const handleDrawElementTypeChange = useCallback((value: string) => {
     const nextType = value as ElementType;
     const nextMode = getDefaultDrawModeForElementType(nextType);
@@ -293,6 +313,8 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
           value={drawElementType}
           onChange={handleDrawElementTypeChange}
           options={drawElementTypeOptions}
+          extraOptions={partOptions}
+          valueLabel={partLabel}
           ariaLabel="Element type for new drawings"
           className="draw-element-type-picker"
         />

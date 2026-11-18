@@ -234,7 +234,7 @@ function EdgeRow({ edge, mode, roofModes, hasRoof, roofEndsAtM, onPick, rowRef, 
   ];
   return (
     <>
-      <div className="element-label">{edge === 'top' ? 'Top (m above base):' : 'Bottom (m above base):'}</div>
+      <div className="element-label">{edge === 'top' ? 'Top (m above base)' : 'Bottom (m above base)'}</div>
       <div className="element-input wall-shape-edge" data-testid={`wall-shape-${edge}`} ref={rowRef}>
         <CompactSegmentedControl
           value={mode}

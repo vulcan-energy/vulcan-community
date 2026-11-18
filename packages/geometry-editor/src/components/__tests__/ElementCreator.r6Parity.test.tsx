@@ -191,7 +191,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     );
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Linked Window'), { target: { value: 'Window' } });
+    fireEvent.change(dropdownAfterLabel('Linked window'), { target: { value: 'Window' } });
 
     expect(updateElement).toHaveBeenCalledTimes(2);
     expect(updateElement).toHaveBeenNthCalledWith(1, 'shade', { parent_element: 'Window' });
@@ -207,7 +207,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     const store = renderElement(shading, [parent]);
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Linked Window'), { target: { value: 'Window' } });
+    fireEvent.change(dropdownAfterLabel('Linked window'), { target: { value: 'Window' } });
 
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', { parent_element: 'Window' });
   });
@@ -219,7 +219,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     );
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Linked Window'), { target: { value: 'Window' } });
+    fireEvent.change(dropdownAfterLabel('Linked window'), { target: { value: 'Window' } });
 
     expect(updateElement).toHaveBeenCalledTimes(2);
     expect(updateElement).toHaveBeenNthCalledWith(1, 'shade', { parent_element: 'Window' });
@@ -235,7 +235,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     );
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Linked Window'), { target: { value: '' } });
+    fireEvent.change(dropdownAfterLabel('Linked window'), { target: { value: '' } });
 
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', { parent_element: '' });
   });
@@ -247,7 +247,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     );
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Shading Type'), { target: { value: 'overhang' } });
+    fireEvent.change(dropdownAfterLabel('Shading type'), { target: { value: 'overhang' } });
 
     const patch = { coordinates: [{ x: 5, y: 0, z: 7 }], shading_type: 'overhang' };
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', patch);
@@ -266,7 +266,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     }), [windowElement([{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }])]);
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Shading Type'), { target: { value: nextType } });
+    fireEvent.change(dropdownAfterLabel('Shading type'), { target: { value: nextType } });
 
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', expectedPatch);
   });
@@ -278,7 +278,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     );
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Shading Type'), { target: { value: 'overhang' } });
+    fireEvent.change(dropdownAfterLabel('Shading type'), { target: { value: 'overhang' } });
 
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', { shading_type: 'overhang' });
   });
@@ -290,7 +290,7 @@ describe('R6 ElementCreator WindowShading projection fence', () => {
     );
     const updateElement = spyOnUpdates(store);
 
-    fireEvent.change(dropdownAfterLabel('Shading Type'), { target: { value: 'overhang' } });
+    fireEvent.change(dropdownAfterLabel('Shading type'), { target: { value: 'overhang' } });
 
     expect(updateElement).toHaveBeenCalledExactlyOnceWith('shade', { shading_type: 'overhang' });
   });
@@ -382,7 +382,7 @@ describe('BuildingElementGround selection stability', () => {
       extra_json: { _ground_line_height_m: 2 },
     } as Element;
     const store = renderElement(ground);
-    const fieldLabel = screen.getByText('Total Area');
+    const fieldLabel = screen.getByText('Total area');
     const fieldInput = (fieldLabel.closest('.field-label-row') ?? fieldLabel.closest('.tooltip-container'))?.nextElementSibling?.querySelector('input');
     expect(fieldInput).toBeInstanceOf(HTMLInputElement);
 
@@ -392,7 +392,7 @@ describe('BuildingElementGround selection stability', () => {
       total_area: 12,
       [GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag]: true,
     });
-    expect(screen.getByText(/Differs from the 10 m² of floors drawn/)).toBeTruthy();
+    expect(screen.getByText(/Use the drawing: 10 m²/)).toBeTruthy();
 
     act(() => {
       store.getState().updateElement('ground', { perimeter: 4 });

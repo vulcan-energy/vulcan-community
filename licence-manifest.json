@@ -1967,6 +1967,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/canvas/RoofPartChips.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/RoofPartChips.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/canvas/snapFeedbackSignal.ts",
       "source_path": "packages/geometry-editor/src/components/canvas/snapFeedbackSignal.ts",
       "license": "AGPL-3.0-only",
@@ -2591,6 +2599,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/HemieBundleEditor.css",
+      "source_path": "packages/geometry-editor/src/components/HemieBundleEditor.css",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/HemieBundleEditor.tsx",
       "source_path": "packages/geometry-editor/src/components/HemieBundleEditor.tsx",
       "license": "AGPL-3.0-only",
@@ -2713,6 +2729,30 @@
     {
       "path": "packages/geometry-editor/src/components/ResolvedFieldLabel.tsx",
       "source_path": "packages/geometry-editor/src/components/ResolvedFieldLabel.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/RoofPartFields.tsx",
+      "source_path": "packages/geometry-editor/src/components/RoofPartFields.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/RoofSection.css",
+      "source_path": "packages/geometry-editor/src/components/RoofSection.css",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/RoofSection.tsx",
+      "source_path": "packages/geometry-editor/src/components/RoofSection.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2849,6 +2889,14 @@
     {
       "path": "packages/geometry-editor/src/components/UnconditionedZoneFields.tsx",
       "source_path": "packages/geometry-editor/src/components/UnconditionedZoneFields.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/UndoToast.tsx",
+      "source_path": "packages/geometry-editor/src/components/UndoToast.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -5136,6 +5184,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/lib/fitRoof.ts",
+      "source_path": "packages/geometry-editor/src/lib/fitRoof.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/floorDerivation.ts",
       "source_path": "packages/geometry-editor/src/lib/floorDerivation.ts",
       "license": "AGPL-3.0-only",
@@ -5624,6 +5680,22 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/lib/roofPart.ts",
+      "source_path": "packages/geometry-editor/src/lib/roofPart.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/roofSectionView.ts",
+      "source_path": "packages/geometry-editor/src/lib/roofSectionView.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/lib/roofTopElevationAtPlanM.ts",
       "source_path": "packages/geometry-editor/src/lib/roofTopElevationAtPlanM.ts",
       "license": "AGPL-3.0-only",
@@ -6002,6 +6074,14 @@
     {
       "path": "packages/geometry-editor/src/lib/unconditionedZones.ts",
       "source_path": "packages/geometry-editor/src/lib/unconditionedZones.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/undoToast.ts",
+      "source_path": "packages/geometry-editor/src/lib/undoToast.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

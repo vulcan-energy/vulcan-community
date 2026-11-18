@@ -999,7 +999,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'psi_wall_floor_junc | Wall-floor junction psi | textbox | - | - | - | tip',
   ],
   'core/BuildingElementGround [Slab_edge_insulation]': [
-    'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
+    'edge_insulation | Edge insulation | textbox | - | - | - | no-tip',
     'areal_heat_capacity | Heat capacity per area | textbox | 0 | - | - | tip',
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
     'u_value | U-Value | textbox | 0 | - | - | tip',
@@ -1236,7 +1236,7 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'mass_distribution_class | Mass distribution | select | - | - | - | tip',
   ],
   'fhs/BuildingElementGround [Slab_edge_insulation]': [
-    'edge_insulation | Edge Insulation | textbox | - | - | - | no-tip',
+    'edge_insulation | Edge insulation | textbox | - | - | - | no-tip',
     'u_value | U-Value | textbox | 0.01 | 10 | - | tip',
     'psi_wall_floor_junc | Wall-floor junction psi | textbox | 0 | 2 | - | tip',
     'thermal_resistance_floor_construction | Floor construction thermal resistance | textbox | 0.000001 | 50 | - | tip',
@@ -1392,7 +1392,6 @@ const EXPECTED_RENDERED_ROWS: RenderedRowInventory = {
     'var_flow_temp_ctrl_during_test | hp · Var Flow Temp Ctrl During Test | checkbox | - | - | - | no-tip',
   ],
   'fhs/System:HotWaterSource': [
-    'ColdWaterSource | Cold Water Source | select | - | - | - | no-tip',
     'HeatSourceWet | Heat Source Wet | textbox | - | - | null | tip',
     'rejected_energy_1 | Rejected Energy 1 | textbox | 0 | - | - | tip',
     'rejected_factor_3 | Rejected Factor 3 | textbox | 0 | - | - | tip',
@@ -1684,6 +1683,25 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     for (const input of invalidContainer.querySelectorAll('input')) {
       expect(input).not.toHaveAttribute('data-exclusive-minimum');
     }
+  });
+
+  it('shows a products target\'s cylinder its methods first: cold water and location elsewhere, the coil under More', () => {
+    const schemaPort = {
+      ...canonicalGeometrySchemaPort,
+      targetRules: () => ({
+        modelValidityChecks: true, fhsInputRules: true, buildingRegulationsChecks: true, hemDatabaseProducts: true, excludedElementTypes: {},
+      }),
+    };
+    const { container } = renderEditor({ elementType: 'System', subtype: 'HotWaterSource', useFHSSchema: true, schemaPort, extraJson: { HotWaterSource: { 'hw cylinder': {
+      type: 'StorageTank', volume: 200, daily_losses: 1.6, location: 'internal', ColdWaterSource: 'mains water',
+      HeatSource: { hp: { type: 'HeatSourceWet', name: 'hp' } },
+    } } } });
+    const keys = fieldKeys(container);
+    expect(keys).toContain('volume');
+    for (const key of ['ColdWaterSource', 'location']) expect(keys).not.toContain(key);
+    // The coil sits under More, open here because a required setting is empty.
+    for (const key of ['name', 'heater_position']) expect(fieldRow(container, key).closest('details')).not.toBeNull();
+    expect(fieldRow(container, 'volume').closest('details')).toBeNull();
   });
 
   it('keeps the electricity supply a user chose for an MVHR on a products target', async () => {
@@ -2042,7 +2060,7 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
     expect(container.textContent).not.toContain('Required, no default');
   });
 
-  it("shows a derived value on its own coil only: a cylinder's heat pump coil, not its boiler coil (E54)", () => {
+  it("shows a derived value on its own coil only: a cylinder's heat pump coil, not its boiler coil", () => {
     const store = createGeometryStore({ defaultDefaultsPath: null });
     const coil = { type: 'object', properties: { temp_flow_limit_upper: { type: 'number' } } };
     const scope = (name: string) => `#/properties/HotWaterSource/properties/cyl/properties/HeatSource/properties/${name}/properties/temp_flow_limit_upper`;
@@ -2495,7 +2513,6 @@ describe('AdvancedFieldsEditor: direct-render characterization (R4.4)', () => {
         },
       },
       [
-        row('ColdWaterSource', 'Cold Water Source', SELECT),
         row('daily_losses', 'Standing heat loss', TEXT('0.001')),
         row('heater_position', 'hp · Heater Position', TEXT('0')),
         row('name', 'hp · Name', TEXT(null)),
@@ -3402,11 +3419,10 @@ describe('EPC system pickers and defaults', () => {
     expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }]);
   });
 
-  it('offers a fan or PV array the electricity supplies only, and a cylinder the model\'s cold water sources', () => {
-    const schema = { properties: { EnergySupply: { type: 'string' }, ColdWaterSource: { type: 'string' } } };
-    const out = applyEcodesignControlClassEnum(schema, { supplyNames: ['mains elec', 'mains gas'], electricSupplyNames: ['mains elec'], allElectric: true, coldWaterNames: ['mains water'] }) as { properties: Record<string, Record<string, unknown>> };
+  it('offers a fan or PV array the electricity supplies only', () => {
+    const schema = { properties: { EnergySupply: { type: 'string' } } };
+    const out = applyEcodesignControlClassEnum(schema, { supplyNames: ['mains elec', 'mains gas'], electricSupplyNames: ['mains elec'], allElectric: true }) as { properties: Record<string, Record<string, unknown>> };
     expect(out.properties.EnergySupply.oneOf).toEqual([{ const: 'mains elec', title: 'Mains electricity' }]);
-    expect(out.properties.ColdWaterSource.oneOf).toEqual([{ const: 'mains water', title: 'Mains water' }]);
   });
 
   it('keys derived values by their field path, and gives the existing-building defaults', () => {
@@ -3416,4 +3432,22 @@ describe('EPC system pickers and defaults', () => {
     expect(systemFieldDefaults(extra, true)).toEqual({ power_max: 15, bypass_fraction_recirculated: 0 });
     expect(systemFieldDefaults(extra, false)).toEqual({ bypass_fraction_recirculated: 0 });
   });
+
+  it("gives an existing building's blank heater position the default, and a new build none", () => {
+    const tank = (heater: Record<string, unknown>) => ({ HotWaterSource: { cyl: { type: 'StorageTank', volume: 150, HeatSource: { heater } } } });
+    expect(systemFieldDefaults(tank({ type: 'ImmersionHeater', power: 3 }), true)).toMatchObject({ heater_position: 0.2 });
+    expect(systemFieldDefaults(tank({ type: 'HeatSourceWet', name: 'boiler' }), true)).toMatchObject({ heater_position: 0.2 });
+    expect(systemFieldDefaults(tank({ type: 'ImmersionHeater', power: 3 }), false)).not.toHaveProperty('heater_position');
+  });
+});
+
+// The FHS conversion gives every hot water source the model's cold water source (Global values),
+// replacing its own, so the cylinder does not ask for one.
+it('leaves the cylinder cold water source out on FHS', async () => {
+  const { container } = renderEditor({
+    elementType: 'System', subtype: 'HotWaterSource', useFHSSchema: true,
+    extraJson: { HotWaterSource: { 'hw cylinder': { type: 'StorageTank', volume: 80, daily_losses: 1.68, ColdWaterSource: 'mains water' } } },
+  });
+  await waitFor(() => expect(fieldKeys(container).length).toBeGreaterThan(0));
+  expect(fieldKeys(container).filter((key) => key.includes('ColdWaterSource'))).toEqual([]);
 });

@@ -556,6 +556,9 @@ describe('main-form window opening inputs', () => {
     expect(screen.getByRole('button', { name: 'Outline · Custom top' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('wall-shape-top')).toBeNull();
     expect(screen.getByLabelText('Height', { selector: 'input' })).toBeDisabled();
+    // The outline sets the area, so the width is the drawn line's: text, not an input.
+    expect(screen.getByRole('status', { name: 'Width' })).toHaveTextContent('1m');
+    expect(screen.queryByLabelText('Width', { selector: 'input' })).toBeNull();
   });
 
   it('a wall fitted under a roof that changed says so on its closed outline', () => {
@@ -566,6 +569,7 @@ describe('main-form window opening inputs', () => {
     } as unknown as Element;
     renderForm(wall);
     expect(screen.getByRole('button', { name: 'Outline · Top under roof · roof changed' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Width', { selector: 'input' })).toBeNull();
   });
 
   it('Edit all N windows selects every window of its kind, keeping this one to come back to', () => {

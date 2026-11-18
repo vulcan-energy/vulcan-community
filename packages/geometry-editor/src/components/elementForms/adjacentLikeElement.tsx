@@ -510,7 +510,10 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
         )}
         {elementType === 'BuildingElementPartyWall' && (
           <>
-            {state.partyWallFabricFields.map((field) => (
+            {ctx.thermalValues}
+            {/* Its U-value inputs belong to the U-value method; an existing building's party wall
+                takes none (the converter fixes its resistance). */}
+            {!state.constructionBands && ctx.thermalMethod !== 'calculation' && state.partyWallFabricFields.map((field) => (
               <div key={field.key} style={{ display: 'contents' }}>
                 <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>{field.label}</div>
                 <div className="element-input" ref={registerBaseFieldRef(field.key)}>
@@ -540,7 +543,10 @@ export const adjacentLikeElementFormModule: ElementFormModule<AdjacentLikeElemen
                   }
                   updateElement(selection.id, { extra_json: nextExtra } as Partial<Element>);
                 }}
-                options={state.partyWallCavityFields.options}
+                // An existing building's blank cavity comes from the age band: a choice, not a gap.
+                options={state.constructionBands
+                  ? [{ value: '', label: 'From the age band' }, ...state.partyWallCavityFields.options]
+                  : state.partyWallCavityFields.options}
                 disabled={state.partyWallCavityFields.options.length === 0}
                 error={partyWallCavityType && !state.partyWallCavityFields.options.some(option => option.value === partyWallCavityType) ? 'Choose a cavity type supported by this model.' : undefined}
                 placeholder="Select cavity type..."

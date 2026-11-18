@@ -16,6 +16,7 @@ import { getSchemaParamIdForField } from '../lib/fieldTooltipMap';
 import {
   fieldUnitForAdornment,
   resolveFieldPresentation,
+  sentenceCaseLabel,
   type ResolvedFieldPresentation,
 } from '../lib/fieldPresentation';
 import { JUNCTION_TYPE_DESCRIPTIONS } from '../lib/simplifiedFabricMap';
@@ -61,7 +62,7 @@ type RendererConfig = {
   tableCell?: boolean;
   validateValue?: (value: unknown) => { valid: boolean; errors?: readonly string[] };
   elementType?: string;
-  evidenceFieldKeys?: Set<string>;
+  renderEvidence?: (fieldKey: string) => React.ReactNode;
   fieldIndicators?: Readonly<Record<string, readonly string[]>>;
   focusSourceElement?: (elementId: string) => void;
   groundUComputedWPerM2K?: number | null;
@@ -81,7 +82,7 @@ type RendererConfig = {
   systemSampleBaselineExtraJson?: unknown;
   /** The target's default for a blank field of this element, by field key (EPC conversion). */
   derivedDefaults?: Readonly<Record<string, unknown>>;
-  /** Fields with no default here whatever the defaults file says (a new build's tank location). */
+  /** Fields with no default here whatever the defaults file says (a products target's tank location). */
   noDefaultFields?: ReadonlySet<string>;
   /** Where a `derivedDefaults` value comes from, by field key ("from the colour"), in place of "default". */
   derivedSourceNotes?: Readonly<Record<string, string>>;
@@ -148,8 +149,8 @@ function fieldIndicatorsFor(
   return propKey ? config.fieldIndicators?.[propKey] : undefined;
 }
 
-function hasEvidenceFor(config: RendererConfig, propKey: string | undefined): boolean {
-  return !!(propKey && config.evidenceFieldKeys?.has(propKey));
+function evidenceLineFor(config: RendererConfig, propKey: string | undefined): React.ReactNode {
+  return propKey ? config.renderEvidence?.(propKey) : null;
 }
 
 function coerceDropdownValue(
@@ -228,7 +229,8 @@ function renderFieldLabelWithTooltipForMode(
     elementType,
     label,
   }, schemaPort);
-  return <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema} />;
+  // A hand-written label: shown in sentence case, looked up as written.
+  return <ResolvedFieldLabel presentation={{ ...presentation, label: sentenceCaseLabel(presentation.label) }} useFHSSchema={useFHSSchema} />;
 }
 
 /**
@@ -309,7 +311,7 @@ export function renderFieldLabelWithTooltip(
  */
 function renderFieldLabelWithIndicator(
   indicatorMessages: readonly string[] | undefined,
-  hasEvidence: boolean | undefined,
+  evidenceLine: React.ReactNode,
   useFHSSchema: boolean | undefined,
   presentation: ResolvedFieldPresentation,
 ): React.ReactNode {
@@ -325,23 +327,7 @@ function renderFieldLabelWithIndicator(
       }}
     >
       <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema ?? false} />
-      {hasEvidence && (
-        <span
-          style={{
-            fontSize: 9,
-            padding: '0px 5px',
-            borderRadius: 9999,
-            background: 'var(--color-success-bg)',
-            border: '1px solid var(--color-success-border)',
-            color: 'var(--color-success-fg)',
-            lineHeight: '16px',
-            whiteSpace: 'nowrap',
-          }}
-          title="Evidence linked to this field"
-        >
-          Ev
-        </span>
-      )}
+      {evidenceLine}
       {indicatorMessages && indicatorMessages.length > 0 && (
         <ValidationIndicator
           hasIssues
@@ -645,7 +631,7 @@ type AdvancedControlPreamble = {
   fieldPresentation: ResolvedFieldPresentation;
   fieldUnit: string | undefined;
   indicatorMessages: readonly string[] | undefined;
-  hasEvidence: boolean;
+  evidenceLine: React.ReactNode;
   defaultValue: unknown;
   fieldSource: FieldSourceInfo;
   /** The row's source note or "↺ Use …" control, for the label row. */
@@ -792,7 +778,7 @@ function useAdvancedControlPreamble(
     fieldPresentation,
     fieldUnit,
     indicatorMessages: fieldIndicatorsFor(cfg, propKey),
-    hasEvidence: hasEvidenceFor(cfg, propKey),
+    evidenceLine: evidenceLineFor(cfg, propKey),
     // A fabric preset value is the field's default: the converter gives it a blank field.
     defaultValue: fieldSource.preset ? fieldSource.value : defaultValue,
     fieldSource,
@@ -992,7 +978,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     elementType,
     fieldPresentation,
     indicatorMessages,
-    hasEvidence,
+    evidenceLine,
   } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
   // Second presentation, same port — see this component's docstring.
   const midpointPresentation = resolveFieldPresentation({
@@ -1207,7 +1193,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
       0,
       renderAdvancedFieldLabelRow(
         indicatorMessages,
-        hasEvidence,
+        evidenceLine,
         null,
         cfg.useFHSSchemaForValidation,
         fieldPresentation,
@@ -1324,7 +1310,7 @@ export const WindowPartListControl: React.FC<AdvancedControlProps> = ({
     0,
     renderAdvancedFieldLabelRow(
       indicatorMessages,
-      hasEvidence,
+      evidenceLine,
       null,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
@@ -1346,7 +1332,7 @@ const ADVANCED_CTRL_LABEL_ROW: React.CSSProperties = {
 
 function renderAdvancedFieldLabelRow(
   indicatorMessages: readonly string[] | undefined,
-  hasEvidence: boolean | undefined,
+  evidenceLine: React.ReactNode,
   source: React.ReactNode,
   useFHSSchema: boolean | undefined,
   presentation: ResolvedFieldPresentation,
@@ -1354,7 +1340,7 @@ function renderAdvancedFieldLabelRow(
   return (
     <div style={ADVANCED_CTRL_LABEL_ROW}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {renderFieldLabelWithIndicator(indicatorMessages, hasEvidence, useFHSSchema, presentation)}
+        {renderFieldLabelWithIndicator(indicatorMessages, evidenceLine, useFHSSchema, presentation)}
       </div>
       {source ? <div style={{ flexShrink: 1, minWidth: 0, display: 'flex', justifyContent: 'flex-end', textAlign: 'right' }}>{source}</div> : null}
     </div>
@@ -1500,7 +1486,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     valueString,
     fieldPresentation,
     indicatorMessages,
-    hasEvidence,
+    evidenceLine,
     defaultValue,
     source,
     followsSource,
@@ -1641,7 +1627,7 @@ export const TextControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     0,
     renderAdvancedFieldLabelRow(
       indicatorMessages,
-      hasEvidence,
+      evidenceLine,
       source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
@@ -1663,7 +1649,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     fieldPresentation,
     fieldUnit,
     indicatorMessages,
-    hasEvidence,
+    evidenceLine,
     defaultValue,
     source,
     followsSource,
@@ -1774,7 +1760,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
           .
         </div>
       ) : showSuspendedThermalTransmNoWallUHint ? (
-        <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 6, lineHeight: 1.35 }}>
+        <div className="field-source-note" style={{ marginTop: 6 }}>
           No adjacent wall U value available on this storey.
         </div>
       ) : null
@@ -1883,7 +1869,7 @@ export const NumberControl: React.FC<AdvancedControlProps> = ({ data, handleChan
     0,
     cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
-      hasEvidence,
+      evidenceLine,
       isSuspendedGroundThermalTransmWallsFieldActive ? thermalTransmWallSource : source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
@@ -1901,7 +1887,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     isCompact,
     fieldPresentation,
     indicatorMessages,
-    hasEvidence,
+    evidenceLine,
     defaultValue,
     source,
   } = useAdvancedControlPreamble({ data, handleChange, path, propKey, label, schema, uischema, config }, defaults, defaultsLookup);
@@ -1923,7 +1909,7 @@ export const BooleanControl: React.FC<AdvancedControlProps> = ({ data, handleCha
     0,
     renderAdvancedFieldLabelRow(
       indicatorMessages,
-      hasEvidence,
+      evidenceLine,
       source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
@@ -1977,7 +1963,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     fieldPresentation,
     fieldUnit: resolvedFieldUnit,
     indicatorMessages,
-    hasEvidence,
+    evidenceLine,
     defaultValue,
     fieldSource,
     source,
@@ -2107,7 +2093,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
       0,
       cfg.tableCell ? null : renderAdvancedFieldLabelRow(
         indicatorMessages,
-        hasEvidence,
+        evidenceLine,
         source,
         cfg.useFHSSchemaForValidation,
         fieldPresentation,
@@ -2137,7 +2123,7 @@ export const EnumControl: React.FC<AdvancedControlProps> = ({ data, handleChange
     0,
     cfg.tableCell ? null : renderAdvancedFieldLabelRow(
       indicatorMessages,
-      hasEvidence,
+      evidenceLine,
       source,
       cfg.useFHSSchemaForValidation,
       fieldPresentation,
@@ -2172,13 +2158,15 @@ export const GroupAccordion: React.FC<{
   children: React.ReactNode;
 }> = ({ label, count, openInitially, hint, reveal = '', children }) => {
   const [toggledOpen, setToggledOpen] = useState<boolean>(!!openInitially);
-  // A reveal opens the group until the user closes it; the next reveal opens it again.
+  // A reveal opens the group until the user closes it; the next reveal opens it again. Working in
+  // the group keeps it open once the reveal ends (a field being filled stays in view).
   const [dismissedReveal, setDismissedReveal] = useState('');
   const open = toggledOpen || (!!reveal && reveal !== dismissedReveal);
   return (
     <details
       style={{ margin: '0.75rem 0', border: '1px solid var(--border-subtle)', borderRadius: '6px' }}
       open={open}
+      onFocus={() => { if (!toggledOpen) setToggledOpen(true); }}
       onToggle={(e) => {
         const nextOpen = (e.target as HTMLDetailsElement).open;
         if (nextOpen === open) return;

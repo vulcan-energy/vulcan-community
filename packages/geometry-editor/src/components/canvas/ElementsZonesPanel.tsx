@@ -36,7 +36,7 @@ import { useGeometrySchemaPort } from '../../../../geometry-editor-host/src/edit
 import { targetSchemaMode } from '../../../../geometry-editor-host/src/schemaPort';
 import { ElementTypePicker } from '../ElementTypePicker';
 import { ELEMENT_TYPE_ORDER } from '../../lib/elementTypeMetadata';
-import { useTargetValidationFlags } from '../../hooks/useTargetRules';
+import { useTargetRules, useTargetValidationFlags } from '../../hooks/useTargetRules';
 import { elementTypeAvailability, simplifiedThermalBridgingOffered } from '../../lib/schemaCache';
 import type { ElementCategoryGhostKey, ElementCategoryGhostState } from '../../lib/elementCategoryVisibility';
 import { HideElementsDropdown } from './HideElementsDropdown';
@@ -189,8 +189,6 @@ export interface ElementsZonesPanelProps {
   /** Missing elements are worked out again when it changes. */
   complianceSettings: object;
   sourceComparisonPort: GeometrySourceComparisonPort;
-  lookupByElement: ReadonlyMap<string, readonly unknown[]>;
-  hasEvidenceDraft: boolean;
   filename?: string;
   viewMode?: CanvasViewMode;
   panelHideOptions: readonly HidePanelOption[];
@@ -225,8 +223,6 @@ type ElementEntryRowProps = {
   elementFloorZ: number;
   isCurrentFloor: boolean;
   currentFloorZ: number;
-  hasEvidenceDraft: boolean;
-  evidenceCount: number;
   allMembersIndividuallyHidden: boolean;
   colleagues: readonly GeometryCanvasRemoteSelection[];
   onEntryClick: (entry: ElementsPanelEntry, isFullySelected: boolean, event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -246,8 +242,6 @@ const ElementEntryRow = memo(function ElementEntryRow({
   elementFloorZ,
   isCurrentFloor,
   currentFloorZ,
-  hasEvidenceDraft,
-  evidenceCount,
   allMembersIndividuallyHidden,
   colleagues,
   onEntryClick,
@@ -304,12 +298,6 @@ const ElementEntryRow = memo(function ElementEntryRow({
               issues={['Source comparison differences']}
               size="small"
               variant="info"
-            />
-          )}
-          {hasEvidenceDraft && evidenceCount > 0 && (
-            <span
-              title={`${evidenceCount} evidence file${evidenceCount > 1 ? 's' : ''} linked`}
-              className="element-evidence-dot"
             />
           )}
           <ColleagueDiscs colleagues={colleagues} />
@@ -392,8 +380,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
   setCurrentFloorZ,
   complianceSettings,
   sourceComparisonPort,
-  lookupByElement,
-  hasEvidenceDraft,
   viewMode = '2d',
   panelHideOptions,
   hiddenPanelKeys,
@@ -687,6 +673,8 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     [modelSettings, schemaPort],
   );
   const { complianceValidationEnabled } = useTargetValidationFlags();
+  // An existing building's converter reads only the zone's areas (`hemie.rs`), not its volume.
+  const { constructionBands } = useTargetRules();
   const zoneValidationById = useMemo(() => {
     const validations = new Map<string, ValidationResult>();
     const spaceLabelIdsByZone = new Map<string, string[]>();
@@ -704,6 +692,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
         complianceValidationEnabled,
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: bridgingOffered,
+        constructionBands,
       });
       const zoneSpaceLabelIds = spaceLabelIdsByZone.get(zone.id) ?? [];
       if (zoneSpaceLabelIds.length === 0) {
@@ -737,6 +726,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
     zoneTargetIssues,
     zones,
     bridgingOffered,
+    constructionBands,
   ]);
   const filteredZones = useMemo(() => {
     if (!validationFilter) return zones;
@@ -973,7 +963,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                       key={zone.id}
                       className={`zone-pill ${selection?.type === 'zone' && selection.id === zone.id ? 'selected' : ''}`}
                       onClick={() => setSelection({ type: 'zone', id: zone.id })}
-                      title={getVolumeCalculationBreakdown(zone)}
+                      title={constructionBands ? undefined : getVolumeCalculationBreakdown(zone)}
                     >
                       <div className="zone-pill-content">
                         <div className="zone-name">
@@ -1006,7 +996,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                           )}
                         </div>
                         <div className="zone-details">
-                          {zone.floorArea?.toFixed(1) || '0.0'}m² • {zone.volume?.toFixed(1) || '0.0'}m³ • {zoneElementCount} elements
+                          {zone.floorArea?.toFixed(1) || '0.0'}m² • {constructionBands ? '' : `${zone.volume?.toFixed(1) || '0.0'}m³ • `}{zoneElementCount} elements
                         </div>
                       </div>
                     </button>
@@ -1137,7 +1127,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                   const isCurrentFloor = summary?.isCurrentFloor ?? false;
                   const isFullySelected = areAllEntryMembersSelected(entry, selectedElementIdSet);
                   const allMembersIndividuallyHidden = entry.memberIds.every((id) => hiddenElementIds.has(id));
-                  const evidenceCount = lookupByElement.get(element.name ?? '')?.length ?? 0;
                   const colleagues = colleaguesByEntry.get(entryKey) ?? NO_COLLEAGUES;
                   return (
                     <ElementEntryRow
@@ -1151,8 +1140,6 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                       elementFloorZ={elementFloorZ}
                       isCurrentFloor={isCurrentFloor}
                       currentFloorZ={currentFloorZ}
-                      hasEvidenceDraft={hasEvidenceDraft}
-                      evidenceCount={evidenceCount}
                       allMembersIndividuallyHidden={allMembersIndividuallyHidden}
                       colleagues={colleagues}
                       onEntryClick={handleElementEntryClick}
@@ -1363,6 +1350,10 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                 const missingRefrigerationAppliance =
                                   missing.type === 'Appliance'
                                   && missing.path === '/Appliances/FridgeOrFridgeFreezer';
+                                // A named appliance the target requires (HEM:EPC's oven and hob).
+                                const missingNamedAppliance = missing.type === 'Appliance' && !missingRefrigerationAppliance
+                                  ? /^\/Appliances\/(.+)$/.exec(missing.path)?.[1]
+                                  : undefined;
                                 updateElement(
                                   elementId,
                                   {
@@ -1374,6 +1365,7 @@ export const ElementsZonesPanel = memo(function ElementsZonesPanel({
                                     ...(missingRefrigerationAppliance
                                       ? { appliancekey: 'Fridge' }
                                       : {}),
+                                    ...(missingNamedAppliance ? { appliancekey: missingNamedAppliance } : {}),
                                   } as any,
                                   true
                                 );

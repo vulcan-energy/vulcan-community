@@ -796,6 +796,26 @@ export function storeyWallHeightPatches(
 }
 
 /**
+ * A committed storey height copied once into the storey's straight walls that have no height of
+ * their own (with their area). A wall with a height keeps it; no other storey is touched.
+ */
+export function heightlessStoreyWallPatches(
+  zIndex: number,
+  height: number,
+  elements: Element[],
+): Array<{ elementId: string; patch: { height: number; area: number } }> {
+  if (!(height > 0)) return [];
+  return elements.flatMap((el) => {
+    if (!isStoreyHeightWall(el) || Math.floor(el.coordinates[0]?.z ?? 0) !== zIndex) return [];
+    const h = (el as { height?: unknown }).height;
+    if (typeof h === 'number' && h > 0) return [];
+    const width = (el as { width?: unknown }).width;
+    const area = typeof width === 'number' && Number.isFinite(width) ? roundToTwoDecimals(width * height) : 0;
+    return [{ elementId: el.id, patch: { height, area } }];
+  });
+}
+
+/**
  * Return a shallow-copy of the floors array with each `height` replaced by its *effective* value
  * (see {@link getEffectiveStoreyHeight}). Use this whenever you need to compute cumulative base
  * heights — callers that already pass `floors` into derivation helpers should wrap with this.

@@ -3,6 +3,9 @@
 
 import type { GeometryProductSlot } from '../../../geometry-editor-host/src/inspectorContributions';
 
+/** The converter's code for a stated value that expects evidence, on the field that states it. */
+export const EVIDENCE_CODE = 'W_TARGET_EVIDENCE';
+
 export type BuildErrorItem = {
   source: 'schema' | 'part_f_preflight' | 'fhs_preflight' | 'build';
   message: string;
@@ -29,8 +32,6 @@ export type TargetValidation = {
   ventilationZoneHeight?: number;
   /** The conversion's values for system fields, for pickers and placeholders (EPC). */
   systemDefaults?: TargetSystemDefaults;
-  /** The storeys in the dwelling as the conversion counts them (an existing building's own count). */
-  storeysInDwelling?: number;
   /** The built form the conversion sends (an HEM:EPC `General.build_type`), worked out from the party walls. */
   builtForm?: string;
 };

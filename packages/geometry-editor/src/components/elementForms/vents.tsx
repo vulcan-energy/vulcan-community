@@ -33,6 +33,8 @@
 // pitch value directly instead of threading that memo through ctx.
 
 import { getElementShape, convertShapeCoordinates } from '../../lib/shapeUtils';
+import { changeWithUndo } from '../../lib/undoToast';
+import { useGeometryStoreApi } from '../../stores/geometryStore';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import type { Element } from '../../geometry/types';
 import { ParentElementDropdown } from '../ParentElementDropdown';
@@ -77,6 +79,7 @@ export interface VentsFormState {
 }
 
 function useFormState(ctx: ElementFormStateCtx): VentsFormState {
+  const geometryStore = useGeometryStoreApi();
   const midHeightAirFlowPathInput = useDecimalInput('', ctx.commitElementNumericField('mid_height_air_flow_path'), { commitOnChange: true });
   const areaCm2Input = useDecimalInput('', ctx.commitElementNumericField('area_cm2'), { commitOnChange: true });
 
@@ -92,13 +95,10 @@ function useFormState(ctx: ElementFormStateCtx): VentsFormState {
         const currentShape = getElementShape(currentElement);
 
         if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-          const ok = window.confirm(
-            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-          );
-          if (ok) {
-            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-            ctx.updateElement(currentElement.id, { coordinates: nextCoords, pitch: newPitch });
-          }
+          ctx.updateElement(currentElement.id, { pitch: newPitch });
+          changeWithUndo(geometryStore, `Changed to a flat surface to take a ${newPitch}° pitch.`, () => {
+            ctx.updateElement(currentElement.id, { coordinates: convertShapeCoordinates(currentElement as any, 'polygon') });
+          });
         }
       }
     }

@@ -54,7 +54,6 @@ import { findLinkedBasementGroundForLineElement } from '../../lib/basementGeomet
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { isDormerAnchorElement } from '../../lib/dormerGeometry';
 import { getHemieBundle } from '../../lib/hemieBundles';
-import { HemieBundleEditor } from '../HemieBundleEditor';
 import { isOrientationPitchAxis } from '../../lib/slopePitchAxis';
 import {
   mergeUnheatedPitchedRoofCeilingElevationExtraJson,
@@ -352,11 +351,6 @@ export const buildingElementOpaqueFormModule: ElementFormModule<BuildingElementO
       selectedShape === 'sloped-polygon' &&
       !selectedElement.parent_element;
     const orientationPitchAxis = showSlopePitchAxis && isOrientationPitchAxis(selectedElement);
-
-    // A bay or conservatory front wall is edited through its bundle fields alone.
-    if (selectedElement && getHemieBundle(selectedElement)?.role === 'front-wall') {
-      return <HemieBundleEditor key={selectedElement.id} anchor={selectedElement} />;
-    }
 
     return (
       <>

@@ -223,6 +223,12 @@ type Row = BTreeMap<String, Value>;
 
 /// Non-blocking mapping diagnostic: the builder reports it beside schema omissions.
 pub(crate) const TARGET_INPUT_WARNING: &str = "W_TARGET_INPUT";
+/// A value the model states in place of a default, which is entered only if documented (an
+/// existing building's EPC): non-blocking, on the field that states it.
+pub(crate) const TARGET_EVIDENCE: &str = "W_TARGET_EVIDENCE";
+/// The instruction each lodgement-evidence notice ends with, after its stated value (DESNZ-defined:
+/// a value in place of a default is entered only if documented).
+pub(crate) const EVIDENCE_INSTRUCTION: &str = "Enter it only if documented: keep the document.";
 
 fn field<'a>(row: &'a Row, key: &str) -> Option<&'a Value> {
     row.get(key)

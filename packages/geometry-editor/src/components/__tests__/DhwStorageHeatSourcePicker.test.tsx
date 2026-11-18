@@ -29,7 +29,7 @@ it('adds named heaters without replacing custom data and removes only the reques
   }
   render(<Harness />);
   expect(onPatch).not.toHaveBeenCalled();
-  const add = () => { fireEvent.change(screen.getByRole('combobox'), { target: { value: '__dhw_immersion__' } }); fireEvent.click(screen.getByRole('button', { name: 'Add heater' })); };
+  const add = () => { fireEvent.change(screen.getByRole('combobox'), { target: { value: '__dhw_immersion__' } }); fireEvent.click(screen.getByRole('button', { name: 'Add' })); };
   add(); add();
   const next = onPatch.mock.lastCall![0];
   expect(next._system_source).toBe('custom');
@@ -50,21 +50,60 @@ it('uses the existing cylinder and heat-pump icons for the new presets', () => {
   expect(getPointElementIconNode({ ...system, system_preset: 'exhaust_air_mev_heat_pump' })).toEqual(ThermometerSnowflake);
 });
 
-it('leaves a heat pump coil\'s upper flow limit blank for the HEM:EPC default (E54), and gives it 65 otherwise', () => {
+it('leaves a coil\'s upper flow limit and positions blank for the HEM:EPC defaults, and states them otherwise', () => {
   const tank: System = { id: 'dhw', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource', parent_element: null,
     coordinates: [{ x: 0, y: 0, z: 0 }], extra_json: { HotWaterSource: { cyl: { type: 'StorageTank', volume: 150 } } } };
   const hp: System = { ...tank, id: 'hp', name: 'Heat pump', subcategory: 'HeatSourceWet', extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } };
   const added = (epc: boolean) => {
     const onPatch = vi.fn();
     render(<GeometryStoreProvider store={createGeometryStore()}>
-      <DhwStorageHeatSourcePicker elementsById={{ dhw: tank, hp }} systemElement={tank} heatPumpFlowLimitDefaulted={epc}
+      <DhwStorageHeatSourcePicker elementsById={{ dhw: tank, hp }} systemElement={tank} epcDefaulted={epc}
         onPatchExtraJson={(patch) => onPatch(patch(tank.extra_json as Record<string, unknown>))} />
     </GeometryStoreProvider>);
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'wet:hp' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add heater' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     cleanup();
     return onPatch.mock.lastCall![0].HotWaterSource.cyl.HeatSource.linked_heat_source;
   };
-  expect(added(true)).toEqual({ type: 'HeatSourceWet', name: 'hp', heater_position: 0.1, thermostat_position: 0.33 });
-  expect(added(false).temp_flow_limit_upper).toBe(65);
+  expect(added(true)).toEqual({ type: 'HeatSourceWet', name: 'hp' });
+  expect(added(false)).toEqual({ type: 'HeatSourceWet', name: 'hp', temp_flow_limit_upper: 65, heater_position: 0.1, thermostat_position: 0.33 });
+});
+
+it('leaves an immersion heater\'s positions blank for the HEM:EPC defaults, and states them otherwise', () => {
+  const tank: System = { id: 'dhw', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource', parent_element: null,
+    coordinates: [{ x: 0, y: 0, z: 0 }], extra_json: { HotWaterSource: { cyl: { type: 'StorageTank', volume: 150 } } } };
+  const added = (epc: boolean) => {
+    const onPatch = vi.fn();
+    render(<GeometryStoreProvider store={createGeometryStore()}>
+      <DhwStorageHeatSourcePicker elementsById={{ dhw: tank }} systemElement={tank} epcDefaulted={epc}
+        onPatchExtraJson={(patch) => onPatch(patch(tank.extra_json as Record<string, unknown>))} />
+    </GeometryStoreProvider>);
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '__dhw_immersion__' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    cleanup();
+    return onPatch.mock.lastCall![0].HotWaterSource.cyl.HeatSource.immersion;
+  };
+  expect(added(true)).toEqual({ type: 'ImmersionHeater', power: 3, EnergySupply: 'mains elec' });
+  expect(added(false)).toEqual({ type: 'ImmersionHeater', power: 3, EnergySupply: 'mains elec', heater_position: 0.1, thermostat_position: 0.33 });
+});
+
+it('reads "Heated by": a coil names its heat source as a link to it, and a tank with no heater asks for one', () => {
+  const tank: System = { id: 'dhw', name: 'Cylinder', type: 'System', subcategory: 'HotWaterSource', parent_element: null,
+    coordinates: [{ x: 0, y: 0, z: 0 }], extra_json: { HotWaterSource: { cyl: { type: 'StorageTank', volume: 150, HeatSource: { coil: { type: 'HeatSourceWet', name: 'hp' } } } } } };
+  const hp: System = { ...tank, id: 'hp', name: 'Heat Pump', subcategory: 'HeatSourceWet', extra_json: { HeatSourceWet: { hp: { type: 'HeatPump' } } } };
+  const store = createGeometryStore();
+  render(<GeometryStoreProvider store={store}>
+    <DhwStorageHeatSourcePicker elementsById={{ dhw: tank, hp }} systemElement={tank} onPatchExtraJson={() => {}} />
+  </GeometryStoreProvider>);
+  expect(screen.getByText('Heated by')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Heat Pump' }).parentElement!.textContent).toBe('Coil from Heat Pump');
+  fireEvent.click(screen.getByRole('button', { name: 'Heat Pump' }));
+  expect(store.getState().selection).toEqual({ type: 'element', id: 'hp' });
+  expect(screen.queryByRole('alert')).toBeNull();
+  cleanup();
+  const empty = { ...tank, extra_json: { HotWaterSource: { cyl: { type: 'StorageTank', volume: 150 } } } };
+  render(<GeometryStoreProvider store={createGeometryStore()}>
+    <DhwStorageHeatSourcePicker elementsById={{ dhw: empty, hp }} systemElement={empty} onPatchExtraJson={() => {}} />
+  </GeometryStoreProvider>);
+  expect(screen.getByRole('alert').textContent).toBe('Choose what heats the cylinder.');
 });

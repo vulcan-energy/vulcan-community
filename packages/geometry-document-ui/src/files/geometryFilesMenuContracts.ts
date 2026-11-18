@@ -145,8 +145,8 @@ export type GeometryFilesMenuProps = Readonly<{
 
   /** `start` is one of `newDocumentStarts`' ids; undefined when the host offers none. */
   onNewDocument?: (start?: string) => void;
-  /** The host's starting points for New Model. With them, New Model asks which one first. */
-  newDocumentStarts?: readonly Readonly<{ id: string; label: string }>[];
+  /** The host's starting points for New Model. With them, New Model asks which one first. `detail`: what the start sets. */
+  newDocumentStarts?: readonly Readonly<{ id: string; label: string; detail?: string }>[];
   onImportCsv?: (files: ArrayLike<File>) => void;
   onOpenPortable?: (files: ArrayLike<File>) => void;
   onDownloadCsv?: () => void;

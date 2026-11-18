@@ -20,7 +20,8 @@ import { worldToCanvas } from '../../lib/shapeUtils';
 import { calculateDrawingPreviewArrow, calculateArrowPoints } from '../../lib/directionArrows';
 import { buildPvPanelRectangleCoords } from '../../lib/pvPanelFootprint';
 import type { DrawMode } from '../../hooks/useDrawingMode';
-import type { ElementType } from '../../geometry/types';
+import type { BuildingElementOpaque, ElementType } from '../../geometry/types';
+import { onHost } from '../../lib/hemieBundles';
 import type { DrawingCanvasPalette } from './drawingPreviewPalette';
 
 // Blue dot + hint pill track snap/cursor while drawing; fall back to a committed
@@ -37,7 +38,7 @@ function getPlacementStartPoint(
 
   const snapOrCursor = drawSnapTargetRef.current || drawCursor || null;
 
-  if (drawMode === 'point' || drawMode === 'room' || drawMode === 'dormer') {
+  if (drawMode === 'point' || drawMode === 'room' || drawMode === 'dormer' || drawMode === 'bay' || drawMode === 'conservatory') {
     return snapOrCursor;
   }
 
@@ -157,6 +158,10 @@ export interface DrawingPreviewProps {
   pvFootprintPreview: { longM: number; shortM: number; pitchDegrees?: number } | null;
   /** Resolved plan cutout (mono-pitch defaults) while hovering a valid sloped host in dormer draw mode */
   dormerDrawPreviewCutout: Array<{ x: number; y: number; z: number }> | null;
+  /** Bay or conservatory placement: the wall its opening is on. The opening, then the footprint, is drawn with its length. */
+  bundleDrawHost?: BuildingElementOpaque | null;
+  /** Bay or conservatory placement, before the first click: the wall under the cursor that can take the part. */
+  bundleHostAt?: (point: { x: number; y: number }) => BuildingElementOpaque | null;
   drawingTooltip: { visible: boolean; text: string; position: { x: number; y: number } };
   segmentLengthPreview: { visible: boolean; text: string; position: { x: number; y: number } };
   /** Bends of a Shift route preview (an L or a dog-leg); the preview line runs through them. */
@@ -182,6 +187,8 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
   multiDrawModifierHeld,
   pvFootprintPreview,
   dormerDrawPreviewCutout,
+  bundleDrawHost = null,
+  bundleHostAt,
   drawingTooltip,
   segmentLengthPreview,
   drawBends = NO_BENDS,
@@ -302,9 +309,62 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
               renderDrawModeTooltipPill(tooltipText, {
                 // Keep the pill inside the canvas (canvasCenter is half the stage size).
                 x: Math.max(4, Math.min(canvasPos.x - tooltipWidth / 2, canvasCenter.x * 2 - tooltipWidth - 4)),
-                y: Math.max(4, Math.min(canvasPos.y - 15 - DRAW_MODE_TOOLTIP_PILL_HEIGHT, canvasCenter.y * 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT - 4)),
+                // A bay's or conservatory's projection step: past the cursor and its length label, away from the wall.
+                y: Math.max(4, Math.min(
+                  (drawMode === 'bay' || drawMode === 'conservatory') && drawPoints.length > 1 && canvasPos.y > w2c(drawPoints[1]).y
+                    ? canvasPos.y + 36
+                    : canvasPos.y - 15 - DRAW_MODE_TOOLTIP_PILL_HEIGHT,
+                  canvasCenter.y * 2 - DRAW_MODE_TOOLTIP_PILL_HEIGHT - 4,
+                )),
               }, palette)}
           </Group>
+        );
+      })()}
+
+      {/* Bay or conservatory placement: "inside" on the dwelling side of the wall, so the part goes the other way. */}
+      {(drawMode === 'bay' || drawMode === 'conservatory') && (() => {
+        const host = bundleDrawHost ?? (drawCursor && drawPoints.length === 0 ? bundleHostAt?.(drawCursor) : null);
+        // A conservatory goes only on a ground-floor wall.
+        if (!host || (drawMode === 'conservatory' && Math.floor(host.coordinates[0].z) !== 0)) return null;
+        const [A, B] = host.coordinates;
+        const length = Math.hypot(B.x - A.x, B.y - A.y) || 1;
+        // Near the end away from the cursor, 52 px in from the wall: clear of the hint above the cursor at any zoom.
+        const cursorT = drawCursor ? ((drawCursor.x - A.x) * (B.x - A.x) + (drawCursor.y - A.y) * (B.y - A.y)) / (length * length) : 0;
+        const t = cursorT < 0.5 ? 0.7 : 0.3;
+        const onWall = { x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t };
+        const base = w2c(onWall);
+        const inward = w2c({ x: onWall.x - (B.y - A.y) / length, y: onWall.y + (B.x - A.x) / length });
+        const unit = Math.hypot(inward.x - base.x, inward.y - base.y) || 1;
+        const at = { x: base.x + ((inward.x - base.x) / unit) * 52, y: base.y + ((inward.y - base.y) / unit) * 52 };
+        return renderDrawingTooltip('inside', { x: at.x - 30, y: at.y - 12 }, palette);
+      })()}
+
+      {bundleDrawHost && drawCursor && drawPoints.length > 0 && (() => {
+        const start = onHost(bundleDrawHost, drawPoints[0]);
+        const end = onHost(bundleDrawHost, drawPoints[1] ?? drawCursor);
+        const out = drawPoints.length > 1 ? Math.max(0, onHost(bundleDrawHost, drawCursor).out) : 0;
+        const [A, B] = bundleDrawHost.coordinates;
+        const length = Math.hypot(B.x - A.x, B.y - A.y) || 1;
+        const shift = (p: { x: number; y: number }) => ({ x: p.x + ((B.y - A.y) / length) * out, y: p.y - ((B.x - A.x) / length) * out });
+        const points = drawPoints.length > 1
+          ? [start.point, shift(start.point), shift(end.point), end.point]
+          : [start.point, end.point];
+        const label = drawPoints.length > 1 ? `${out.toFixed(2)} m` : `${Math.abs(end.along - start.along).toFixed(2)} m`;
+        const at = w2c(drawPoints.length > 1 ? shift(end.point) : { x: (start.point.x + end.point.x) / 2, y: (start.point.y + end.point.y) / 2 });
+        const closed = drawPoints.length > 1;
+        return (
+          <>
+            <Line
+              points={points.flatMap((p) => [w2c(p).x, w2c(p).y])}
+              stroke={palette.guide}
+              strokeWidth={closed ? 2 : 3}
+              dash={closed ? [6, 4] : undefined}
+              closed={closed}
+              fill={closed ? palette.guideFill : undefined}
+              listening={false}
+            />
+            {renderDrawModeTooltipPill(label, { x: at.x + 8, y: at.y + 8 }, palette)}
+          </>
         );
       })()}
 

@@ -14,6 +14,8 @@ use super::*;
 /// (top) only.
 const CONSERVATORY_WALL_WINDOW_TYPES: [&str; 3] =
     ["closed", "half opening top", "top third opening"];
+/// DESNZ-defined: HEMIE's conservatory roof pitch when none is given (degrees).
+const CONSERVATORY_DEFAULT_PITCH: f64 = 20.0;
 
 /// An element's editor bundle tag.
 pub(super) struct Tag<'a> {
@@ -36,6 +38,11 @@ pub(super) fn tag<'a>(e: &El<'a>) -> Option<Tag<'a>> {
         conservatory_type: text("conservatory_type"),
         adjacent_space_type: text("adjacent_space_type"),
     })
+}
+
+/// The parameters the editor keeps on a bundle's anchor, when it states them.
+fn editor_parameters<'e>(anchor: &El<'e>) -> Option<&'e Map<String, Value>> {
+    anchor.get("hemie_bundle")?.get("parameters")?.as_object()
 }
 
 fn is_member_wall(e: &El, kind: &str) -> bool {
@@ -112,7 +119,7 @@ pub(super) fn left_out<'a>(ctx: &mut Ctx, els: &[El<'a>]) -> BTreeSet<&'a str> {
 /// takes the elements before `left_out`. Returns the host walls replaced, their pieces (each with
 /// its unheated space type when sheltered), and the non-separated conservatory floors (each its
 /// own building part), and the windows and doors in a non-separated span, which are inside the
-/// dwelling and not entered (DESNZ-defined, as the span; DESNZ question E49; reported).
+/// dwelling and not entered (DESNZ-defined, as the span; a question for DESNZ; reported).
 #[allow(clippy::type_complexity)]
 pub(super) fn conservatory_hosts<'a>(
     ctx: &mut Ctx,
@@ -149,6 +156,16 @@ pub(super) fn conservatory_hosts<'a>(
         };
         let t = tag(left).expect("member");
         let host_name = t.host;
+        // The editor draws a conservatory's walls before their height is given; the drawn
+        // height is not an input until it is.
+        if !unheated
+            && member(els, id, "front-wall")
+                .and_then(|front| editor_parameters(front))
+                .is_some_and(|p| p.get("wallHeight").and_then(Value::as_f64).is_none())
+        {
+            ctx.errors.push(error("CONSERVATORY", left.path(), format!("Conservatory '{id}' has no wall height to eaves. Give it one on the conservatory.")));
+            continue;
+        }
         let space = if unheated {
             let Some(space) = t.adjacent_space_type else {
                 ctx.errors.push(error("CONSERVATORY", left.path(), format!("Unheated conservatory '{id}' does not state what unheated space '{host_name}' borders. Choose corridor, garage, roof void or stairwell on the conservatory.")));
@@ -533,6 +550,17 @@ pub(super) fn attach_bays(
                 .copied()
                 .filter(|p| inside(centroid(&p.pts), &bay.poly))
                 .collect();
+            // The editor states a top bay's roof (flat or pitched) before it draws one: a bay
+            // whose editor has no roof chosen yet stops rather than enter none.
+            if over.is_empty() && editor_parameters(front).is_some_and(|p| p.get("roof").is_none())
+            {
+                ctx.errors.push(error(
+                    "BAY",
+                    front.path(),
+                    format!("The bay {names} has no roof. Choose Flat or Pitched on the bay."),
+                ));
+                continue;
+            }
             let flat = over.iter().filter(|p| p.num("pitch") == Some(0.0)).count();
             let construction_type = match (flat, over.len()) {
                 (_, 0) => None,
@@ -866,7 +894,7 @@ pub(super) fn conservatory_roof(
     };
     let main = &measured[largest(&measured)];
     let (slope_orientation, u) = slope(top_ring, main.orientation, orient);
-    // ours, as for loft roofs (E15): the area-weighted mean pitch.
+    // ours, as for loft roofs: the area-weighted mean pitch.
     let pitch = measured.iter().map(|m| m.area * m.pitch).sum::<f64>() / area;
     rectangularity_notice(ctx, part, top_ring);
     // Derived from the model: an exposed gable is a profiled external wall across the ridge at
@@ -884,7 +912,17 @@ pub(super) fn conservatory_roof(
     roof["roof_type"] = json!("Conservatory Pitched");
     roof["pitch_type"] = json!(pitch_type);
     roof["slope_orientation"] = json!(slope_orientation);
-    roof["pitch"] = json!(pitch);
+    // DESNZ-defined: a blank pitch is 20°. The editor draws a blank pitch at 20° and leaves
+    // `roofPitch` out; a typed pitch, or planes re-pitched by hand, are sent.
+    let typed = (pitch - CONSERVATORY_DEFAULT_PITCH).abs() > 0.5
+        || gables
+            .iter()
+            .find(|(w, ..)| tag(w).is_some_and(|t| t.role == "front-wall"))
+            .and_then(|(w, ..)| editor_parameters(w))
+            .is_none_or(|p| p.contains_key("roofPitch"));
+    if typed {
+        roof["pitch"] = json!(pitch);
+    }
     let (left, right) = (gable_at(left), gable_at(scale(left, -1.0)));
     roof["is_external_left_gable_wall"] = json!(left);
     roof["is_external_right_gable_wall"] = json!(right);
@@ -899,7 +937,7 @@ pub(super) fn conservatory_roof(
 // ---------------------------------------------------------------------------------------------
 // Box in the roof
 
-/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours (E30): how
+/// DESNZ-defined: a box-shaped room set within a pitched roof is not covered. Ours: how
 /// a box room is recognised, a top floor standing clear of the outline below under an unheated
 /// pitched roof.
 pub(super) fn box_in_roof(
@@ -1737,5 +1775,74 @@ mod tests {
             "{}",
             errors[0].message
         );
+    }
+
+    /// The anchor's tag, with these parameters (CSV-escaped JSON) after its host wall.
+    fn with_parameters(text: &str, host: &str, parameters: &str) -> String {
+        let anchor = format!(r#"""role"":""front-wall"",""host_wall"":""{host}"""#);
+        assert!(text.contains(&anchor));
+        text.replace(&anchor, &format!(r#"{anchor},""parameters"":{parameters}"#))
+    }
+
+    #[test]
+    fn a_conservatory_whose_editor_states_no_wall_height_stops() {
+        let house = conservatory_house("non-separated", &[0, 1]);
+        let (_, errors, _) = run(&with_parameters(&house, "W02", r#"{""width"":4}"#));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("wall height to eaves")),
+            "{errors:#?}"
+        );
+        let (model, errors, _) = run(&with_parameters(
+            &house,
+            "W02",
+            r#"{""width"":4,""wallHeight"":2.4}"#,
+        ));
+        assert!(errors.is_empty(), "{errors:#?}");
+        // A pitch the editor did not state but the plane carries (edited on the plane) is sent.
+        assert_eq!(conservatory_part(&model)["roof"]["pitch"], 15.0);
+        // A blank pitch, drawn at HEMIE's own default (20°): no pitch is sent.
+        let blank = with_parameters(
+            &house.replace(
+                "C roof,Z,BuildingElementOpaque,7,15,",
+                "C roof,Z,BuildingElementOpaque,7,20,",
+            ),
+            "W02",
+            r#"{""width"":4,""wallHeight"":2.4}"#,
+        );
+        let (model, errors, _) = run(&blank);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let roof = &conservatory_part(&model)["roof"];
+        assert!(roof.get("pitch").is_none(), "{roof}");
+        let (model, _, _) = run(&with_parameters(
+            &house,
+            "W02",
+            r#"{""width"":4,""wallHeight"":2.4,""roofPitch"":15}"#,
+        ));
+        assert_eq!(conservatory_part(&model)["roof"]["pitch"], 15.0);
+    }
+
+    #[test]
+    fn a_top_bay_whose_editor_chose_no_roof_stops() {
+        let roofless: String = bay_house(&[])
+            .lines()
+            .filter(|line| !line.starts_with("Bay roof,"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (_, errors, _) = run(&with_parameters(
+            &roofless,
+            "W00",
+            r#"{""openingWidth"":2}"#,
+        ));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("Choose Flat or Pitched")),
+            "{errors:#?}"
+        );
+        // A roof chosen as none, saved before the roof was derived, is entered with none.
+        let (_, errors, _) = run(&with_parameters(&roofless, "W00", r#"{""roof"":""none""}"#));
+        assert!(errors.is_empty(), "{errors:#?}");
     }
 }

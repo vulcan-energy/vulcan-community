@@ -134,3 +134,19 @@ it('asks for a heat source for wet emitters on a target without the FHS rules', 
   expect(rows.map((row) => [row.requiredBy, row.message])).toEqual([['schema', 'Heat source required when Wet Emitters are present']]);
   expect(detectMissingElements([], { rad: emitter }, { complianceValidationEnabled: false })).toEqual([]);
 });
+
+describe('detectMissingElements named appliances', () => {
+  const wall = { id: 'w', name: 'Wall', type: 'BuildingElementOpaque', zoneId: 'z', coordinates: [], isPlaceholder: false } as unknown as Element;
+  const checks = { complianceValidationEnabled: false, modelValidityChecks: true, requiredApplianceKeys: ['Oven', 'Hobs'] };
+
+  it('offers each appliance the target requires that the plan has not drawn', () => {
+    const findings = detectMissingElements([], byId([wall, appliance('Oven')]), checks);
+    expect(findings.filter((finding) => finding.type === 'Appliance')).toEqual([
+      expect.objectContaining({ path: '/Appliances/Hobs', pillQualifier: 'Hobs', requiredBy: 'schema' }),
+    ]);
+  });
+
+  it('asks for nothing before anything is drawn', () => {
+    expect(detectMissingElements([], {}, checks)).toEqual([]);
+  });
+});

@@ -299,6 +299,17 @@ export type ParseCsvToGeometryOptions = Readonly<{
   assignIds?: (parsed: { zones: Zone[]; elements: Element[]; spaceLabels: SpaceLabel[] }) => void;
 }>;
 
+/**
+ * The converter does not read Space Labels. In the editor a label adds area and room counts to its zone only with
+ * a zone, a room type and an outline: this notice names the rows that add nothing, or is undefined. It describes
+ * the rows; it does not change what was read.
+ */
+export function idleSpaceLabelsNotice(labels: readonly SpaceLabel[]): string | undefined {
+  const idle = labels.filter((label) => !label.zoneId || !label.room_type || label.coordinates.length < 3);
+  if (idle.length === 0) return undefined;
+  return `${idle.length === 1 ? 'This Space Labels row adds' : 'These Space Labels rows add'} no area or room count to a zone: ${idle.map((label) => label.name || '(no name)').join(', ')}. A label counts once it has a zone, a room type and an outline.`;
+}
+
 export const parseCsvToGeometry = (
   csvContent: string,
   options: ParseCsvToGeometryOptions = {},
@@ -801,12 +812,8 @@ export const parseCsvToGeometry = (
       detectedZoneOverrideMarkers[zone.name],
     );
   }
-  // The converter does not read Space Labels. In the editor a label adds area and room counts to its
-  // zone only with a zone, a room type and an outline, so name the rows that add nothing.
-  const idleLabels = newSpaceLabels.filter((label) => !label.zoneId || !label.room_type || label.coordinates.length < 3);
-  if (idleLabels.length > 0) {
-    warnings.push(`${idleLabels.length === 1 ? 'This Space Labels row adds' : 'These Space Labels rows add'} no area or room count to a zone: ${idleLabels.map((label) => label.name || '(no name)').join(', ')}. A label counts once it has a zone, a room type and an outline.`);
-  }
+  const idleNotice = idleSpaceLabelsNotice(newSpaceLabels);
+  if (idleNotice) warnings.push(idleNotice);
   for (const label of newSpaceLabels) {
     promoteOverrideMarkersOnImport(
       label as unknown as Record<string, unknown>,

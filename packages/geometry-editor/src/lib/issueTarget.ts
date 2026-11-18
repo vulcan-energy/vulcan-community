@@ -18,18 +18,42 @@ const ZONE_FIELD_KEYS: Record<string, string> = { ThermalBridging: 'simplifiedTh
 export const issuePathSegments = (path?: string) =>
   (path ?? '').split('/').filter(Boolean).map((segment) => segment.replace(/~1/g, '/').replace(/~0/g, '~'));
 
+type IssueModel = {
+  zones: ReadonlyArray<{ id: string; name?: string }>;
+  elements: Iterable<{ id: string; name?: string; zoneId?: string; extra_json?: unknown } | undefined>;
+};
+
+/** A System row's plant sits under its own key: `extra_json.HotWaterSource['hw cylinder']`. */
+const holdsPlant = (extra: unknown, section: string, key: string) => {
+  const plants = (extra as Record<string, unknown> | undefined)?.[section];
+  return typeof plants === 'object' && plants !== null && Object.prototype.hasOwnProperty.call(plants, key);
+};
+
 /**
  * Resolves a validation path to the zone/element and field the user should edit.
  * Names match exactly within their zone; array indices after the field are dropped
- * (window_part_list/0 → window_part_list).
+ * (window_part_list/0 → window_part_list). A row whose path names no element goes to the
+ * first element its `message` names in single quotes ("The walls 'Wall (N) 2' do not join"),
+ * when exactly one element (in the row's zone, if it has one) has that name. Failing both, a
+ * top-level plant path goes to the unique Systems row holding that plant key.
  */
-export function resolveIssueTarget(
-  path: string | undefined,
-  model: {
-    zones: ReadonlyArray<{ id: string; name?: string }>;
-    elements: Iterable<{ id: string; name?: string; zoneId?: string } | undefined>;
-  },
-): IssueTarget {
+export function resolveIssueTarget(path: string | undefined, model: IssueModel, message?: string): IssueTarget {
+  const target = resolvePath(path, model);
+  if (target.elementId) return target;
+  const elements = [...model.elements].filter((element) => element && (!target.zoneId || element.zoneId === target.zoneId));
+  // The message's row first: an emitter or pipe error names its own row, not its system's.
+  for (const [, name] of message?.matchAll(/'([^']+)'/g) ?? []) {
+    const matches = elements.filter((element) => element!.name === name);
+    if (matches.length === 1) return { ...target, elementId: matches[0]!.id, fieldKey: undefined };
+  }
+  const s = issuePathSegments(path);
+  if (s[0] === 'Zone' || !s[1]) return target;
+  const holders = elements.filter((element) => holdsPlant(element!.extra_json, s[0]!, s[1]!));
+  // A deeper path (a heat source inside the plant) has no control of its own on the row.
+  return holders.length === 1 ? { ...target, elementId: holders[0]!.id, fieldKey: s.length === 3 ? s[2] : undefined } : target;
+}
+
+function resolvePath(path: string | undefined, model: IssueModel): IssueTarget {
   const s = issuePathSegments(path);
   if (s[0] === 'InfiltrationVentilation' && s[1] === 'MechanicalVentilation' && s[2]) {
     const matches = [...model.elements].filter((element) => element?.name === s[2]);

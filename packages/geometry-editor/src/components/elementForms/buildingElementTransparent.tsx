@@ -167,7 +167,7 @@ import { DerivedSource, Readout, SourceNote } from '../FieldSource';
 import { isOverridden } from '../../lib/fieldSource';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
-import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, isConservatoryGlazing, windowSections, withConservatoryGlazingOpeningType, withWindowSections } from '../../lib/hemieBundles';
+import { WINDOW_OPENING_TYPES, conservatoryGlazingOpeningType, getHemieBundle, isConservatoryGlazing, windowSections, withConservatoryGlazingOpeningType, withWindowSections } from '../../lib/hemieBundles';
 import { CompactSegmentedControl } from '../WindowDetailControls';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import type { Element } from '../../geometry/types';
@@ -640,6 +640,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
     // orientation are its wall's ("On Wall (S) · faces S"), so only a free one shows them.
     const lineWindow = selectedElement?.type === 'BuildingElementTransparent' && selectedElement.coordinates?.length === 2;
     const hosted = !!state.parentElement;
+    // HEM:EPC takes a conservatory roof's glazing with no close shading or security risk.
+    const conservatoryRoofGlazing = getHemieBundle(selectedElement)?.role.startsWith('roof-glazing') === true;
     const baseHeightInput = (
       <StandardInput
         {...decimalInputProps(state.baseHeightInput)}
@@ -688,6 +690,8 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             />
           </div>
         </>}
+        {/* Thermal values follow the size: the inputs every window states, before how it opens. */}
+        {ctx.thermalValues}
         {!openingsInTable && !state.constructionBands && <>
         {state.openingPart ? <>
           <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem' }}>Part that opens</div>
@@ -912,7 +916,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             )}
           </>
         ) : null}
-        {selectedElement?.type === 'BuildingElementTransparent' && (
+        {selectedElement?.type === 'BuildingElementTransparent' && !conservatoryRoofGlazing && (
           <SecurityRiskField
             element={selectedElement}
             fieldRef={registerBaseFieldRef('security_risk')}
@@ -920,8 +924,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
           />
         )}
         {openingFields}
-        {ctx.thermalValues}
-        {renderFieldLabel('Frame area fraction', elementType)}
+        {renderFieldLabel('Frame area fraction', elementType, 'frame_area_fraction')}
         <div className="element-input" ref={registerBaseFieldRef('frame_area_fraction')}>
           <StandardInput
             {...decimalInputProps(state.freeAreaFractionInput)}
@@ -996,7 +999,7 @@ export const buildingElementTransparentFormModule: ElementFormModule<BuildingEle
             {baseHeightInput}
           </div>
         </>}
-        {selectedElement?.name && state.windowInputs.some((input) => input !== 'opening_type') && (
+        {selectedElement?.name && !conservatoryRoofGlazing && state.windowInputs.some((input) => input !== 'opening_type') && (
           <CloseShadingFields windowName={selectedElement.name} kinds={state.windowInputs.filter((input): input is CloseShadingKind => input !== 'opening_type')} elementsById={ctx.elementsById} updateElement={ctx.updateElement} />
         )}
       </>

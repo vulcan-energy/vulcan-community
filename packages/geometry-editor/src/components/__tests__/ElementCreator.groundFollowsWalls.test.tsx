@@ -250,10 +250,10 @@ describe('ground fields a target does not read', () => {
   };
 
   it('shows no total area or perimeter where the target hides them', () => {
-    expect(renderFloor(canonicalGeometrySchemaPort).container.textContent).toMatch(/Total Area.*Perimeter/);
+    expect(renderFloor(canonicalGeometrySchemaPort).container.textContent).toMatch(/Total area.*Perimeter/);
     const hiding = { ...canonicalGeometrySchemaPort, targetRules: () => ({ hiddenFields: { BuildingElementGround: ['total_area', 'perimeter'] } }) };
     const text = renderFloor(hiding).container.textContent ?? '';
-    expect(text).not.toContain('Total Area');
+    expect(text).not.toContain('Total area');
     expect(text).not.toContain('Perimeter (m)');
   });
 });

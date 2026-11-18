@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { GeometryDocumentHostPort } from '../../../../geometry-document/src';
@@ -85,6 +85,36 @@ describe('FilenameBar validation readiness', () => {
 
     expect(screen.getByRole('button', { name: 'Build Error (1)' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Not validated' })).not.toBeInTheDocument();
+  });
+
+  it('opens on a host surface\'s event with the host\'s rows, under their heading after the build errors', () => {
+    const select = vi.fn();
+    const store = createGeometryStore();
+    const hostIssues = { heading: 'Overheating', rows: [{ key: 'w1', location: 'Window 1', message: 'Choose a room type.', select }] };
+    const { rerender } = render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null} hostIssues={hostIssues} />
+      </GeometryStoreProvider>,
+    );
+    // The host's rows alone do not raise the chip.
+    expect(screen.queryByRole('button', { name: /Build Error/ })).not.toBeInTheDocument();
+    act(() => { window.dispatchEvent(new CustomEvent('open-build-errors')); });
+    expect(screen.getByText('Overheating')).toBeInTheDocument();
+    expect(screen.getByText('1 error')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Choose a room type.' }));
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Overheating')).not.toBeInTheDocument();
+
+    rerender(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null} hostIssues={hostIssues}
+          buildErrorItems={[{ source: 'schema', message: '"NumberOfBedrooms" is a required property', path: '/', keyword: 'required' }]} />
+      </GeometryStoreProvider>,
+    );
+    act(() => { window.dispatchEvent(new CustomEvent('open-build-errors')); });
+    expect(screen.getByText('HEM input build failed')).toBeInTheDocument();
+    expect(screen.getByText('Overheating')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose a room type.' })).toBeInTheDocument();
   });
 
   it('does not show Not validated for a draft that was never saved', () => {
@@ -263,5 +293,34 @@ describe('FilenameBar action placement', () => {
     const saveStack = container.querySelector('.filename-bar-save-stack')!;
     expect(saveStack.contains(screen.getByRole('button', { name: 'Save menu' }))).toBe(true);
     expect(container.querySelector('.filename-bar-left')!.contains(screen.getByRole('button', { name: 'Lead' }))).toBe(true);
+  });
+});
+
+describe('FilenameBar with no errors', () => {
+  it('shows no chip for lodgement evidence or notices alone', () => {
+    const store = createGeometryStore();
+    store.getState().setTargetValidation({ hemVersion: '0.13.2', items: [
+      { source: 'schema', severity: 'warning', code: 'W_TARGET_EVIDENCE', path: '/Zone/Zone 1/BuildingElement/Wall (N)/u_value', message: "'Wall (N)' states its U-value: 0.18. Enter it only if documented: keep the document." },
+      { source: 'schema', severity: 'warning', code: 'W_TARGET_INPUT', path: '/Zone', message: 'A note.' },
+    ] });
+    render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="idle" saveError={null} />
+      </GeometryStoreProvider>,
+    );
+    expect(screen.queryByRole('button', { name: /^(Check|Build Error|Not validated)/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('FilenameBar rejected save', () => {
+  it('keeps the Build Error chip for a save rejected with no items, beside the live notices', () => {
+    const store = createGeometryStore();
+    store.getState().setTargetValidation({ hemVersion: '0.13.2', items: [{ source: 'schema', severity: 'warning', code: 'W_TARGET_INPUT', path: '/Zone', message: 'A note.' }] });
+    render(
+      <GeometryStoreProvider store={store}>
+        <FilenameBar documentHost={documentHostHarness()} saveStatus="error" saveError={null} buildError="Conversion failed" />
+      </GeometryStoreProvider>,
+    );
+    expect(screen.getByRole('button', { name: /^Build Error/ })).toHaveClass('status-chip--error');
   });
 });

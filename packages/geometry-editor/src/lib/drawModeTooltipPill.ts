@@ -246,6 +246,12 @@ export function getDrawModeTooltipText(
     return 'Click a sloped roof where the dormer window centre should go';
   }
 
+  if (drawMode === 'bay' || drawMode === 'conservatory') {
+    if (drawPoints.length === 0) return 'Click where the opening starts';
+    if (drawPoints.length === 1) return 'Click where the opening ends';
+    return 'Drag out, click to set the projection';
+  }
+
   // Ducts and pipes skip the shape-switch clause: their dropdown already shows the keys.
   const showShapeSwitch = drawElementType !== 'MechanicalVentilationDuctwork' && drawElementType !== 'WaterPipework';
   if (drawMode === 'line' || drawMode === 'tb-plan-line') {

@@ -108,6 +108,23 @@ describe('elementNameRemap', () => {
     expect(result.extra_json?.hemie_bundle).toEqual({ kind: 'bay', bundle_id: 'bay-1', role: 'left-wall', host_wall: 'Front wall' });
   });
 
+  it('a wall rename moves a roof part’s edge types and slope roles', () => {
+    const wall = makeElement({ id: 'wall', name: 'Wall (S)' });
+    const tag = (role: string, extra = {}) => ({ extra_json: { hemie_bundle: { kind: 'roof', bundle_id: 'roof-0', role, ...extra } } });
+    const anchor = makeElement({ id: 'a', name: 'Roof 1 Wall (S) slope', ...tag('slope:Wall (S)', { parameters: { level: 0, at: { x: 1, y: 1 }, edges: { 'Wall (S)': 'gable', 'Wall (N)': 'eaves' } } }) });
+    const upper = makeElement({ id: 'b', name: 'Roof 1 Wall (S) upper slope 2', ...tag('slope:Wall (S):upper:2') });
+    const other = makeElement({ id: 'c', name: 'Roof 1 Wall (N) slope', ...tag('slope:Wall (N)') });
+    const elementsById = { wall: { ...wall, name: 'Front wall' }, a: anchor, b: upper, c: other };
+
+    const result = applyElementRenamePlanToElementsById(elementsById, ['a', 'b', 'c'], [{ elementId: 'wall', from: 'Wall (S)', to: 'Front wall' }]);
+
+    const bundle = (id: string) => result.elementsById[id].extra_json?.hemie_bundle as { role: string; parameters?: { edges: Record<string, string> } };
+    expect(bundle('a').role).toBe('slope:Front wall');
+    expect(bundle('a').parameters?.edges).toEqual({ 'Front wall': 'gable', 'Wall (N)': 'eaves' });
+    expect(bundle('b').role).toBe('slope:Front wall:upper:2');
+    expect(result.elementsById.c).toBe(other);
+  });
+
   it('remaps wet emitter distribution system references', () => {
     const emitter = makeElement({
       id: 'emitter',

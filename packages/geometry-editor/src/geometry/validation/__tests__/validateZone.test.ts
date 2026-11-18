@@ -54,3 +54,14 @@ describe('validateZone where the target takes thermal-bridge records only', () =
     expect(result.issues).toContainEqual(expect.objectContaining({ fieldKey: 'simplifiedThermalBridging', message: expect.stringContaining('Untick Simplified') }));
   });
 });
+
+// An existing building's converter reads only the zone's areas: no height or volume finding there.
+it('checks the zone height and volume only where the target reads them', () => {
+  const odd = { ...zone, height: 0, volume: 0, _heightUserOverride: true, _derivedHeight: 2.4 } as Zone;
+  const keys = (constructionBands: boolean) => {
+    const result = validateZone(odd, { constructionBands });
+    return [...result.issues, ...result.warnings].map((i) => i.fieldKey).filter((key) => key === 'height' || key === 'volume');
+  };
+  expect(keys(false)).toEqual(['height', 'volume', 'height']);
+  expect(keys(true)).toEqual([]);
+});

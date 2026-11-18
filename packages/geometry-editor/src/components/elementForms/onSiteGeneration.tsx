@@ -48,9 +48,9 @@ import {
   useDecimalInput,
   useIntegerInput,
 } from './formPrimitives';
-import type { ElementFormModule, ElementFormStateCtx } from './types';
+import type { ElementFormModule, ElementFormMore, ElementFormRenderCtx, ElementFormStateCtx } from './types';
+import { compassPoint } from '../../lib/parentOrientation';
 import { useKeyedState } from '../../hooks/useKeyedState';
-import { CompactSegmentedControl } from '../WindowDetailControls';
 
 function roundToInt(value: number): number {
   return Math.round(value ?? 0);
@@ -69,9 +69,9 @@ export interface OnSiteGenerationFormState {
   getCurrentOrientation: (element: Element) => number;
   /** The panel's ventilation strategies, from the target schema (empty when the schema has none). */
   ventilationStrategies: string[];
-  /** An existing building's array size: from its panel count or its drawn area, once the user picks. */
-  pvSizeChosen: 'count' | 'drawn' | null;
-  setPvSizeChosen: (value: 'count' | 'drawn' | null) => void;
+  /** An existing building's roof-given pitch or orientation the user opened to edit. */
+  hostFieldEditing: 'pitch' | 'orientation360' | null;
+  setHostFieldEditing: (value: 'pitch' | 'orientation360' | null) => void;
 }
 
 /** The existing-building PV mounting types (schema `PhotovoltaicMountingType`). */
@@ -80,6 +80,28 @@ const PV_MOUNTING_TYPES = [
   { value: 'integrated', label: 'Integrated into the roof' },
   { value: 'ground-mounted', label: 'Ground-mounted' },
 ];
+
+/** HEM:EPC's inverter: its type and whether it is inside, one choice; blank takes the defaults. */
+const PV_INVERTERS = [
+  { value: 'string_inverter|inside', label: 'String, inside' },
+  { value: 'string_inverter|outside', label: 'String, outside' },
+  { value: 'optimised_inverter|inside', label: 'Optimised, inside' },
+  { value: 'optimised_inverter|outside', label: 'Optimised, outside' },
+];
+
+/** The inverter choice the PV states: blank when it states neither its type nor where it is. */
+export function inverterChoice(extra: Readonly<Record<string, unknown>>): string {
+  if (extra.inverter_type === undefined && extra.inverter_is_inside === undefined) return '';
+  return `${extra.inverter_type === 'optimised_inverter' ? 'optimised_inverter' : 'string_inverter'}|${extra.inverter_is_inside === false ? 'outside' : 'inside'}`;
+}
+
+/** The PV's data with this inverter choice; blank removes both fields for the defaults. */
+export function withInverterChoice(extra: Readonly<Record<string, unknown>>, choice: string): Record<string, unknown> {
+  const rest = Object.fromEntries(Object.entries(extra).filter(([key]) => key !== 'inverter_type' && key !== 'inverter_is_inside'));
+  if (!choice) return rest;
+  const [type, place] = choice.split('|');
+  return { ...rest, inverter_type: type, inverter_is_inside: place === 'inside' };
+}
 
 const VENTILATION_STRATEGY_LABELS: Record<string, string> = {
   unventilated: 'Unventilated',
@@ -262,11 +284,11 @@ function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only when selection or element version changes
   }, [ctx.selection?.id, ctx.selection?.type, ctx.selectedElementV]);
 
-  const [pvSizeChosen, setPvSizeChosen] = useKeyedState<'count' | 'drawn' | null>(ctx.selection?.id ?? '', null);
+  const [hostFieldEditing, setHostFieldEditing] = useKeyedState<'pitch' | 'orientation360' | null>(ctx.selection?.id ?? '', null);
 
   return {
-    pvSizeChosen,
-    setPvSizeChosen,
+    hostFieldEditing,
+    setHostFieldEditing,
     peakPowerInput,
     onSitePitchInput,
     onSiteOrientationInput,
@@ -278,47 +300,8 @@ function useFormState(ctx: ElementFormStateCtx): OnSiteGenerationFormState {
   };
 }
 
-export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormState> = {
-  type: 'OnSiteGeneration',
-  useFormState,
-
-  hydrate(state, element) {
-    if (element.type !== 'OnSiteGeneration') return;
-    // On-site solar (element/global selection — legacy branches were identical)
-    const peakPower = 'peak_power' in element && typeof element.peak_power === 'number'
-      ? roundToTwoDecimals(element.peak_power)
-      : (element.peak_power ?? '');
-    const pitch =
-      'pitch' in element && typeof element.pitch === 'number'
-        ? element.pitch
-        : (element.pitch ?? '');
-    const orientation = roundToInt(state.getCurrentOrientation(element));
-    const baseHeight =
-      'base_height' in element && typeof element.base_height === 'number'
-        ? roundToTwoDecimals(element.base_height)
-        : (element.base_height ?? '');
-    const width =
-      'width' in element && typeof element.width === 'number'
-        ? roundToTwoDecimals(element.width)
-        : (element.width ?? '');
-    const height =
-      'height' in element && typeof element.height === 'number'
-        ? roundToTwoDecimals(element.height)
-        : (element.height ?? '');
-
-    state.peakPowerInput.setValue(peakPower);
-    state.onSitePitchInput.setValue(pitch);
-    state.onSiteOrientationInput.setValue(orientation);
-    state.onSiteBaseHeightInput.setValue(baseHeight);
-    state.onSiteWidthInput.setValue(width);
-    state.onSiteHeightInput.setValue(height);
-  },
-
-  reset() {
-    // Legacy resetFormFields never reset OnSiteGeneration state; preserved as-is.
-  },
-
-  renderPanel(state, ctx) {
+/** The PV panel's fields, and on an existing building those that sit under "More". */
+function pvView(state: OnSiteGenerationFormState, ctx: ElementFormRenderCtx): { main: ReactNode; more: ElementFormMore | null } {
     const { peakPowerInput, onSitePitchInput, onSiteOrientationInput, onSiteBaseHeightInput, onSiteWidthInput, onSiteHeightInput } = state;
     const {
       elementType,
@@ -336,6 +319,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
       getGlobalOrientationOffset,
       onSiteHostDerivation,
       selectedPvDimensionNotes,
+      setSelection,
       hemDatabaseProducts,
       existingBuilding,
     } = ctx;
@@ -346,7 +330,7 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
     // peak power and inverter defaulted unless stated; the mounting type gives the ventilation.
     const existingPv = hemDatabaseProducts && existingBuilding;
     const pvExtra = readRecord(pvElement?.extra_json);
-    const pvSizeFromCount = Boolean(existingPv && (state.pvSizeChosen ? state.pvSizeChosen === 'count' : pvExtra.panel_count !== undefined));
+    const panelCount = typeof pvExtra.panel_count === 'number' ? pvExtra.panel_count : undefined;
     const patchPvExtra = (key: string, value: unknown) => {
       if (pvElement) updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), [key]: value } } as Partial<Element>);
     };
@@ -473,198 +457,129 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
       } as Partial<Element>);
     };
 
-    return (
+    const hostName = onSiteHostDerivation?.hostName;
+    const renderHostResetRow = (
+      fieldKey: 'pitch' | 'orientation360' | 'base_height',
+      unitSuffix: string,
+      inputJsx: ReactNode,
+      currentValue: number | '',
+      onReset: (derived: number) => void,
+    ) => {
+      const derivedValue = onSiteHostDerivation?.derived[fieldKey];
+      const hasHostValue = typeof derivedValue === 'number' && Number.isFinite(derivedValue);
+      const epsilon = fieldKey === 'base_height' ? 0.01 : 0.5;
+      const current = typeof currentValue === 'number' ? currentValue : null;
+      const isDivergent =
+        hasHostValue && current !== null && Math.abs(current - (derivedValue as number)) > epsilon;
+      return (
+        <div
+          className="element-input"
+          style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
+        >
+          <div className={hasHostValue && !isDivergent ? 'field-value--source' : ''} style={{ display: 'flex', gap: '4px', alignItems: 'center', width: '100%' }}>
+            {inputJsx}
+          </div>
+          {hasHostValue ? (
+            <div>
+              <DerivedSource
+                derived={derivedValue}
+                current={currentValue}
+                tolerance={epsilon}
+                info={<SourceNote>from {hostName ?? 'the roof'}</SourceNote>}
+                useLabel={`Use ${hostName ? hostName.replace(/^[A-Z](?![A-Z])/, (c) => c.toLowerCase()) : 'the roof'}`}
+                unit={unitSuffix.trim() || undefined}
+                fieldLabel={fieldKey === 'base_height' ? 'Base height' : fieldKey === 'pitch' ? 'Pitch' : 'Orientation'}
+                onUse={onReset}
+              />
+            </div>
+          ) : null}
+        </div>
+      );
+    };
+    const pitchInput = (autoFocus = false) => (
       <>
-        {existingPv && pvElement ? (
-          <>
-            <div className="element-label">Mounting type</div>
-            <div className="element-input">
-              <StandardDropdown
-                value={typeof pvExtra.mounting_type === 'string' ? pvExtra.mounting_type : ''}
-                onChange={(value) => patchPvExtra('mounting_type', value || undefined)}
-                options={PV_MOUNTING_TYPES}
-                placeholder="Required"
-                variant="ghost"
-                size="md"
-              />
-            </div>
-            {/* One size: a stated panel count replaces the drawn area (`hemie_systems.rs`). */}
-            <div className="element-label">Size from</div>
-            <div className="element-input">
-              <CompactSegmentedControl
-                ariaLabel="Size from"
-                value={pvSizeFromCount ? 'count' : 'drawn'}
-                options={[{ value: 'count', label: 'Panel count' }, { value: 'drawn', label: 'Drawn area' }]}
-                onChange={(next) => {
-                  state.setPvSizeChosen(next);
-                  if (next === 'drawn' && pvExtra.panel_count !== undefined) patchPvExtra('panel_count', undefined);
-                }}
-              />
-            </div>
-            {pvSizeFromCount ? <>
-            <div className="element-label">Panel count</div>
-            <div className="element-input">
+        <StandardInput
+          {...decimalInputProps(onSitePitchInput)}
+          autoFocus={autoFocus}
+          unit={fieldUnit('pitch')}
+          step="0.5"
+          min="0"
+          max="90"
+          variant="ghost"
+          size="md"
+          className="flex-1"
+        />
+        <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('pitch', onSitePitchInput.value)} issue={getFieldValidationIssue('pitch', onSitePitchInput.value) || undefined} />
+      </>
+    );
+    const usePitch = (derived: number) => {
+      onSitePitchInput.setValue(derived);
+      commitExistingElementDraft({
+        pitch: derived,
+        _pitchUserOverride: false,
+      } as Partial<Element>);
+    };
+    const orientationInput = (autoFocus = false) => (
+      <>
+        <StandardInput
+          {...integerInputProps(onSiteOrientationInput)}
+          autoFocus={autoFocus}
+          unit={fieldUnit('orientation360')}
+          step="1"
+          min="0"
+          max="360"
+          variant="ghost"
+          size="md"
+          className="flex-1"
+        />
+        <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('orientation360', onSiteOrientationInput.value)} issue={getFieldValidationIssue('orientation360', onSiteOrientationInput.value) || undefined} />
+      </>
+    );
+    const useOrientation = (derived: number) => {
+      onSiteOrientationInput.setValue(Math.round(derived));
+      resetOnSiteOrientationToHost(derived);
+    };
+    const baseHeightRows = (
+      <>
+        {renderFieldLabel(`${resolveFieldLabelContent('base_height')} (m):`, elementType, 'base_height')}
+        <div ref={registerBaseFieldRefs('base_height')}>
+          {renderHostResetRow(
+            'base_height',
+            ' m',
+            <>
               <StandardInput
-                type="number"
-                min="1"
-                step="1"
-                value={typeof pvExtra.panel_count === 'number' ? String(pvExtra.panel_count) : ''}
-                error={typeof pvExtra.panel_count === 'number' ? undefined : 'Enter the number of panels.'}
-                onChange={(e) => {
-                  const count = Number.parseInt(e.target.value, 10);
-                  patchPvExtra('panel_count', Number.isFinite(count) && count > 0 ? count : undefined);
-                }}
+                {...decimalInputProps(onSiteBaseHeightInput)}
+                unit={fieldUnit('base_height')}
+                step="0.01"
+                min="0"
+                max="500"
                 variant="ghost"
                 size="md"
                 className="flex-1"
               />
-            </div>
-            <div className="field-source-note">The panel count gives the array size; the outline only places it on the roof.</div>
-            </> : null}
-          </>
-        ) : null}
-        {renderFieldLabelWithComparisonIndicator('Peak Power (kWp):', elementType, globalComparisonFieldIndicators.peak_power)}
-        <div className="element-input" ref={registerBaseFieldRef('peak_power')}>
-          <StandardInput
-            {...decimalInputProps(peakPowerInput)}
-            placeholder={existingPv ? 'Default' : undefined}
-            unit={fieldUnit('peak_power')}
-            step="0.001"
-            min="0.001"
-            max="100"
-            variant="ghost"
-            size="md"
-            className="flex-1"
-          />
-          <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('peak_power', peakPowerInput.value)} issue={getFieldValidationIssue('peak_power', peakPowerInput.value) || undefined} />
+              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('base_height', onSiteBaseHeightInput.value)} issue={getFieldValidationIssue('base_height', onSiteBaseHeightInput.value) || undefined} />
+            </>,
+            onSiteBaseHeightInput.value,
+            (derived) => {
+              onSiteBaseHeightInput.setValue(roundToTwoDecimals(derived));
+              commitExistingElementDraft({
+                base_height: derived,
+                _baseHeightUserOverride: false,
+              } as Partial<Element>);
+            },
+          )}
         </div>
-        {(() => {
-          const hostName = onSiteHostDerivation?.hostName;
-          const renderHostResetRow = (
-            fieldKey: 'pitch' | 'orientation360' | 'base_height',
-            unitSuffix: string,
-            inputJsx: ReactNode,
-            currentValue: number | '',
-            onReset: (derived: number) => void,
-          ) => {
-            const derivedValue = onSiteHostDerivation?.derived[fieldKey];
-            const hasHostValue = typeof derivedValue === 'number' && Number.isFinite(derivedValue);
-            const epsilon = fieldKey === 'base_height' ? 0.01 : 0.5;
-            const current = typeof currentValue === 'number' ? currentValue : null;
-            const isDivergent =
-              hasHostValue && current !== null && Math.abs(current - (derivedValue as number)) > epsilon;
-            return (
-              <div
-                className="element-input"
-                style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'stretch' }}
-              >
-                <div className={hasHostValue && !isDivergent ? 'field-value--source' : ''} style={{ display: 'flex', gap: '4px', alignItems: 'center', width: '100%' }}>
-                  {inputJsx}
-                </div>
-                {hasHostValue ? (
-                  <div>
-                    <DerivedSource
-                      derived={derivedValue}
-                      current={currentValue}
-                      tolerance={epsilon}
-                      info={<SourceNote>from {hostName ?? 'the roof'}</SourceNote>}
-                      useLabel={`Use ${hostName ? hostName.replace(/^[A-Z](?![A-Z])/, (c) => c.toLowerCase()) : 'the roof'}`}
-                      unit={unitSuffix.trim() || undefined}
-                      fieldLabel={fieldKey === 'base_height' ? 'Base height' : fieldKey === 'pitch' ? 'Pitch' : 'Orientation'}
-                      onUse={onReset}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            );
-          };
-          return (
-            <>
-              {renderFieldLabel('Pitch (degrees):', elementType, 'pitch')}
-              <div ref={registerBaseFieldRefs('pitch')}>
-                {renderHostResetRow(
-                  'pitch',
-                  '°',
-                  <>
-                    <StandardInput
-                      {...decimalInputProps(onSitePitchInput)}
-                      unit={fieldUnit('pitch')}
-                      step="0.5"
-                      min="0"
-                      max="90"
-                      variant="ghost"
-                      size="md"
-                      className="flex-1"
-                    />
-                    <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('pitch', onSitePitchInput.value)} issue={getFieldValidationIssue('pitch', onSitePitchInput.value) || undefined} />
-                  </>,
-                  onSitePitchInput.value,
-                  (derived) => {
-                    onSitePitchInput.setValue(derived);
-                    commitExistingElementDraft({
-                      pitch: derived,
-                      _pitchUserOverride: false,
-                    } as Partial<Element>);
-                  },
-                )}
-              </div>
-              {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
-              <div ref={registerBaseFieldRefs('orientation360')}>
-                {renderHostResetRow(
-                  'orientation360',
-                  '°',
-                  <>
-                    <StandardInput
-                      {...integerInputProps(onSiteOrientationInput)}
-                      unit={fieldUnit('orientation360')}
-                      step="1"
-                      min="0"
-                      max="360"
-                      variant="ghost"
-                      size="md"
-                      className="flex-1"
-                    />
-                    <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('orientation360', onSiteOrientationInput.value)} issue={getFieldValidationIssue('orientation360', onSiteOrientationInput.value) || undefined} />
-                  </>,
-                  onSiteOrientationInput.value,
-                  (derived) => {
-                    onSiteOrientationInput.setValue(Math.round(derived));
-                    resetOnSiteOrientationToHost(derived);
-                  },
-                )}
-              </div>
-              {renderFieldLabel(`${resolveFieldLabelContent('base_height')} (m):`, elementType, 'base_height')}
-              <div ref={registerBaseFieldRefs('base_height')}>
-                {renderHostResetRow(
-                  'base_height',
-                  ' m',
-                  <>
-                    <StandardInput
-                      {...decimalInputProps(onSiteBaseHeightInput)}
-                      unit={fieldUnit('base_height')}
-                      step="0.01"
-                      min="0"
-                      max="500"
-                      variant="ghost"
-                      size="md"
-                      className="flex-1"
-                    />
-                    <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('base_height', onSiteBaseHeightInput.value)} issue={getFieldValidationIssue('base_height', onSiteBaseHeightInput.value) || undefined} />
-                  </>,
-                  onSiteBaseHeightInput.value,
-                  (derived) => {
-                    onSiteBaseHeightInput.setValue(roundToTwoDecimals(derived));
-                    commitExistingElementDraft({
-                      base_height: derived,
-                      _baseHeightUserOverride: false,
-                    } as Partial<Element>);
-                  },
-                )}
-              </div>
-            </>
-          );
-        })()}
-        {pvSizeFromCount ? null : <>
+      </>
+    );
+    const footprintDisabled = (() => {
+      if (!selection?.id) return true;
+      const el = getElementById(selection.id) as any;
+      if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return true;
+      const [p0, p1] = el.coordinates;
+      return Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1e-4;
+    })();
+    const sizeRows = (
+      <>
         {renderFieldLabel('Width (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('width')}>
           <StandardInput
@@ -703,55 +618,225 @@ export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormS
             {selectedPvDimensionNotes.height}
           </div>
         ) : null}
-        </>}
-        {/* A products target's PV root has no such field, and the panel needs one: it is stated here. */}
-        {hemDatabaseProducts && !existingPv && state.ventilationStrategies.length > 0 && pvElement ? (
+      </>
+    );
+
+    const footprintButtons = (
+      <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <button type="button" className="btn editor-action-btn editor-action-btn--secondary" disabled={footprintDisabled} onClick={resetOnSiteDimensions}>
+          Rebuild footprint
+        </button>
+        <button type="button" className="btn editor-action-btn editor-action-btn--secondary" disabled={footprintDisabled} onClick={switchOnSiteOrientation}>
+          Switch orientation
+        </button>
+      </div>
+    );
+
+    if (existingPv && pvElement) {
+      // A value the roof gives reads as text with its source; clicking it edits it. Off a roof, or
+      // once it differs, it is an input (with "Use <roof>" while on one).
+      const derived = onSiteHostDerivation?.derived;
+      const followsHost = (key: 'pitch' | 'orientation360', value: number | '') =>
+        typeof derived?.[key] === 'number' && typeof value === 'number' && Math.abs(value - derived[key]!) <= 0.5 && state.hostFieldEditing !== key;
+      const hostLink = onSiteHostDerivation ? (
+        <span className="field-source-note">from <button type="button" className="field-source-note__link" onClick={() => setSelection({ type: 'element', id: onSiteHostDerivation.hostId })}>{onSiteHostDerivation.hostName}</button></span>
+      ) : null;
+      const hostField = (key: 'pitch' | 'orientation360', label: string, value: number | '', text: string, input: (autoFocus: boolean) => ReactNode, onUse: (derived: number) => void) => (
+        <div ref={registerBaseFieldRefs(key)} style={{ minWidth: 0 }}>
+          <div className="element-label" style={{ display: 'flex', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>{label}{followsHost(key, value) ? hostLink : null}</div>
+          {followsHost(key, value)
+            // As tall as an input, so a value beside one being edited sits on its line.
+            ? <button type="button" className="field-source-note__link" style={{ textDecoration: 'none', fontSize: 'var(--font-size-sm, 13px)', color: 'var(--text-primary)', minHeight: 'var(--form-input-height)', display: 'flex', alignItems: 'center' }} aria-label={`${label} ${text}, from ${onSiteHostDerivation?.hostName ?? 'the roof'}. Edit`} title="Edit" onClick={() => state.setHostFieldEditing(key)}>{text}</button>
+            : renderHostResetRow(key, '°', input(state.hostFieldEditing === key), value, (next) => { state.setHostFieldEditing(null); onUse(next); })}
+        </div>
+      );
+      const inverter = inverterChoice(pvExtra);
+      const orientation = onSiteOrientationInput.value;
+      const peakPowerLabel = renderFieldLabel('Peak power', elementType, 'peak_power');
+      const inverterLabel = renderFieldLabel('Inverter', elementType, 'inverter_type');
+      return {
+        main: (
           <>
-            <div className="element-label">Panel ventilation</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              <div>
+                <div className="element-label">Panels</div>
+                <div className="element-input">
+                  {/* Blank, the drawn area gives the array size; a count replaces it (`hemie_systems.rs`). */}
+                  <StandardInput
+                    type="number"
+                    min="1"
+                    step="1"
+                    aria-label="Panels"
+                    value={panelCount === undefined ? '' : String(panelCount)}
+                    placeholder="from drawn area"
+                    onChange={(e) => {
+                      const count = Number.parseInt(e.target.value, 10);
+                      patchPvExtra('panel_count', Number.isFinite(count) && count > 0 ? count : undefined);
+                    }}
+                    variant="ghost"
+                    size="md"
+                    className="flex-1"
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="element-label">Mounting</div>
+                <div className="element-input">
+                  <StandardDropdown
+                    aria-label="Mounting"
+                    value={typeof pvExtra.mounting_type === 'string' ? pvExtra.mounting_type : ''}
+                    onChange={(value) => patchPvExtra('mounting_type', value || undefined)}
+                    options={PV_MOUNTING_TYPES}
+                    placeholder="Required"
+                    variant="ghost"
+                    size="md"
+                  />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              {hostField('pitch', 'Pitch', onSitePitchInput.value, typeof onSitePitchInput.value === 'number' ? `${Math.round(onSitePitchInput.value * 10) / 10}°` : '', pitchInput, usePitch)}
+              {hostField('orientation360', 'Faces', orientation, typeof orientation === 'number' ? `${compassPoint(orientation)} · ${orientation}°` : '', orientationInput, useOrientation)}
+            </div>
+            {peakPowerLabel}
+            <div className="element-input" ref={registerBaseFieldRef('peak_power')}>
+              <StandardInput
+                {...decimalInputProps(peakPowerInput)}
+                aria-label="Peak power"
+                placeholder={panelCount === undefined ? 'default from the drawn area' : `default for ${panelCount} panel${panelCount === 1 ? '' : 's'}`}
+                unit="kWp"
+                step="0.001"
+                min="0.001"
+                max="100"
+                variant="ghost"
+                size="md"
+                className="flex-1"
+              />
+              <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('peak_power', peakPowerInput.value)} issue={getFieldValidationIssue('peak_power', peakPowerInput.value) || undefined} />
+            </div>
+            {inverterLabel}
             <div className="element-input">
               <StandardDropdown
-                value={typeof ventilationStrategy === 'string' ? ventilationStrategy : ''}
-                onChange={(value) => updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), ventilation_strategy: value || undefined } } as Partial<Element>)}
-                options={state.ventilationStrategies.map((value) => ({ value, label: VENTILATION_STRATEGY_LABELS[value] ?? value }))}
-                placeholder="Select…"
+                aria-label="Inverter"
+                value={inverter}
+                onChange={(value) => updateElement(pvElement.id, { extra_json: withInverterChoice(pvExtra, value || '') } as Partial<Element>)}
+                options={PV_INVERTERS}
+                placeholder="String, inside"
                 variant="ghost"
                 size="md"
               />
             </div>
+            <div className="field-source-note">{inverter
+              ? <button type="button" className="field-source-note__link" onClick={() => updateElement(pvElement.id, { extra_json: withInverterChoice(pvExtra, '') } as Partial<Element>)}>Use default</button>
+              : 'default'}</div>
           </>
-        ) : null}
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <button
-            type="button"
-            className="btn editor-action-btn editor-action-btn--secondary"
-            disabled={(() => {
-              if (!selection?.id) return true;
-              const el = getElementById(selection.id) as any;
-              if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return true;
-              const [p0, p1] = el.coordinates;
-              return Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1e-4;
-            })()}
-            onClick={resetOnSiteDimensions}
-          >
-            Rebuild footprint
-          </button>
-          <button
-            type="button"
-            className="btn editor-action-btn editor-action-btn--secondary"
-            disabled={(() => {
-              if (!selection?.id) return true;
-              const el = getElementById(selection.id) as any;
-              if (!el || el.type !== 'OnSiteGeneration' || !el.coordinates || el.coordinates.length < 2) return true;
-              const [p0, p1] = el.coordinates;
-              return Math.hypot(p1.x - p0.x, p1.y - p0.y) < 1e-4;
-            })()}
-            onClick={switchOnSiteOrientation}
-          >
-            Switch orientation
-          </button>
-        </div>
-      </>
-    );
+        ),
+        more: {
+          fields: <>{baseHeightRows}{sizeRows}{footprintButtons}</>,
+          labels: ['base height', 'width', 'height'],
+          keys: ['base_height', 'width', 'height'],
+          // Open while the base height is the user's own rather than the roof's.
+          stated: (pvElement as { _baseHeightUserOverride?: boolean })._baseHeightUserOverride === true,
+        },
+      };
+    }
+
+    return {
+      main: (
+        <>
+          {renderFieldLabelWithComparisonIndicator('Peak Power (kWp):', elementType, globalComparisonFieldIndicators.peak_power, 'peak_power')}
+          <div className="element-input" ref={registerBaseFieldRef('peak_power')}>
+            <StandardInput
+              {...decimalInputProps(peakPowerInput)}
+              unit={fieldUnit('peak_power')}
+              step="0.001"
+              min="0.001"
+              max="100"
+              variant="ghost"
+              size="md"
+              className="flex-1"
+            />
+            <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('peak_power', peakPowerInput.value)} issue={getFieldValidationIssue('peak_power', peakPowerInput.value) || undefined} />
+          </div>
+          {renderFieldLabel('Pitch (degrees):', elementType, 'pitch')}
+          <div ref={registerBaseFieldRefs('pitch')}>
+            {renderHostResetRow('pitch', '°', pitchInput(), onSitePitchInput.value, usePitch)}
+          </div>
+          {renderFieldLabel('Orientation (degrees):', elementType, 'orientation360')}
+          <div ref={registerBaseFieldRefs('orientation360')}>
+            {renderHostResetRow('orientation360', '°', orientationInput(), onSiteOrientationInput.value, useOrientation)}
+          </div>
+          {baseHeightRows}
+          {sizeRows}
+          {/* A products target's PV root has no such field, and the panel needs one: it is stated here. */}
+          {hemDatabaseProducts && state.ventilationStrategies.length > 0 && pvElement ? (
+            <>
+              <div className="element-label">Panel ventilation</div>
+              <div className="element-input">
+                <StandardDropdown
+                  value={typeof ventilationStrategy === 'string' ? ventilationStrategy : ''}
+                  onChange={(value) => updateElement(pvElement.id, { extra_json: { ...readRecord(pvElement.extra_json), ventilation_strategy: value || undefined } } as Partial<Element>)}
+                  options={state.ventilationStrategies.map((value) => ({ value, label: VENTILATION_STRATEGY_LABELS[value] ?? value }))}
+                  placeholder="Select…"
+                  variant="ghost"
+                  size="md"
+                />
+              </div>
+            </>
+          ) : null}
+          {footprintButtons}
+        </>
+      ),
+      more: null,
+    };
+}
+
+export const onSiteGenerationFormModule: ElementFormModule<OnSiteGenerationFormState> = {
+  type: 'OnSiteGeneration',
+  useFormState,
+
+  hydrate(state, element) {
+    if (element.type !== 'OnSiteGeneration') return;
+    // On-site solar (element/global selection — legacy branches were identical)
+    const peakPower = 'peak_power' in element && typeof element.peak_power === 'number'
+      ? roundToTwoDecimals(element.peak_power)
+      : (element.peak_power ?? '');
+    const pitch =
+      'pitch' in element && typeof element.pitch === 'number'
+        ? element.pitch
+        : (element.pitch ?? '');
+    const orientation = roundToInt(state.getCurrentOrientation(element));
+    const baseHeight =
+      'base_height' in element && typeof element.base_height === 'number'
+        ? roundToTwoDecimals(element.base_height)
+        : (element.base_height ?? '');
+    const width =
+      'width' in element && typeof element.width === 'number'
+        ? roundToTwoDecimals(element.width)
+        : (element.width ?? '');
+    const height =
+      'height' in element && typeof element.height === 'number'
+        ? roundToTwoDecimals(element.height)
+        : (element.height ?? '');
+
+    state.peakPowerInput.setValue(peakPower);
+    state.onSitePitchInput.setValue(pitch);
+    state.onSiteOrientationInput.setValue(orientation);
+    state.onSiteBaseHeightInput.setValue(baseHeight);
+    state.onSiteWidthInput.setValue(width);
+    state.onSiteHeightInput.setValue(height);
+  },
+
+  reset() {
+    // Legacy resetFormFields never reset OnSiteGeneration state; preserved as-is.
+  },
+
+  renderPanel(state, ctx) {
+    return pvView(state, ctx).main;
+  },
+
+  renderMore(state, ctx) {
+    return pvView(state, ctx).more;
   },
 
   subtype() {

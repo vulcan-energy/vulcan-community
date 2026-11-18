@@ -1,0 +1,226 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors */
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* The bay and conservatory part editor: the element editor's header and footer around one box of fields. */
+.part-editor__kind {
+  color: var(--accent-primary);
+  text-transform: uppercase;
+}
+
+.part-editor__host {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+  line-height: 1.2;
+}
+
+.part-editor__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.part-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.part-editor__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.part-editor__note {
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.part-editor__required {
+  color: var(--accent-primary);
+  font-size: var(--font-size-caption);
+  font-weight: 400;
+}
+
+.part-editor__two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.part-editor__readout {
+  color: var(--text-primary);
+}
+
+.part-editor__divider {
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.part-editor__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.part-editor__chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+  cursor: pointer;
+}
+
+.part-editor__chip.is-marked {
+  border-color: var(--accent-primary);
+  background: var(--selected-bg);
+  color: var(--text-primary);
+}
+
+.part-back-link {
+  margin-bottom: 6px;
+  font-size: var(--font-size-caption);
+}
+
+.part-editor .element-editor-header__name {
+  flex: 1 1 auto;
+  /* "Conservatory 1" stays whole; the host text wraps instead. */
+  min-width: 8em;
+}
+
+/* The conservatory tool's first question: two answer cards, before anything is drawn. */
+.part-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.part-question__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.part-question__q {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.part-question__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.part-question__choice b {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.part-question__choice span {
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.part-question__choice.is-on {
+  border-color: var(--row-highlight-border);
+  background: var(--selected-bg);
+}
+
+/* Roof part: the pitch control (category over its angle, or degrees) and the chips on the plan. */
+.part-editor__pitch {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.part-editor__pitch > [role='group'] {
+  flex: 1 1 auto;
+}
+
+.part-editor__pitch [role='group'] button {
+  white-space: pre-line;
+}
+
+.part-editor__pitch-or {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 92px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.roof-chips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1300;
+}
+
+.roof-chip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 7px;
+  border-radius: 9px;
+  background: var(--surface-overlay-solid, var(--surface-overlay));
+  border: 1px solid var(--border-overlay, var(--border-subtle));
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-xxs);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+button.roof-chip {
+  cursor: pointer;
+}
+
+button.roof-chip:hover {
+  border-color: var(--accent-primary);
+}
+
+.roof-chip__k {
+  color: var(--text-muted);
+}
+
+.roof-chip--party {
+  color: var(--canvas-element-party-wall-stroke);
+  border-color: color-mix(in srgb, var(--canvas-element-party-wall-stroke) 50%, transparent);
+}
+
+.roof-chip--party .roof-chip__k {
+  color: inherit;
+}
+
+.roof-chip--on {
+  border-color: var(--accent-primary);
+}
+
+.roof-chip--quiet {
+  color: var(--text-secondary);
+  pointer-events: none;
+}

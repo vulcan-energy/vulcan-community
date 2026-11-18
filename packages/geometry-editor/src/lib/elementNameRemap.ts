@@ -93,6 +93,31 @@ const resolveNameArray = (value: unknown, renameMap: Map<string, string>): unkno
   return changed ? next : value;
 };
 
+/** A roof slope's role names the wall under its eaves: `slope:<wall>`, then `:upper` and `:<n>`. */
+const SLOPE_ROLE = /^slope:(.*?)((?::upper)?(?::\d+)?)$/;
+
+/** The wall names a roof member refers to: its slope's wall and, on the anchor, the edge types' keys. */
+const roofWallNames = (hemie: Record<string, unknown>): string[] => {
+  if (hemie.kind !== 'roof') return [];
+  const slope = typeof hemie.role === 'string' ? SLOPE_ROLE.exec(hemie.role)?.[1] : undefined;
+  const edges = (hemie.parameters as { edges?: Record<string, unknown> } | undefined)?.edges;
+  return [...(slope ? [slope] : []), ...Object.keys(edges ?? {})];
+};
+
+/** A roof member with its slope role and edge-type keys renamed; the same object when none moves. */
+const remapRoofBundle = (hemie: Record<string, unknown>, renameMap: Map<string, string>): Record<string, unknown> => {
+  if (hemie.kind !== 'roof' || !roofWallNames(hemie).some((name) => renameMap.has(name))) return hemie;
+  const match = typeof hemie.role === 'string' ? SLOPE_ROLE.exec(hemie.role) : null;
+  const parameters = hemie.parameters as { edges?: Record<string, unknown> } | undefined;
+  return {
+    ...hemie,
+    ...(match ? { role: `slope:${renameMap.get(match[1]) ?? match[1]}${match[2]}` } : {}),
+    ...(parameters?.edges ? {
+      parameters: { ...parameters, edges: Object.fromEntries(Object.entries(parameters.edges).map(([wall, type]) => [renameMap.get(wall) ?? wall, type])) },
+    } : {}),
+  };
+};
+
 const normalizedRenameEntries = (renamePlan: ElementRenameEntry[]): ElementRenameEntry[] =>
   renamePlan
     .map((entry) => ({
@@ -166,6 +191,7 @@ const collectElementReferenceNames = (element: Element): Set<string> => {
     const hemie = (extraJson as Record<string, unknown>).hemie_bundle;
     if (hemie && typeof hemie === 'object' && !Array.isArray(hemie)) {
       add((hemie as Record<string, unknown>).host_wall);
+      for (const wall of roofWallNames(hemie as Record<string, unknown>)) add(wall);
     }
   }
 
@@ -294,12 +320,15 @@ export const remapElementNameReferences = (
       } as Element['extra_json'];
     }
     const hemie = extraObj.hemie_bundle as Record<string, unknown> | undefined;
-    const hostWall = hemie && typeof hemie === 'object' ? resolveName(hemie.host_wall, renameMap) : undefined;
-    if (hemie && hostWall !== hemie.host_wall) {
-      patch.extra_json = {
-        ...(patch.extra_json ?? extraObj),
-        hemie_bundle: { ...hemie, host_wall: hostWall },
-      } as Element['extra_json'];
+    if (hemie && typeof hemie === 'object') {
+      const hostWall = resolveName(hemie.host_wall, renameMap);
+      const roof = remapRoofBundle(hemie, renameMap);
+      if (hostWall !== hemie.host_wall || roof !== hemie) {
+        patch.extra_json = {
+          ...(patch.extra_json ?? extraObj),
+          hemie_bundle: { ...roof, ...(hostWall !== hemie.host_wall ? { host_wall: hostWall } : {}) },
+        } as Element['extra_json'];
+      }
     }
   }
 

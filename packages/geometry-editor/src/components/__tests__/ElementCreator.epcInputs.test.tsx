@@ -151,3 +151,22 @@ it.each([[warmAirRoot, true], [fhsRoot, false]])('offers a warm-air heater categ
   const category = screen.getByText('Heat source').closest('select')!;
   expect([...category.options].map((option) => option.text).includes('Warm air heater')).toBe(offered);
 });
+
+// An existing building's converter builds its own storeys and reads only the zone's areas
+// (`hemie.rs`): the zone shows no height or volume there.
+it.each([[true, false], [false, true]])('shows the zone height and volume only where the target reads them (construction bands %s)', (constructionBands, shown) => {
+  const port = { ...canonicalGeometrySchemaPort, targetRules: () => ({ constructionBands }) };
+  const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: port });
+  store.setState({ zones: [{ id: 'z', name: 'Zone 1', floorArea: 78.89, height: 2.4, volume: 189.34, livingroom_area: 50, restofdwelling_area: 28.89 }], defaultsLoading: false } as never);
+  render(
+    <GeometryEditorServicePortsProvider schemaPort={port} workspaceResourcePort={unavailableGeometryWorkspaceResourcePort}>
+      <GeometryStoreProvider store={store}>
+        <ElementCreator selection={{ type: 'zone', id: 'z' } as never} setSelection={vi.fn()} useCard={false}
+          inspectorContributions={emptyGeometryInspectorContributions} />
+      </GeometryStoreProvider>
+    </GeometryEditorServicePortsProvider>,
+  );
+  expect(screen.queryByText('Height') !== null).toBe(shown);
+  expect(screen.queryByText('Volume') !== null).toBe(shown);
+  expect(screen.getByText('Living (m²)')).toBeInTheDocument();
+});

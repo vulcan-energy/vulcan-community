@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { act, renderHook } from '@testing-library/react';
+import { createElement, type ChangeEvent, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useWallSharedFormState } from '../../components/elementForms/wallShared';
 import type { Element } from '../../geometry/types';
-import { createGeometryStore } from '../geometryStore';
+import { createGeometryStore, GeometryStoreProvider } from '../geometryStore';
 import { HISTORY_CAPTURE_QUIET_MS } from '../geometryStore/slices/historySlice';
 
 type Store = ReturnType<typeof createGeometryStore>;
@@ -153,5 +156,92 @@ describe('storey heights on mixed storeys', () => {
     store.getState().updateElement(id, { height: undefined } as Partial<Element>);
     store.getState().updateElement(id, { name: 'Renamed' } as Partial<Element>);
     expect((store.getState().elementsById[id] as { height?: number }).height).toBeUndefined();
+  });
+});
+
+describe('a committed wall height fills the storey walls with none', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const heightOf = (store: Store, name: string) => (byName(store, name) as { height?: number }).height;
+  const areaOf = (store: Store, name: string) => (byName(store, name) as { area?: number }).area;
+
+  function drawn(): Store {
+    const store = createGeometryStore({ defaultDefaultsPath: null });
+    store.getState().addZone({ name: 'Zone 1', floorArea: 20, height: 5, volume: 100 });
+    const zoneId = store.getState().zones[0]!.id;
+    store.getState().addElements([
+      wall('A', zoneId, 0, 0),
+      wall('B', zoneId, 0, 5),
+      wall('Gable', zoneId, 0, 10, { height: 3.1, area: 12.4 }),
+      wall('Upper', zoneId, 1, 0),
+    ] as never);
+    const f1 = store.getState().floors.find((floor) => floor.zIndex === 0)!;
+    store.getState().updateFloor(f1.id, { height: 2.5, heightUserOverride: true });
+    // As a model opened with walls drawn and no height stated.
+    store.setState((state) => ({
+      elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, el]) => [id,
+        ['A', 'B', 'Upper'].includes(el.name) ? { ...el, height: undefined, area: 0 } as Element : el])),
+    }));
+    store.getState().seedHistory('load');
+    return store;
+  }
+
+  function heightField(store: Store, name: string) {
+    const id = byName(store, name)!.id;
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(GeometryStoreProvider, { store }, children);
+    return renderHook(() => useWallSharedFormState({
+      elementType: 'BuildingElementOpaque',
+      selection: { type: 'element', id },
+      isExistingElementSelection: () => true,
+      getElementById: (elementId) => store.getState().elementsById[elementId],
+      commitExistingElementDraft: (overrides) => store.getState().updateElement(id, overrides ?? {}),
+      commitElementNumericField: () => () => {},
+      selectedElementV: 0,
+      updateElement: (elementId, updates) => store.getState().updateElement(elementId, updates),
+      getGlobalOrientationOffset: () => 0,
+      getCurrentOrientation: () => 0,
+    }), { wrapper }).result;
+  }
+  const typed = (value: string) => ({ target: { value } }) as ChangeEvent<HTMLInputElement>;
+
+  it('typing 2 then 2.7 then leaving the field fills 2.7 once; walls with a height and other storeys keep theirs; one undo step', () => {
+    const store = drawn();
+    const field = heightField(store, 'A');
+    act(() => field.current.heightInput.handleInputChange(typed('2')));
+    act(() => field.current.heightInput.handleInputChange(typed('2.7')));
+    // Keystrokes write the typed wall only.
+    expect(heightOf(store, 'A')).toBe(2.7);
+    expect(heightOf(store, 'B')).toBeUndefined();
+    act(() => field.current.heightInput.handleBlur());
+    expect(heightOf(store, 'B')).toBe(2.7);
+    expect(areaOf(store, 'B')).toBe(10.8);
+    expect(heightOf(store, 'Gable')).toBe(3.1);
+    expect(heightOf(store, 'Upper')).toBeUndefined();
+    settle();
+    store.getState().undo();
+    expect(['A', 'B', 'Gable', 'Upper'].map((name) => heightOf(store, name) ?? 0)).toEqual([0, 0, 3.1, 0]);
+  });
+
+  it('the filled heights are stored: a later change to the first wall does not move them', () => {
+    const store = drawn();
+    const field = heightField(store, 'A');
+    act(() => field.current.heightInput.handleInputChange(typed('2.7')));
+    act(() => field.current.heightInput.handleBlur());
+    act(() => field.current.heightInput.handleInputChange(typed('2.4')));
+    act(() => field.current.heightInput.handleBlur());
+    expect(heightOf(store, 'A')).toBe(2.4);
+    expect(heightOf(store, 'B')).toBe(2.7);
+  });
+
+  it('a height typed in the floor picker fills its storey walls with none, one undo step', () => {
+    const store = drawn();
+    settle();
+    const f1 = store.getState().floors.find((floor) => floor.zIndex === 0)!;
+    store.getState().updateFloor(f1.id, { height: 2.6, heightUserOverride: true });
+    expect(['A', 'B', 'Gable', 'Upper'].map((name) => heightOf(store, name) ?? 0)).toEqual([2.6, 2.6, 3.1, 0]);
+    settle();
+    store.getState().undo();
+    expect(['A', 'B', 'Gable', 'Upper'].map((name) => heightOf(store, name) ?? 0)).toEqual([0, 0, 3.1, 0]);
   });
 });

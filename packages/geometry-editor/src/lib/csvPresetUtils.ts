@@ -25,6 +25,12 @@ export { SLOPE_PITCH_AXIS_EXTRA_JSON_KEY } from './slopePitchAxis';
 export const NAME_AUTO_SYNC_EXTRA_JSON_KEY = ELEMENT_NAME_AUTO_SYNC_DESCRIPTOR.key;
 
 /**
+ * extra_json key of the evidence files a host links to an element's fields: `{ [fieldKey]: workspacePath[] }`.
+ * It moves with the element (rename, copy, undo); the `_` prefix keeps it out of the HEM input.
+ */
+export const FIELD_EVIDENCE_EXTRA_JSON_KEY = '_evidence';
+
+/**
  * Keys removed from extra_json before WASM → HEM JSON merge.
  * - UI-only: presets, psi picker state, canvas PV footprint flags (`_pv_*`).
  * - Audit-only: large assembly and solver-provenance payloads — HEM does not read them; the saved
@@ -50,6 +56,7 @@ export const EXTRA_JSON_UI_KEYS = [
   'ru_calculator_state_v1',
   /** Window treatment simplified UI snapshot (paired with `treatment` in extra_json) */
   '_treatment_ui',
+  FIELD_EVIDENCE_EXTRA_JSON_KEY,
   /** P1–P3: id of the adjacent / party line for ψ apportion; not a HEM input field. */
   '_vulcan_ui_tb_adjacent_element_id',
   /** CSV form of the key above: the adjacent / party line's name, resolved back to its id on load. */

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { buildHostedLinearParentPatch, compassPoint, openingTooWide, wallUnderOpening } from '../parentOrientation';
+import { buildHostedLinearParentPatch, compassPoint, openingTooWide } from '../parentOrientation';
 import { createGeometryStore } from '../../stores/geometryStore';
 import { unavailableGeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 
@@ -33,30 +33,17 @@ describe('moving a window to another wall', () => {
   });
 });
 
-describe('wallUnderOpening', () => {
-  it('finds the wall a detached window lies on, on its storey only', () => {
-    const lower = wall('Wall (S)', [[0, 0], [4, 0]], 0);
-    const upper = wall('Wall (S) 1', [[0, 0], [4, 0]], 1);
-    const door = wall('Door', [[0, 0], [4, 0]], 1, { is_external_door: true });
-    expect(wallUnderOpening(win([[1, 0], [2, 0]], 1, 1), [door, lower, upper])?.name).toBe('Wall (S) 1');
-    expect(wallUnderOpening(win([[1, 1], [2, 1]], 1, 0), [lower])).toBeUndefined();
-  });
-});
-
 it('names the compass point a window faces', () => {
   expect([0, 44, 90, 180, 225, 359].map(compassPoint)).toEqual(['N', 'NE', 'E', 'S', 'SW', 'N']);
 });
 
-it('deleting a wall detaches its window and remembers the wall until the next save', () => {
+it('deleting a wall detaches its window', () => {
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: unavailableGeometrySchemaPort });
   const south = wall('Wall (S)', [[0, 0], [4, 0]]);
   const hosted = { ...win([[1, 0], [2, 0]], 1), parent_element: 'Wall (S)' } as Element;
   store.setState({ elementsById: { [south.id]: south, w: hosted }, elementIds: [south.id, 'w'] });
   store.getState().removeElement(south.id);
   expect(store.getState().elementsById.w?.parent_element).toBeNull();
-  expect(store.getState().detachedOpenings).toEqual({ w: 'Wall (S)' });
-  store.getState().setLastSavedCsv('saved');
-  expect(store.getState().detachedOpenings).toEqual({});
 });
 
 it('the read-only Area line shows only when the outline is not a plain rectangle', async () => {

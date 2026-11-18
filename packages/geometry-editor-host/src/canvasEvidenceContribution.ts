@@ -9,8 +9,6 @@ export type GeometryCanvasOverlayEvidenceRequest = Readonly<{
 }>;
 
 export type GeometryCanvasEvidenceState = Readonly<{
-  lookupByElement: ReadonlyMap<string, readonly unknown[]>;
-  hasLinkedDraft: boolean;
   uploadOverlayEvidence?: (
     request: GeometryCanvasOverlayEvidenceRequest,
   ) => Promise<void>;
@@ -21,11 +19,7 @@ export interface GeometryCanvasEvidenceContribution {
   useEvidence(documentFileName: string): GeometryCanvasEvidenceState;
 }
 
-const EMPTY_LOOKUP: ReadonlyMap<string, readonly unknown[]> = new Map();
-const EMPTY_STATE: GeometryCanvasEvidenceState = Object.freeze({
-  lookupByElement: EMPTY_LOOKUP,
-  hasLinkedDraft: false,
-});
+const EMPTY_STATE: GeometryCanvasEvidenceState = Object.freeze({});
 
 /** Community/no-evidence composition: no controls, service or network path. */
 export const unavailableGeometryCanvasEvidenceContribution:

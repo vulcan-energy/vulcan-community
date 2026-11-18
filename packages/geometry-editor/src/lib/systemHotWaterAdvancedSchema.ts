@@ -27,35 +27,6 @@ function isRecord(x: unknown): x is UnknownRec {
   return x != null && typeof x === 'object' && !Array.isArray(x);
 }
 
-/** Keys of root `ColdWaterSource` in FHS (e.g. `mains water`, `header tank`) — used as `enum` for references. */
-export function coldWaterSourceKeysFromFhsRoot(rootFhsSchema: Record<string, unknown> | null | undefined): string[] {
-  if (!rootFhsSchema || !isRecord(rootFhsSchema.properties)) return [];
-  const cws = (rootFhsSchema.properties as UnknownRec).ColdWaterSource;
-  if (!isRecord(cws) || !isRecord(cws.properties)) return [];
-  return Object.keys(cws.properties).sort();
-}
-
-/**
- * Tank `ColdWaterSource` is a string `reference_to` root keys; published schema has no `enum`, so JsonForms
- * shows a free-text field. Inline the allowed key list from root `ColdWaterSource.properties` for Advanced Fields.
- */
-export function inlineHwCylinderColdWaterSourceEnumOnHotWaterSubschema(
-  subschema: Record<string, unknown>,
-  rootFhsSchema: Record<string, unknown> | null | undefined,
-): void {
-  const keys = coldWaterSourceKeysFromFhsRoot(rootFhsSchema);
-  if (keys.length === 0) return;
-  if (!isRecord(subschema.properties)) return;
-  const hw = (subschema.properties as UnknownRec).HotWaterSource;
-  if (!isRecord(hw) || !isRecord(hw.properties)) return;
-  const cyl = hw.properties[HW_CYL];
-  if (!isRecord(cyl) || !isRecord(cyl.properties)) return;
-  const cws = cyl.properties.ColdWaterSource;
-  if (!isRecord(cws) || cws.type !== 'string') return;
-  if (Array.isArray(cws.enum) && cws.enum.length > 0) return;
-  cyl.properties.ColdWaterSource = { ...cws, enum: keys };
-}
-
 /**
  * JsonForms/flattening can leave properties from multiple `allOf` branches in one object.
  * Remove keys that are only valid for `CombiBoiler` when the instance is another `hw cylinder` `type`

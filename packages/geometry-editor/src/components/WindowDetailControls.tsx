@@ -123,15 +123,19 @@ export function CompactSegmentedControl<T extends string>({
   options,
   onChange,
   ariaLabel,
-  fullWidth = false,
+  compact = false,
 }: {
   value: T;
   options: Array<{ value: T; label: string; disabled?: boolean; title?: string }>;
   onChange: (value: T) => void;
   ariaLabel: string;
-  /** A form row: the control fills its column, each option an equal share, at input height. */
-  fullWidth?: boolean;
+  /**
+   * Sized to its text, for a toggle inline beside a label or in a section header. Without it
+   * the control is a form row: it fills its column, each option an equal share, at input height.
+   */
+  compact?: boolean;
 }) {
+  const fullWidth = !compact;
   return (
     <div
       role="group"

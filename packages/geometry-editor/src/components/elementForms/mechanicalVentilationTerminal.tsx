@@ -392,7 +392,7 @@ export const mechanicalVentilationTerminalFormModule: ElementFormModule<Mechanic
             </div>
           </>
         )}
-        {renderFieldLabel('mid_height_air_flow_path:', elementType, 'mid_height_air_flow_path')}
+        {renderFieldLabel('Mid height air flow path:', elementType, 'mid_height_air_flow_path')}
         <div className="element-input" ref={registerBaseFieldRefs(['mvhrTerminalMidHeightAirFlowPath', 'mid_height_air_flow_path'])}>
           <StandardInput
             {...decimalInputProps(mvhrTerminalMidHeightAirFlowPathInput)}

@@ -60,7 +60,6 @@ export {
   type GeometryInspectorEvidenceBridge,
   type GeometryInspectorEvidenceContribution,
   type GeometryInspectorEvidenceProviderProps,
-  type GeometryInspectorEvidenceSectionContext,
   type GeometryInspectorSelection,
   type GeometryProductCatalogueAdvancedHotWaterContext,
   type GeometryProductCatalogueContribution,

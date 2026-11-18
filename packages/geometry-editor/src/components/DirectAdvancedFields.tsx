@@ -72,7 +72,7 @@ export type DirectAdvancedFieldsProps = {
   /** Shown after the fields and before the "More" group (`config.collapsedEngineFields`). */
   beforeMore?: React.ReactNode;
   /** Host fields shown last inside the "More" group, named in its hint; `stated` opens it. */
-  hostMore?: { fields: React.ReactNode; stated: boolean; labels: readonly string[] };
+  hostMore?: { fields: React.ReactNode; stated: boolean; labels: readonly string[]; keys?: readonly string[] };
   /** A field the user was sent to (an error link); "More" opens when it holds it. */
   focusFieldKey?: string | null;
   focusFieldVersion?: number;
@@ -507,7 +507,7 @@ function SystemPerformanceTable({ args, copy = TEST_POINT_TABLE_COPY, issues }: 
     return <button type="button" className="btn btn-nav btn-small" onClick={() => applyChange(segments, [{}])}>{copy.addLabel}</button>;
   }
   return <GroupAccordion label={label} count={rows.length} openInitially={rows.length <= 3}>
-    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 0 }}>{copy.hint}</p>
+    <p className="field-source-note" style={{ marginTop: 0 }}>{copy.hint}</p>
     {config.systemSampleMode === true && changed && Array.isArray(baseline) && <div style={{ marginBottom: 8 }}>
       <ResetFieldButton align="note" label="Use default test data" title="Use default test data" ariaLabel={`${label}: use default test data`} onClick={() => applyChange(segments, structuredClone(baseline))} />
     </div>}
@@ -900,6 +900,8 @@ export function DirectAdvancedFields({
   );
 
   const engineKeys = (config as { collapsedEngineFields?: ReadonlySet<string> }).collapsedEngineFields ?? NO_ENGINE_FIELDS;
+  const collapseStatedRequired = (config as { collapsedStatedRequired?: boolean }).collapsedStatedRequired === true;
+  const emptyRequiredInMore: string[] = [];
   const moreNodes: AdvancedFieldsLayoutNode[] = [];
   let collectingMore = true;
   function renderLayoutNode(node: AdvancedFieldsLayoutNode, key: React.Key): React.ReactElement | null {
@@ -950,9 +952,13 @@ export function DirectAdvancedFields({
     const parentRequired = Array.isArray(parentSchema.required)
       ? (parentSchema.required as unknown[]).filter((v): v is string => typeof v === 'string')
       : [];
-    // A field under "More" renders there, after the others, in the same order; a required one stays in view.
-    if (collectingMore && engineKeys.has(leafKey) && !parentRequired.includes(leafKey)) {
+    // A field under "More" renders there, after the others, in the same order; a required one stays in
+    // view. With `collapsedStatedRequired` (a cylinder, whose heaters state their settings when added)
+    // it stays under More too, which opens while one of them is empty: a field never moves as it is typed in.
+    const required = parentRequired.includes(leafKey);
+    if (collectingMore && engineKeys.has(leafKey) && (!required || collapseStatedRequired)) {
       moreNodes.push(node);
+      if (required && !isStated(value)) emptyRequiredInMore.push(leafKey);
       return null;
     }
     return renderControlForProperty({
@@ -1012,14 +1018,18 @@ export function DirectAdvancedFields({
   const laidOut = layout ? renderLayoutNode(layout, 'root') : null;
   collectingMore = false;
   const moreKeys = layout ? moreNodes.map((node) => { const segments = segmentsFromLayoutScope(node.scope ?? ''); return segments[segments.length - 1] ?? ''; }) : engineEntries.map(({ key }) => key);
-  const moreLabels = moreKeys.map((key) => {
-    const label = labelForProperty(key, {}, elementType);
-    return /^[A-Z][a-z]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+  // A cylinder's field of a part ("Coil · Heater Position") is named by its part; others by the field.
+  const moreLabels = moreKeys.map((key, i) => {
+    const part = collapseStatedRequired && moreNodes[i]?.label?.includes(' · ') ? moreNodes[i]!.label!.split(' · ').slice(-2)[0] : undefined;
+    return part
+      ? part.replace(/^[A-Z](?=[a-z])/, (letter) => letter.toLowerCase())
+      : labelForProperty(key, {}, elementType).replace(/\b([A-Z])(?=[a-z])/g, (letter) => letter.toLowerCase());
   });
   // "More" opens for a field the user was sent to (an error link), and stays open while it is the one asked for.
-  const moreReveal = focusFieldKey && moreKeys.includes(focusFieldKey) ? `${focusFieldKey}:${focusFieldVersion ?? 0}` : '';
+  const moreReveal = focusFieldKey && (moreKeys.includes(focusFieldKey) || hostMore?.keys?.includes(focusFieldKey)) ? `${focusFieldKey}:${focusFieldVersion ?? 0}`
+    : emptyRequiredInMore.join(' ');
   const moreStated = layout
-    ? moreNodes.some((node) => isStated(getAtPath(data, segmentsFromLayoutScope(node.scope ?? ''))))
+    ? !collapseStatedRequired && moreNodes.some((node) => isStated(getAtPath(data, segmentsFromLayoutScope(node.scope ?? ''))))
     : engineEntries.some(({ key }) => isStated(data[key]));
   return (
     <div data-testid="direct-advanced-fields">

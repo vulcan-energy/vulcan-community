@@ -412,19 +412,13 @@ pub(super) fn distant(
     let nothing_anywhere = quadrants
         .iter()
         .all(|q| q.source == "none" && q.roof_source == "none");
-    notices.push(notice(
-        SHADING_POINTER,
-        if nothing_anywhere {
-            let drawn = if below {
-                "everything drawn sits below the dwelling and is left out"
-            } else {
-                "nothing is drawn or chosen on any side"
-            };
-            format!("Distant shading: {drawn}, so each side takes the default, very light, and the roof is not shaded. Draw what shades a side, or choose its band.")
-        } else {
-            format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; "))
-        },
-    ));
+    // Nothing drawn or stated anywhere: no notice, as the Site read-out shows each side very
+    // light. Objects all below the dwelling are said to be left out, which nothing else shows.
+    if nothing_anywhere && below {
+        notices.push(notice(SHADING_POINTER, "Distant shading: everything drawn sits below the dwelling and is left out, so each side takes the default, very light, and the roof is not shaded. Draw what shades a side, or choose its band.".into()));
+    } else if !nothing_anywhere {
+        notices.push(notice(SHADING_POINTER, format!("Distant shading, seen from {base:.2} m (the lowest storey), the roof shaded where an object rises above the dwelling's {dwelling_height:.2} m: {}.{assumed}", described.join("; "))));
+    }
     Some((
         json!({"model_type": "hemie", "DwellingShadingSegments": segments}),
         HemieShading {
@@ -812,13 +806,8 @@ mod tests {
     #[test]
     fn nothing_drawn_and_nothing_stated_assumes_very_light() {
         let out = derive(&[], 180.0);
-        // One short notice for the whole dwelling; no side repeats it.
-        assert!(
-            out.notice("nothing is drawn or chosen on any side, so each side takes the default, very light, and the roof is not shaded. Draw what shades a side, or choose its band."),
-            "{:?}",
-            out.notices
-        );
-        assert_eq!(out.notices.len(), 1, "{:?}", out.notices);
+        // Every side very light. No notice: the Site read-out shows each side's band.
+        assert!(out.notices.is_empty(), "{:?}", out.notices);
     }
 
     #[test]

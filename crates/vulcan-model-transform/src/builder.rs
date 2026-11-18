@@ -2352,23 +2352,9 @@ impl JSONBuilder {
                     csv_data,
                     &self.schema_build_types(),
                 ) {
-                    Ok((build_type, sides)) => {
+                    // The Build type field shows it "from the party walls": no note repeats it.
+                    Ok((build_type, _)) => {
                         result["General"]["build_type"] = Value::String(build_type.into());
-                        let label = match build_type {
-                            "semi_detached_end_terrace" => "semi-detached or end-terrace",
-                            "mid_terrace" => "mid-terrace",
-                            other => other,
-                        };
-                        let walls = match sides {
-                            0 => "it has no party walls".to_string(),
-                            1 => "its party walls are on 1 side".to_string(),
-                            n => format!("its party walls are on {n} sides"),
-                        };
-                        notices.push(crate::finalization::SchemaOmission {
-                            code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
-                            path: "/General/build_type".into(),
-                            message: format!("Build type is {label}, as {walls}. To change it, choose Build type in Global Settings."),
-                        });
                     }
                     Err(message) => {
                         // The template's FHS value would add a second, misleading error.
@@ -3037,7 +3023,23 @@ impl JSONBuilder {
                     // An empty allowlist means the schema lookup failed entirely; the
                     // element degrades to a bare `type` and the user's values are
                     // discarded, so record an E056 (non-fatal — a JSON is still saved).
-                    if allowed_building_element_props.is_empty() {
+                    if allowed_building_element_props.is_empty()
+                        && schema_element_type == "BuildingElementGround"
+                        && floor_type.is_none()
+                    {
+                        // A ground floor's inputs depend on its type: ask for the type, on its field.
+                        self.push_non_fatal(
+                            "E056",
+                            &crate::json_pointer(&[
+                                "Zone",
+                                zone_name,
+                                "BuildingElement",
+                                element_name,
+                                "floor_type",
+                            ]),
+                            &format!("'{element_name}' has no floor type. Choose it on the floor."),
+                        );
+                    } else if allowed_building_element_props.is_empty() {
                         self.push_non_fatal(
                             "E056",
                             &crate::json_pointer(&[
@@ -3436,6 +3438,7 @@ impl JSONBuilder {
                         .borrow_mut()
                         .extend(warnings.into_iter().map(|w| {
                             crate::finalization::SchemaOmission {
+                                label: None,
                                 code: w.code,
                                 path: w.path,
                                 // A user note says what to check, with no engine-version prefix.
@@ -3573,7 +3576,7 @@ impl JSONBuilder {
         if !cut.is_empty() {
             self.schema_omissions
                 .borrow_mut()
-                .push(crate::finalization::SchemaOmission {
+                .push(crate::finalization::SchemaOmission { label: None,
                     code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                     path: crate::json_pointer(&["Zone", zone, "BuildingElement"]),
                     message: format!(
@@ -5485,7 +5488,7 @@ impl JSONBuilder {
                 {
                     self.schema_omissions
                         .borrow_mut()
-                        .push(crate::finalization::SchemaOmission {
+                        .push(crate::finalization::SchemaOmission { label: None,
                             code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
                             path: pointer,
                             message: format!(
@@ -5605,6 +5608,19 @@ impl JSONBuilder {
             Value::String(source.clone())
         };
         root.insert("ColdWaterSource".to_string(), root_source);
+
+        if self.profile.fills_hot_water_cold_water_source() {
+            if let Some(sources) = root
+                .get_mut("HotWaterSource")
+                .and_then(Value::as_object_mut)
+            {
+                for hot_water in sources.values_mut().filter_map(Value::as_object_mut) {
+                    hot_water
+                        .entry("ColdWaterSource")
+                        .or_insert_with(|| Value::String(source.clone()));
+                }
+            }
+        }
 
         for (key, value) in root.iter_mut() {
             if key == "ColdWaterSource" {
@@ -5895,6 +5911,9 @@ impl JSONBuilder {
             .filter_map(|row| row.get("extra_json"))
             .collect();
         let mut missing = Vec::new();
+        let existing = result.get("IsExistingBuilding") == Some(&Value::Bool(true));
+        // An existing building's HEM:EPC input counts its own storeys (Global Settings shows it).
+        let counts_storeys = existing && self.profile.converts_existing_buildings_to_hemie();
         let used: Vec<String> = METADATA_INPUT_FIELD_NAMES
             .iter()
             .filter(|name| !present.contains(**name) && !blank.contains(**name))
@@ -5921,6 +5940,7 @@ impl JSONBuilder {
                     // The party walls give it, and that note says so.
                     || *name == "General_build_type"
                         && self.profile.derives_build_type_from_party_walls()
+                    || *name == "General_storeys_in_dwelling" && counts_storeys
                 {
                     return None;
                 }
@@ -5930,7 +5950,6 @@ impl JSONBuilder {
                 })
             })
             .collect();
-        let existing = result.get("IsExistingBuilding") == Some(&Value::Bool(true));
         for name in self
             .profile
             .required_metadata_rows()
@@ -5976,7 +5995,7 @@ impl JSONBuilder {
         if !used.is_empty() {
             self.schema_omissions
                 .borrow_mut()
-                .push(crate::finalization::SchemaOmission {
+                .push(crate::finalization::SchemaOmission { label: None,
                     code: crate::target_mappings::TARGET_INPUT_WARNING.to_string(),
                     path: "/Metadata".to_string(),
                     message: format!(
@@ -8391,7 +8410,7 @@ impl JSONBuilder {
                     for key in ["c", "c_per_m", "n", "thermal_mass", "thermal_mass_per_m"] {
                         if number(key).is_some() {
                             self.schema_omissions.borrow_mut().push(
-                                crate::finalization::SchemaOmission {
+                                crate::finalization::SchemaOmission { label: None,
                                     code: "TARGET_FIELD_OMITTED".into(),
                                     path: crate::json_pointer(&["Wet Emitters", name, key]),
                                     message: format!("Wet Emitters row '{name}': {key} is not used, because the radiator's HEM Database product gives it; the authored source is preserved."),
@@ -10929,6 +10948,40 @@ Basement floor,Living,BuildingElementGround,48,,,28,Heated_basement,2,0.3,"{floo
     }
 
     #[test]
+    fn a_ground_floor_with_no_type_is_asked_for_its_type_on_that_field() {
+        let csv = "Zone\nName,Type,volume,floor_area\nLiving,Zone,100,40\n\nGround Elements\nName,Zone,Type,area,perimeter\nFloor,Living,BuildingElementGround,40,26\n";
+        let mut builder = JSONBuilder::from_json_inputs(
+            include_str!("../../../data/schemas/hem_epc_orchestrator_input.schema.json"),
+            include_str!("../../../data/defaults/defaults_template_epc.json"),
+            ModelProfile::Epc,
+            &crate::VersionMetadata {
+                hem_core_version: "2.0.0a4".into(),
+                wrapper_version: Some("0.13.2".into()),
+            },
+        )
+        .expect("EPC builder");
+        builder.set_product_database(
+            crate::epc_products::ProductDatabase::parse(&crate::epc_products::tests::pinned())
+                .unwrap(),
+        );
+        let _ = builder.build_json(&CSVParser::new().parse_csv(csv).expect("CSV"));
+        let errors = builder.take_non_fatal_errors();
+        let floor: Vec<_> = errors
+            .iter()
+            .filter(|e| e.path.contains("/Floor"))
+            .collect();
+        assert_eq!(floor.len(), 1, "{errors:#?}");
+        assert_eq!(
+            floor[0].path,
+            "/Zone/Living/BuildingElement/Floor/floor_type"
+        );
+        assert_eq!(
+            floor[0].message,
+            "'Floor' has no floor type. Choose it on the floor."
+        );
+    }
+
+    #[test]
     fn epc_basement_wall_whose_area_is_not_its_drawing_fails_naming_it() {
         // W0 states 10 m², less than its 8 m × 2 m below ground: no area is left above ground.
         let csv = heated_basement_csv(DERIVED_U).replace(
@@ -11524,6 +11577,31 @@ mod schema_cleanup_tests {
             json.as_object().unwrap().contains_key("General"),
             "General should be kept for FHS schema"
         );
+    }
+
+    #[test]
+    fn fhs_hot_water_sources_take_the_model_cold_water_source_stated_or_not() {
+        // The editor leaves the hot water source's own cold water source out on FHS: every
+        // source takes the model's, whether it stated one or not.
+        let mut builder =
+            JSONBuilder::new(FHS_SCHEMA_PATH, DEFAULTS_PATH).expect("Builder should init");
+        builder.cold_water_source = COLD_WATER_SOURCE_HEADER_TANK.to_string();
+        let mut json = json!({
+            "HotWaterSource": {
+                "hw cylinder": {"type": "StorageTank", "volume": 80.0},
+                "combi": {"type": "CombiBoiler", "ColdWaterSource": "mains water"}
+            }
+        });
+        builder.apply_wrapper_cold_water_source(&mut json);
+        assert_eq!(
+            json["HotWaterSource"]["hw cylinder"]["ColdWaterSource"],
+            "header tank"
+        );
+        assert_eq!(
+            json["HotWaterSource"]["combi"]["ColdWaterSource"],
+            "header tank"
+        );
+        assert_eq!(json["ColdWaterSource"], json!({"header tank": {}}));
     }
 
     #[test]

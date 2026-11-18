@@ -28,6 +28,10 @@ pub struct SchemaOmission {
     pub code: String,
     pub path: String,
     pub message: String,
+    /// A lodgement-evidence notice's stated value, without the instruction the message adds
+    /// ("'Wall (N)' states its U-value: 0.18"); none on any other notice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -425,7 +429,7 @@ fn project(
             // Ambiguous unions are validation errors, not permission to erase fields.
             if local_forbidden || (unevaluated_closed && !declared && !ambiguous) {
                 removed.insert(key.clone());
-                omissions.push(SchemaOmission { code:"TARGET_FIELD_OMITTED".into(), path:pointer(path, &key), message:"Field is not allowed by the selected target schema in this context; the authored source is preserved.".into() });
+                omissions.push(SchemaOmission { label: None, code:"TARGET_FIELD_OMITTED".into(), path:pointer(path, &key), message:"Field is not allowed by the selected target schema in this context; the authored source is preserved.".into() });
             } else if !children.is_empty() {
                 project(
                     object.get_mut(&key).unwrap(),

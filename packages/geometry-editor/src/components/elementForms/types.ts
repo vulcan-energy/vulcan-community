@@ -18,6 +18,7 @@ import type {
 } from '../../../../geometry-editor-host/src';
 import type { BuildingElementTransparent, Element, ElementType, Floor } from '../../geometry/types';
 import type { CanvasShape } from '../../lib/shapeUtils';
+import type { ThermalMethod } from '../../lib/thermalMethod';
 import type { SlopedElementDimensions } from '../../lib/slopedElementDimensions';
 import type { TransparentOpeningDerivedValues } from '../../lib/transparentOpeningDerivedFields';
 import type { UnheatedPitchedRoofCeilingElevation } from '../../lib/unheatedPitchedRoofCeiling';
@@ -281,8 +282,13 @@ export interface ElementFormRenderCtx {
   productCatalogue: GeometryProductCatalogueContribution | null;
   /** Host fields for the selected glazed element, shown under Open area. */
   openingFields: ReactNode;
-  /** A window's "Thermal values" block (method, then its inputs), shown after its size and position. */
+  /**
+   * A window's "Thermal values" block (method, then its inputs), shown after its size and position;
+   * a party wall's "Thermal values from" control, placed before its U-value and cavity inputs.
+   */
   thermalValues: ReactNode;
+  /** The selected element's "Thermal values from" method; undefined when it has none. */
+  thermalMethod: ThermalMethod | undefined;
   /** A window's "On Wall (S) · faces S" line, first on its panel. */
   windowHost: ReactNode;
   /** "Edit all N windows": selects every window of this kind for the bulk edit; null for the only one. */
@@ -407,6 +413,8 @@ export interface ElementFormModule<S> {
   reset(state: S): void;
   /** This family's case of renderAttributePanel. */
   renderPanel(state: S, ctx: ElementFormRenderCtx): ReactNode;
+  /** Fields this family puts under the advanced editor's "More" (`hostMoreFields`), when it has any. */
+  renderMore?(state: S, ctx: ElementFormRenderCtx): ElementFormMore | null;
   /** This family's case of getElementSubtype, when it has one. Several legacy
    * cases return `x || undefined` rather than a bare string, so this must
    * allow undefined too. */
@@ -418,8 +426,11 @@ export interface ElementFormInstance {
   hydrate(element: Element): void;
   reset(): void;
   renderPanel(ctx: ElementFormRenderCtx): ReactNode;
+  renderMore(ctx: ElementFormRenderCtx): ElementFormMore | null;
   subtype(): string | undefined;
 }
+
+export type ElementFormMore = { fields: ReactNode; stated: boolean; labels: readonly string[]; keys?: readonly string[] };
 
 export function bindElementFormModule<S>(
   module: ElementFormModule<S>,
@@ -429,6 +440,7 @@ export function bindElementFormModule<S>(
     hydrate: (element) => module.hydrate(state, element),
     reset: () => module.reset(state),
     renderPanel: (ctx) => module.renderPanel(state, ctx),
+    renderMore: (ctx) => module.renderMore?.(state, ctx) ?? null,
     subtype: () => module.subtype?.(state),
   };
 }

@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
 import type { GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
+import { defineGeometryInspectorContributions, type GeometryInspectorContributions } from '../../../../geometry-editor-host/src/inspectorContributions';
 import type { GeometryWorkspaceResourcePort } from '../../../../geometry-editor-host/src/workspaceResourcePort';
 import type { Element } from '../../geometry/types';
 import { MultiSelectPanel } from '../MultiSelectPanel';
@@ -106,6 +107,7 @@ function mount(
   elements: Element[],
   selectedElementIds = elements.map((element) => element.id),
   workspaceResourcePort: GeometryWorkspaceResourcePort = resources,
+  inspectorContributions?: GeometryInspectorContributions,
 ) {
   const store = createGeometryStore({ defaultDefaultsPath: null });
   store.setState({
@@ -120,6 +122,7 @@ function mount(
           selectedElementIds={selectedElementIds}
           onDelete={vi.fn()}
           workspaceResourcePort={workspaceResourcePort}
+          inspectorContributions={inspectorContributions}
         />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>,
@@ -723,6 +726,31 @@ describe('R6 MultiSelect parity fence — model, bytes, persistence and history'
     act(() => store.getState().undo());
     expect(store.getState().elementsById.a?.efficacy).toBe(90);
     expect(store.getState().elementsById.b?.efficacy).toBe(80);
+  });
+});
+
+describe('host opening fields on several windows', () => {
+  it('shows what they share, marks what differs, and writes each window in one undo step', () => {
+    vi.useFakeTimers();
+    const glazing = (id: string, extra_json: Record<string, unknown>) => ({
+      id, type: 'BuildingElementTransparent', name: id, zoneId: 'zone', coordinates: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }],
+      width: 1, height: 1, base_height: 1, area: 1, extra_json,
+    }) as Element;
+    const contributions = defineGeometryInspectorContributions({ openingFields: { render: ({ element, mixed, elements, multiple, onPatchExtraJson }) =>
+      <button type="button" onClick={() => onPatchExtraJson((current, target) => ({ ...current, _opens: `for ${String(target?.id)}` }))}>
+        {`${String(multiple)} ${elements?.length} ${JSON.stringify(element.extra_json)} ${mixed?.join(',')}`}
+      </button> } });
+    const { store } = mount([glazing('a', { _style: 'sash', _kind: 'window' }), glazing('b', { _style: 'sash', _kind: 'door' })],
+      undefined, resources, contributions);
+    act(() => store.getState().saveToHistory('fixture baseline'));
+    fireEvent.click(screen.getByRole('button', { name: 'true 2 {"_style":"sash"} _kind' }));
+    expect(store.getState().elementsById.a?.extra_json).toMatchObject({ _style: 'sash', _kind: 'window', _opens: 'for a' });
+    expect(store.getState().elementsById.b?.extra_json).toMatchObject({ _style: 'sash', _kind: 'door', _opens: 'for b' });
+    act(() => vi.advanceTimersByTime(350));
+    expect(store.getState().history).toHaveLength(2);
+    act(() => store.getState().undo());
+    expect(store.getState().elementsById.a?.extra_json).not.toHaveProperty('_opens');
+    expect(store.getState().elementsById.b?.extra_json).not.toHaveProperty('_opens');
   });
 });
 

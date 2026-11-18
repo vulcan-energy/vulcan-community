@@ -19,25 +19,14 @@ export type GeometryInspectorEvidenceProviderProps = Readonly<{
   children: ReactNode;
 }>;
 
-export type GeometryInspectorEvidenceSectionContext = Readonly<{
-  elementType: string;
-  elementSubtype?: string;
-  useFHSSchema: boolean;
-}>;
-
 export interface GeometryInspectorEvidenceBridge {
-  readonly linkedFieldKeys: ReadonlySet<string>;
+  /** The host's evidence line for one field of the selected element; null when it has none. */
   renderFieldIndicator(fieldKey: string): ReactNode;
-  renderSection(context: GeometryInspectorEvidenceSectionContext): ReactNode;
 }
-
-const EMPTY_LINKED_FIELD_KEYS: ReadonlySet<string> = Object.freeze(new Set<string>());
 
 export const unavailableGeometryInspectorEvidenceBridge: GeometryInspectorEvidenceBridge =
   Object.freeze({
-    linkedFieldKeys: EMPTY_LINKED_FIELD_KEYS,
     renderFieldIndicator: () => null,
-    renderSection: () => null,
   });
 
 export const GeometryInspectorEvidenceContext =
@@ -199,17 +188,24 @@ export type GeometryConstructionDetailsContribution = Readonly<{
 export type GeometryInspectorElementFieldsContext = Readonly<{
   /** The one element currently shown in the Details inspector. */
   element: Readonly<Record<string, unknown>>;
-  /** Merge a host-owned field into the element's existing extra_json. */
+  /**
+   * Merge a host-owned field into the element's existing extra_json. With several selected, `update`
+   * runs once for each of them and gets that element as `target`; the writes are one undo step.
+   */
   onPatchExtraJson(
-    update: (current: Record<string, unknown>) => Record<string, unknown>,
+    update: (current: Record<string, unknown>, target?: Readonly<Record<string, unknown>>) => Record<string, unknown>,
   ): void;
   /**
    * Several elements are selected: `element` holds the extra_json values they share, and a
    * patch applies to each of them.
    */
   multiple?: boolean;
+  /** With several selected, each of them. */
+  elements?: readonly Readonly<Record<string, unknown>>[];
   /** With several elements selected, the extra_json keys whose values differ between them. */
   mixed?: readonly string[];
+  /** With several selected: they share one construction (the planes of one roof), so a mixed value is an error. */
+  mustMatch?: boolean;
   /**
    * The element's "Thermal values from" method (geometry-editor `lib/thermalMethod.ts`): with
    * 'band' the age band and construction show; otherwise only the fields HEM still reads.
@@ -231,7 +227,10 @@ export type GeometryInspectorElementFieldsContribution = Readonly<{
  * its row with `data-host-field-key` so validation rows can focus it.
  */
 export type GeometryInspectorOpeningFieldsContribution = Readonly<{
+  /** Also shown for several selected windows (`multiple`), where a change applies to each. */
   render: ComponentType<GeometryInspectorElementFieldsContext>;
+  /** Window extra_json keys the next window drawn takes from the last one (lib/windowCarry.ts). */
+  carryKeys?: readonly string[];
 }>;
 
 export type GeometryInspectorOpeningPartFieldsContext = Readonly<{

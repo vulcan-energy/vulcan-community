@@ -189,7 +189,6 @@ export interface BuildingElementGroundFormState {
   derivedGroundEffectiveArea: number;
   autoDerivedTotalArea: number;
   groundTotalAreaManual: boolean;
-  groundTotalAreaWarning: boolean;
   derivedGroundPerimeter: number;
   groundPerimeterDetails: GroundExposedPerimeterDetails | null;
   groundPerimeterManual: boolean;
@@ -385,9 +384,6 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
   const groundTotalAreaManual = selectedGroundElement
     ? selectedGroundElement[GROUND_TOTAL_AREA_OVERRIDE_DESCRIPTOR.flag] === true
     : false;
-  const groundTotalAreaWarning = selectedGroundElement
-    ? groundTotalAreaManual && groundTotalAreaMismatch(selectedGroundElement.total_area, autoDerivedTotalArea)
-    : false;
 
   useEffect(() => {
     if (!selectedGroundElement) return;
@@ -547,7 +543,6 @@ function useFormState(ctx: ElementFormStateCtx): BuildingElementGroundFormState 
     setParentElement: ctx.shared.setParentElement,
     autoDerivedTotalArea,
     groundTotalAreaManual,
-    groundTotalAreaWarning,
     derivedGroundEffectiveArea,
     derivedGroundPerimeter,
     groundPerimeterDetails,
@@ -609,7 +604,6 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
       hiddenFields,
       autoDerivedTotalArea,
       groundTotalAreaManual,
-      groundTotalAreaWarning,
       perimeterInput,
       groundPerimeterManual,
       groundPerimeterDetails,
@@ -685,11 +679,6 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('totalArea', totalAreaInput.value)} issue={getFieldValidationIssue('totalArea', totalAreaInput.value) || undefined} />
         </div>
-        {groundTotalAreaWarning ? (
-          <div className="field-source-note" style={{ color: 'var(--text-warning)' }}>
-            Differs from the {formatConditionalDecimals(autoDerivedTotalArea)} m² of floors drawn.
-          </div>
-        ) : null}
         </>}
         {!hiddenFields.includes('perimeter') && <>
         {renderFieldLabel(
@@ -782,7 +771,7 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
           </>
         )}
         {renderFieldLabel(
-          'Wall thickness (m):',
+          'Wall thickness:',
           elementType,
           undefined,
           groundWallThicknessAutofill.valueM == null ? undefined : thicknessFollowsWalls ? (
@@ -866,11 +855,11 @@ export const buildingElementGroundFormModule: ElementFormModule<BuildingElementG
                 ))}
               </div>
             ) : groundWallThicknessAutofill.candidateCount > 0 ? (
-              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.35 }}>
+              <div className="field-source-note">
                 No wall on this storey has an assembly with a thickness, so enter it.
               </div>
             ) : (
-              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.35 }}>
+              <div className="field-source-note">
                 No wall on this storey has an assembly with a thickness, so enter it.
               </div>
             )}

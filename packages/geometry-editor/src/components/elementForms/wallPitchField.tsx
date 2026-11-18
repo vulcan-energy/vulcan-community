@@ -6,7 +6,7 @@
 // and Adjacent-like (BuildingElementPartyWall/AdjacentConditionedSpace/
 // AdjacentUnconditionedSpace_Simple) each carried their own near-identical
 // copy of this field, locatable via the '// Check for shape-pitch mismatches
-// before updating' comment and the two window.confirm message strings.
+// before updating' comment and the two shape-conversion message strings.
 // Follows the serviceLine.tsx renderServiceLineCoreFields precedent: a plain
 // exported render function parameterized by opts, not an ElementFormModule
 // itself.
@@ -23,7 +23,7 @@
 // - Common to all three: the field label ('Surface facing:' for polygon
 //   shape, 'Pitch (degrees):' otherwise), the polygon-shape StandardDropdown
 //   (0deg/180deg only, HORIZONTAL_POLYGON_PITCH_OPTIONS), and the
-//   non-polygon StandardInput with the shape-pitch-mismatch window.confirm
+//   non-polygon StandardInput with the shape-pitch-mismatch conversion
 //   flow (polygon-shape pitch != 0/180 offers "convert to sloped polygon";
 //   line-shape pitch === 0/180 offers "convert to polygon"), plus the
 //   Facing-up/Vertical/Facing-down/Angled-surface note.

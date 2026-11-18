@@ -183,7 +183,7 @@ describe('FloorPickerDropdown', () => {
       id: 'roof', name: 'Roof', type: 'BuildingElementOpaque', width: 4, height: 4, area: 16, pitch: 35, base_height: 4.8,
       coordinates: [{ x: 0, y: -1, z: 1 }, { x: 4, y: -1, z: 1 }, { x: 4, y: 4, z: 1 }], parent_element: null,
     };
-    render(<FloorPickerDropdown {...props} elementsById={{ ...elementsById, roof } as any} />);
+    render(<FloorPickerDropdown {...props} elementsById={{ ...elementsById, roof }} />);
     fireEvent.click(screen.getByTitle('Current floor'));
     expect(screen.getByRole('button', { name: 'Empty' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Copy of/ })).toBeNull();

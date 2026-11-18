@@ -118,7 +118,7 @@ export const FancoilTestDataFields: React.FC<FancoilTestDataFieldsProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
         {renderFieldLabelWithTooltip('Fancoil test data', elementType)}
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+      <div className="field-source-note" style={{ marginBottom: '8px' }}>
         Per FHS: each test point has a flow/return temperature difference (K) and one or more heat outputs (kW).
         Fan power (W) entries align with test indices. Use comma-separated kW values for multiple outputs at one ΔT.
       </div>

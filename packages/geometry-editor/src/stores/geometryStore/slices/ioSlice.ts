@@ -18,6 +18,7 @@ import {
 } from '../../../lib/zoneDerivation';
 import { windowOpeningFreeHeight, windowOpeningPart, type WindowOpeningSource } from '../../../lib/windowOpenings';
 import { calculateDwellingLengthWidthFromGroundElements } from '../../../lib/buildingFootprintDimensions';
+import { statedBuildType } from '../../../lib/hemieFabric';
 import { aggregateDwellingCounts, dwellingCountZoneIds } from '../../../lib/spaceLabelDerivation';
 import { resolveEffectiveVentilationBaseHeight, systemsRowVentilationBaseHeight, ventilationZoneBaseDrawingZ } from '../../../lib/effectiveDwellingDetails';
 import { coerceElementToStrictestNumericTyping } from '../../../lib/schemaCoercion';
@@ -180,11 +181,6 @@ export interface IoSlice {
   lastSavedCsv: string | null;
   /** Set after a successful save or load. */
   setLastSavedCsv: (csv: string | null) => void;
-  /**
-   * Windows whose wall was deleted since the last save or load, by id, with that wall's name:
-   * the window panel reads "Was on Wall (S)" with a reattach. Not part of the model.
-   */
-  detachedOpenings: Readonly<Record<string, string>>;
   /** Internal cancellation hook used by document-boundary reset actions. */
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => void;
   /**
@@ -934,8 +930,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
   getCsvMigrationIssues: () => csvMigrationIssues(Object.values(get().elementsById), get().sourceCsvVersion),
   resolveCsvUValueInterpretation: (ids, meaning) => set(state => ({ elementsById: Object.fromEntries(Object.entries(state.elementsById).map(([id, element]) => [id, ids.includes(id) ? resolveCsvUValueMeaning(element, meaning) : element])) })),
   lastSavedCsv: null,
-  setLastSavedCsv: (csv) => set({ lastSavedCsv: csv, detachedOpenings: {} }),
-  detachedOpenings: {},
+  setLastSavedCsv: (csv) => set({ lastSavedCsv: csv }),
   cancelPendingLoadedCsvWorkForDocumentBoundary: () => {
     invalidatePendingDefaultsWork(loadedCsvWorkScheduler);
   },
@@ -2074,10 +2069,14 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       }
       // build_type / storeys_in_dwelling / storey_of_dwelling
       const dd = calculateDwellingDetailsSuggestion(newElements);
+      // A converter that works out the build type (HEM:EPC) saves only a stated one (a pick or the
+      // file's, such as a maisonette), so the file's is kept and the floors' is not used.
+      const derivesBuildType = targetRules(options.schemaPort, importedSettings).derivedMetadataRows.includes('General_build_type');
+      const loadedBuildType = derivesBuildType ? statedBuildType(importedSettings) : importedSettings.build_type ?? dd.buildType;
       if (
         importedSettings.storey_of_dwelling !== undefined &&
         dd.storeyOfDwelling !== undefined &&
-        (importedSettings.build_type ?? dd.buildType) === 'flat'
+        loadedBuildType === 'flat'
       ) {
         const legacyZeroBasedStorey = dd.contributingFloorLevels[0];
         if (
@@ -2090,7 +2089,8 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
       }
       if (importedSettings.build_type !== undefined
           && dd.buildType !== undefined
-          && importedSettings.build_type === dd.buildType) {
+          && importedSettings.build_type === dd.buildType
+          && !derivesBuildType) {
         importedSettings.build_type = undefined;
       }
       if (importedSettings.storeys_in_dwelling !== undefined
@@ -2103,7 +2103,7 @@ export const createIoSlice = (options: IoSliceOptions): GeometryStoreSlice => {
           && importedSettings.storey_of_dwelling === dd.storeyOfDwelling) {
         importedSettings.storey_of_dwelling = undefined;
       }
-      if ((importedSettings.build_type ?? dd.buildType) === 'house') {
+      if (loadedBuildType === 'house') {
         importedSettings.storey_of_dwelling = undefined;
         importedSettings.storeys_in_building = undefined;
       }
