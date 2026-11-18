@@ -1,0 +1,70 @@
+/* SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+/* Roof section (Roof panel). Colours come from the shared tokens. */
+
+.roof-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.roof-section__summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.roof-section__summary strong { color: var(--text-primary); }
+.roof-section__toggle { cursor: pointer; width: 100%; }
+
+.roof-section__box {
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.roof-section__svg {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+  height: auto;
+  overflow: visible;
+}
+
+.roof-section__svg text {
+  font-family: var(--font-family);
+  font-size: 10px;
+  fill: var(--text-muted);
+  paint-order: stroke;
+  stroke: var(--bg-secondary);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.roof-section__roof { fill: var(--accent-primary); fill-opacity: 0.18; stroke: var(--text-secondary); stroke-width: 2; stroke-linejoin: round; }
+.roof-section__eaves { stroke: var(--text-secondary); stroke-width: 2; stroke-linecap: round; }
+.roof-section__svg .roof-section__fill { fill: var(--text-muted); }
+
+.roof-section__svg .roof-section__link {
+  fill: var(--accent-primary);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.roof-section__svg .roof-section__link:focus-visible { outline: 1px solid var(--accent-primary); }

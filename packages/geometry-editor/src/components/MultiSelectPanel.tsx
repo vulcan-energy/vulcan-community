@@ -417,7 +417,7 @@ const formatValueLabel = (value: number) => {
 
 const formatScalarLabel = (value: unknown) => {
   if (typeof value === 'number') return formatValueLabel(value);
-  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string' && value.trim().length > 0) return value;
   return '-';
 };
@@ -426,6 +426,15 @@ const extraJsonRecord = (el: Element): Record<string, unknown> =>
   el.extra_json && typeof el.extra_json === 'object' && !Array.isArray(el.extra_json)
     ? (el.extra_json as Record<string, unknown>)
     : {};
+
+/** The extra_json values every element holds alike, and the keys whose values differ. */
+const sharedExtraJson = (elements: readonly Element[]) => {
+  const [first, ...rest] = elements;
+  const shared = Object.fromEntries(Object.entries(extraJsonRecord(first!)).filter(([key, value]) =>
+    rest.every((el) => extraJsonValuesEqual(extraJsonRecord(el)[key], value))));
+  const mixed = [...new Set(elements.flatMap((el) => Object.keys(extraJsonRecord(el))))].filter((key) => !(key in shared));
+  return { shared, mixed };
+};
 
 const WINDOW_DETAIL_COPY_KEYS = ['window_part_list', 'treatment', '_treatment_ui', 'shading'] as const;
 type WindowDetailCopyKey = typeof WINDOW_DETAIL_COPY_KEYS[number];
@@ -878,10 +887,9 @@ const computeScalarDistribution = <T extends Element>(
   return { entries, totalEligible: eligible.length };
 };
 
-/** A shared value's option. A boolean's summary reads True/False; its options' values are true/false. */
+/** A shared value's option: its value, or its label (a boolean's summary reads Yes/No, as its options do). */
 const summaryMatchesOption = (inputValue: string, option: { value: string; label: string }) =>
-  option.value === inputValue || option.label === inputValue
-  || ((inputValue === 'True' || inputValue === 'False') && option.value === inputValue.toLowerCase());
+  option.value === inputValue || option.label === inputValue;
 
 const describeDistribution = (distribution: PropertyDistribution | null) => {
   if (!distribution) {
@@ -957,8 +965,8 @@ const assemblyImpactValue = (currentValues: unknown[], nextValues: unknown[]): s
 
 
 const BOOLEAN_SELECT_OPTIONS = [
-  { value: 'true', label: 'True' },
-  { value: 'false', label: 'False' },
+  { value: 'true', label: 'Yes' },
+  { value: 'false', label: 'No' },
 ] as const;
 const WINDOW_SHADING_TYPE_OPTIONS = (Object.entries(WINDOW_SHADING_TYPE_LABELS) as [WindowShading['shading_type'], string][])
   .map(([value, label]) => ({ value, label }));
@@ -1652,9 +1660,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     const types = new Set(activeElements.map((el) => hemieConstructionType(el, all, buildType)));
     if (types.size !== 1 || types.has(undefined)) return null;
     const [first, ...rest] = activeElements;
-    const shared = Object.fromEntries(Object.entries(extraJsonRecord(first!)).filter(([key, value]) =>
-      rest.every((el) => extraJsonValuesEqual(extraJsonRecord(el)[key], value))));
-    const mixed = [...new Set(activeElements.flatMap((el) => Object.keys(extraJsonRecord(el))))].filter((key) => !(key in shared));
+    const { shared, mixed } = sharedExtraJson(activeElements);
     // The planes of one roof share one construction (`sharedRoofPlanes`).
     const roof = sharedRoofPlanes(first!, all, buildType);
     const oneRoof = rest.length > 0 && rest.every((el) => roof.some((plane) => plane.id === el.id));
@@ -1664,14 +1670,16 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
     const methods = new Set(activeElements.map((el) => inferThermalMethod(el, true)));
     const thermalMethod = methods.size === 1 ? [...methods][0] : undefined;
     const location = shared.insulation_location ?? parseHemieConstruction(hemieSettings?.[hemieConstructionSetting(type)])?.insulation_location;
-    return { element: { ...first!, extra_json: shared } as Element, mixed, oneRoofMixed: oneRoof && mixed.some((key) => roofFields.has(key)),
+    return { element: { ...first!, extra_json: shared } as Element, mixed, oneRoof, oneRoofMixed: oneRoof && mixed.some((key) => roofFields.has(key)),
       thermalMethod, more: hemieMoreLabels(type, thermalMethod === 'band', location).length > 0 };
   }, [ElementFieldsRenderer, activeElements, buildType, constructionBands, elementsById, hemieSettings, inspectorContributions]);
-  const patchActiveExtraJson = useCallback((update: (current: Record<string, unknown>) => Record<string, unknown>) => {
+  // One host patch applied to each of `targets`, as one undo step.
+  const patchExtraJsonOf = useCallback((targets: readonly Element[]) => (update: (current: Record<string, unknown>,
+    target?: Readonly<Record<string, unknown>>) => Record<string, unknown>) => {
     const patches: Record<string, Record<string, unknown>> = {};
-    for (const el of activeElements) {
+    for (const el of targets) {
       const current = extraJsonRecord(el);
-      const next = update({ ...current });
+      const next = update({ ...current }, el as unknown as Readonly<Record<string, unknown>>);
       const patch: Record<string, unknown> = {};
       for (const key of new Set([...Object.keys(current), ...Object.keys(next)])) {
         if (!extraJsonValuesEqual(current[key], next[key])) patch[key] = next[key];
@@ -1679,7 +1687,17 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
       if (Object.keys(patch).length) patches[el.id] = patch;
     }
     applyExtraJsonMergeBulk(patches);
-  }, [activeElements, applyExtraJsonMergeBulk]);
+  }, [applyExtraJsonMergeBulk]);
+  const patchActiveExtraJson = useMemo(() => patchExtraJsonOf(activeElements), [activeElements, patchExtraJsonOf]);
+  // The host's window opening fields (overheating), for the selected windows together.
+  const OpeningFieldsRenderer = inspectorContributions?.openingFields?.render;
+  const sharedOpening = useMemo(() => {
+    if (!OpeningFieldsRenderer || activeWindowSurfaceElements.length === 0) return null;
+    const { shared, mixed } = sharedExtraJson(activeWindowSurfaceElements);
+    return { element: { ...activeWindowSurfaceElements[0]!, extra_json: shared } as unknown as Readonly<Record<string, unknown>>, mixed,
+      elements: activeWindowSurfaceElements as unknown as readonly Readonly<Record<string, unknown>>[],
+      patch: patchExtraJsonOf(activeWindowSurfaceElements) };
+  }, [OpeningFieldsRenderer, activeWindowSurfaceElements, patchExtraJsonOf]);
   const constructionFieldScopeKey = useMemo(() => {
     if (activeType === 'BuildingElementOpaque') return `opaque:${activeOpaqueSurfaceMode ?? 'all'}`;
     return activeConstructionScope ?? activeType ?? 'fabric';
@@ -3283,6 +3301,11 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
           </React.Fragment>
         ))}
 
+        {sharedOpening && OpeningFieldsRenderer && (
+          <OpeningFieldsRenderer multiple mixed={sharedOpening.mixed} element={sharedOpening.element}
+            elements={sharedOpening.elements} onPatchExtraJson={sharedOpening.patch} />
+        )}
+
         {activeWindowSurfaceElements.length > 0 && (
           <div className="multi-select-window-copy">
             <div className="element-label multi-select-field-subtitle">Window Details</div>
@@ -3614,7 +3637,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
         {selectionKinds.has('Vents') && (
           <div className="multi-select-field-group">
             {renderSelectRow(
-              'Parent Element',
+              'Parent element',
               ventParentSummary,
               true,
               ventParentOptions,
@@ -3811,6 +3834,9 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {hasFabricElements && (
           <div className="multi-select-field-group">
+            {/* Under construction bands the age band and its thermal method (the host's fields below) set the
+                fabric, as in the one-element form: no assembly, U-value or resistance here. */}
+            {!constructionBands && <>
             <div className="batch-row multi-select-row">
               <div className="multi-select-row__label">Assembly</div>
               <div className="multi-select-row__control">
@@ -3884,6 +3910,7 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
               LIVE_NUMBER_BOUNDS.manualThermalResistanceConstruction,
             )}
             </>}
+            </>}
             {renderManualSelectRow(
               constructionFieldScopeKey,
               constructionTargetIds,
@@ -3907,14 +3934,18 @@ export const MultiSelectPanel: React.FC<MultiSelectPanelProps> = ({
 
         {sharedFabricElement && ElementFieldsRenderer && (
           <div className="multi-select-field-group">
+            {/* Each shown field that differs says so under it; this line covers one the current method or More hides. */}
             {sharedFabricElement.oneRoofMixed && (
               <p className="field-source-note" data-shared-roof>One roof: the values must match.</p>
             )}
-            <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
+            <ElementFieldsRenderer multiple mixed={sharedFabricElement.mixed} mustMatch={sharedFabricElement.oneRoof} elements={activeElements as unknown as Readonly<Record<string, unknown>>[]}
+              element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
               thermalMethod={sharedFabricElement.thermalMethod} onPatchExtraJson={patchActiveExtraJson} />
             {sharedFabricElement.more && (
-              <GroupAccordion label="More">
-                <ElementFieldsRenderer multiple section="more" mixed={sharedFabricElement.mixed} element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
+              <GroupAccordion label="More" openInitially={sharedFabricElement.oneRoofMixed}>
+                <ElementFieldsRenderer multiple section="more" mixed={sharedFabricElement.mixed} mustMatch={sharedFabricElement.oneRoof}
+                  elements={activeElements as unknown as Readonly<Record<string, unknown>>[]}
+                  element={sharedFabricElement.element as unknown as Readonly<Record<string, unknown>>}
                   thermalMethod={sharedFabricElement.thermalMethod} onPatchExtraJson={patchActiveExtraJson} />
               </GroupAccordion>
             )}

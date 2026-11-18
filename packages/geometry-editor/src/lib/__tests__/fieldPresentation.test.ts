@@ -10,6 +10,7 @@ import type {
 import {
   normalizeFieldUnit,
   resolveFieldPresentation,
+  sentenceCaseLabel,
 } from '../fieldPresentation';
 import { resolveFieldLabelContent } from '../schemaDescriptionOverrides';
 
@@ -360,5 +361,15 @@ describe('resolveFieldLabelContent (R4.6b-3 label content rule)', () => {
     ['u_value', 'U-Value', 'U-Value'],
   ] as const)('labels %s (title %s) as %s', (propertyKey, title, expected) => {
     expect(resolveFieldLabelContent(propertyKey, title)).toBe(expected);
+  });
+});
+
+describe('sentenceCaseLabel', () => {
+  it('shows a hand-written label in sentence case, keeping acronyms, units and user names', () => {
+    expect(sentenceCaseLabel('Party Wall Lining Type:')).toBe('Party wall lining type');
+    expect(sentenceCaseLabel('U-Value')).toBe('U-value');
+    expect(sentenceCaseLabel('MVHR unit:')).toBe('MVHR unit');
+    expect(sentenceCaseLabel('Efficiency (Round Trip):')).toBe('Efficiency (Round Trip)');
+    expect(sentenceCaseLabel('Heat Pump · Energy Supply')).toBe('Heat Pump · Energy supply');
   });
 });

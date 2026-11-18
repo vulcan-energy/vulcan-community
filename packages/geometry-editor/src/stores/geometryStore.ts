@@ -11,8 +11,9 @@ import {
 } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StateCreator, type StoreApi } from 'zustand/vanilla';
+import { onlyHeatingCircuit } from '../lib/spaceHeatSystemSync';
 import { geometryPerf } from '../lib/geometryPerf';
-import { simplifiedThermalBridgingOffered } from '../lib/schemaCache';
+import { requiredSuppliedApplianceKeys, simplifiedThermalBridgingOffered } from '../lib/schemaCache';
 import {
   convertShapeCoordinates,
   getElementShape,
@@ -67,6 +68,7 @@ import {
   getStoreyHeight,
   isInternalFloorElement,
   isStoreyHeightWall,
+  heightlessStoreyWallPatches,
   isWalkableFloorHorizontalPolygon,
   withEffectiveStoreyHeights,
   ZONE_OVERRIDE_EPSILON,
@@ -220,6 +222,7 @@ import {
   followGroundFabricOnEdit,
   type GroundFabricFollower,
 } from '../lib/groundSuspendedFabricSync';
+import { followHemieBundleHosts } from '../lib/hemieBundles';
 import {
   SYSTEM_SUBCATEGORY_AUTO_NAME_LABELS,
   classifyPitch,
@@ -1602,6 +1605,11 @@ export interface GeometryState extends
     perIdUpdates: Record<string, Partial<Element>>,
     options?: { mode: 'replace' },
   ) => void;
+  /**
+   * After the user commits a wall's height (blur or Enter), copies it once into every straight
+   * wall on the same storey that has no height of its own. Rides in the edit's undo step.
+   */
+  fillHeightlessStoreyWalls: (wallId: string) => void;
   /**
    * Merge flat keys into each element's extra_json (same as assembly calculator apply); one history entry.
    * Undefined patch values remain own keys so explicit extra_json clearing semantics are preserved.
@@ -3153,7 +3161,6 @@ const createGeometryState = (
       canUndo: false,
       canRedo: false,
       lastSavedCsv: null,
-      detachedOpenings: {},
       targetValidation: null,
       globalOrientationOffset: 0,
       ...extras,
@@ -3380,6 +3387,22 @@ const createGeometryState = (
     changedEntries.forEach(([id, updates], index) => {
       get().updateElement(id, updates, index < changedEntries.length - 1);
     });
+  },
+
+  fillHeightlessStoreyWalls: (wallId) => {
+    const state = get();
+    const wall = state.elementsById[wallId];
+    const height = (wall as { height?: unknown } | undefined)?.height;
+    if (!wall || !isStoreyHeightWall(wall) || typeof height !== 'number') return;
+    const patches = heightlessStoreyWallPatches(
+      Math.floor(wall.coordinates[0]?.z ?? 0),
+      height,
+      Object.values(state.elementsById),
+    );
+    if (patches.length === 0) return;
+    state.writeAs('derived', () => state.updateElementsBulk(
+      Object.fromEntries(patches.map(({ elementId, patch }) => [elementId, patch as Partial<Element>])),
+    ));
   },
 
   setFabricPreset: (preset) => {
@@ -4094,6 +4117,11 @@ const createGeometryState = (
       if (electric.length === 1) {
         newElement = { ...newElement, extra_json: { ...record(newElement.extra_json), EnergySupply: electric[0] } } as Element;
       }
+    }
+    // A new emitter on a model with one heating circuit takes it; with several, the user picks.
+    if (type === 'WetEmitter') {
+      const circuit = onlyHeatingCircuit(Object.values(get().elementsById));
+      if (circuit) newElement = { ...newElement, space_heat_system: circuit } as Element;
     }
     newElement = { ...newElement, _nameAutoSync: true };
 
@@ -7156,13 +7184,11 @@ const createGeometryState = (
       const resolveElementName = createElementNameLookup(Object.values(state.elementsById));
       const resolveParentElement = createParentElementLookup(Object.values(state.elementsById));
       const removedName = removedElement.name;
-      const detachedOpenings = { ...state.detachedOpenings };
       if (removedName) {
         for (const elId of newElementIds) {
           const el = remainingElementsById[elId];
           if (el && resolveParentElement(el)?.id === id) {
             remainingElementsById[elId] = { ...el, parent_element: null } as typeof el;
-            if (el.type === 'BuildingElementTransparent') detachedOpenings[elId] = removedName;
           } else if (el?.type === 'MechanicalVentilationTerminal' && resolveElementName(el.host_element, undefined, isMvhrTerminalHost)?.id === id) {
             remainingElementsById[elId] = {
               ...el,
@@ -7178,7 +7204,6 @@ const createGeometryState = (
       const updates: Record<string, any> = {
         elementsById: remainingElementsById,
         elementIds: newElementIds,
-        detachedOpenings,
       };
       if (state.selection?.id === id) {
         updates.selection = null;
@@ -7873,6 +7898,7 @@ const createGeometryState = (
         complianceValidationEnabled,
         primaryFhsZoneId,
         simplifiedThermalBridgingOffered: simplifiedThermalBridgingOffered(schemaPort, 'fhs'),
+        constructionBands: targetRules(schemaPort, state.complianceSettings).constructionBands,
       });
       allWarnings.push(...validation.warnings.map(w => w.message));
       allCriticalIssues.push(...validation.issues.map(i => i.message));
@@ -7935,6 +7961,9 @@ const createGeometryState = (
       {
         ...targetValidationFlags(schemaPort, state.complianceSettings),
         partOActiveCoolingRequired: state.complianceSettings.PartO_active_cooling_required,
+        requiredApplianceKeys: schemaPort.availability === 'available'
+          ? requiredSuppliedApplianceKeys(schemaPort.getRootSchema(targetSchemaMode(schemaPort)))
+          : [],
       },
       selectPartFData({
         zones: state.zones,
@@ -7973,6 +8002,7 @@ export const createGeometryStore = (
     acceptsShieldLocation: () => acceptsSuspendedShieldLocation(schemaPort),
   });
   rawSetState({ withCopySources: follower.withCopySources });
+  followHemieBundleHosts(store);
   return store;
 };
 

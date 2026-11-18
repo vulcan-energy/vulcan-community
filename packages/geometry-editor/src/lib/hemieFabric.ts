@@ -25,6 +25,12 @@ const ENGLAND_AREAS = new Set(('AL B BA BB BD BH BL BN BR BS CB CM CO CR CT CV C
 
 /** The nation the model states for a postcode in a border area. */
 export const HEMIE_NATION = 'HEMIE_nation';
+
+/** An untested existing building's leakage inputs: the HEM:EPC form asks them under Air test. */
+export const HEMIE_OPEN_FIREPLACES = 'HEMIE_number_of_open_fireplaces';
+export const HEMIE_DOUBLE_GLAZING_PERIOD = 'HEMIE_double_glazing_installation_period';
+export const HEMIE_HEAT_LOSS_CORRIDOR = 'HEMIE_heat_loss_corridor';
+export const HEMIE_AIR_TEST_ROWS: ReadonlySet<string> = new Set([HEMIE_OPEN_FIREPLACES, HEMIE_DOUBLE_GLAZING_PERIOD, HEMIE_HEAT_LOSS_CORRIDOR]);
 export const NATIONS = ['England', 'Wales', 'Scotland', 'Northern Ireland'] as const;
 
 /** A well-formed postcode's area, else undefined. */
@@ -76,7 +82,7 @@ export const FABRIC_PRESET_TYPES: ReadonlySet<string> = new Set(['BuildingElemen
 export const HEMIE_RETIRED_ROWS: Readonly<Record<string, string>> = {
   HEMIE_region: 'The region setting was removed: it now comes from the postcode. For a postcode area that spans two nations, choose the Nation next to the Postcode in Global Settings.',
   HEMIE_front_door: 'The front door setting was removed: mark the front door on the door itself.',
-  HEMIE_infiltration_properties: 'The infiltration setting was removed. With no air test, enter the open fireplaces and glazing date in Global Settings > Air tightness.',
+  HEMIE_infiltration_properties: 'The infiltration setting was removed. With no air test, enter the open fireplaces and glazing date in Global Settings > Air test.',
 };
 
 const HEAT_CAPACITY_BANDS = ['Very light', 'Light', 'Medium', 'Heavy', 'Very heavy'] as const;
@@ -123,6 +129,7 @@ export function hemieDefaultPlaceholder(constructionType: string, field: string,
   switch (field) {
     case 'areal_heat_capacity':
       if (constructionType.endsWith('_door')) return '50,000 (default)';
+      if (constructionType === 'heated_pitched_roof') return '50,000 (default)';
       return constructionType === 'window' ? '20,000 (default)' : undefined;
     case 'insulation_thickness':
       if (NO_INSULATION.has(constructionType) || !located) return 'None (default)';
@@ -168,7 +175,7 @@ export const HEMIE_CONSTRUCTION_FIELDS: Readonly<Record<string, readonly string[
   party_or_sheltered_door: ['areal_heat_capacity'],
   flat_roof: ['insulation_location', 'insulation_thickness'],
   unheated_pitched_roof: ['insulation_location', 'insulation_thickness'],
-  heated_pitched_roof: ['insulation_thickness'],
+  heated_pitched_roof: ['insulation_thickness', 'areal_heat_capacity'],
   mini_flat_roof: ['insulation_location', 'insulation_thickness'],
   mini_pitched_roof: ['insulation_location', 'insulation_thickness'],
   suspended_floor: ['insulation_thickness'],
@@ -328,7 +335,7 @@ export const HEMIE_ELEMENT_KEYS = [
   'basement_depth_descriptor', 'basement_air_volume', 'thatched', 'insulation_type', 'insulation_thermal_conductivity',
   'ceiling_thickness', 'ceiling_thermal_conductivity', 'joist_depth', 'percentage_area_of_timber_joists', 'roof_characteristics',
   'rafter_depth', 'percentage_area_of_timber_rafters', 'air_gap_thermal_resistance', 'internal_finish_thickness',
-  'internal_finish_thermal_conductivity', 'surface_material', 'finish',
+  'internal_finish_thermal_conductivity', 'surface_material', 'finish', 'is_insulated',
 ] as const;
 
 /** The existing-building fields an element holds in its extra_json. */
@@ -512,8 +519,9 @@ export function statedBuildType(settings: { build_type?: string; unreadMetadataR
  */
 export function hemieConstructionType(element: Element, elements: readonly Element[] = [], buildType?: string): string | undefined {
   const type = hemieBaseConstructionType(element, elements);
-  // A bay's or dormer's elements keep their own constructions.
-  if (buildType !== PARK_HOME || element.extra_json?.dormer_bundle || element.extra_json?.hemie_bundle) return type;
+  // A bay's, conservatory's or dormer's elements keep their own constructions; a roof part's slopes are the roof's.
+  const part = (element.extra_json?.hemie_bundle as { kind?: string } | undefined)?.kind;
+  if (buildType !== PARK_HOME || element.extra_json?.dormer_bundle || part === 'bay' || part === 'conservatory') return type;
   switch (type) {
     case 'external_wall':
       return level(element) === roomInRoofLevel(elements) ? type : 'park_home_wall';

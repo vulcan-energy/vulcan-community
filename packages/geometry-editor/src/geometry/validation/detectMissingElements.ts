@@ -259,6 +259,8 @@ export interface MissingElementChecks {
   /** Rows any target needs, such as a heat source for wet emitters. */
   modelValidityChecks?: boolean;
   partOActiveCoolingRequired?: boolean;
+  /** Appliances the target's schema requires by name, each with its energy supply (HEM:EPC's oven and hob). */
+  requiredApplianceKeys?: readonly string[];
 }
 
 // Detect missing required elements for zones based on the FHS schema
@@ -453,6 +455,18 @@ export const detectMissingElements = (
     // A target without the FHS rules still needs a consistent model.
     if (wetEmittersNeedHeatSource) dwellingWide.push(heatSourceRow('Heat source required when Wet Emitters are present'));
     if (hotWaterNeedsHeatSource) dwellingWide.push(heatSourceRow('Heat source required by hot water source'));
+  }
+  if (checksModel) {
+    for (const key of checks.requiredApplianceKeys ?? []) {
+      if (elements.some((el) => !el.isPlaceholder && el.type === 'Appliance' && el.appliancekey === key)) continue;
+      dwellingWide.push({
+        type: 'Appliance',
+        requiredBy: 'schema',
+        path: `/Appliances/${key}`,
+        message: `Add the ${key.toLowerCase()} and choose its energy supply.`,
+        pillQualifier: key,
+      });
+    }
   }
 
   const perZone: MissingElement[] = [];

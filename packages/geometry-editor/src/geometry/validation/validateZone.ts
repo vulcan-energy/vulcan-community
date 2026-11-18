@@ -12,6 +12,8 @@ export type ZoneValidationContext = {
   primaryFhsZoneId?: string;
   /** False where the target takes thermal-bridge records only (see `simplifiedThermalBridgingOffered`). */
   simplifiedThermalBridgingOffered?: boolean;
+  /** An existing building (construction bands): the converter reads only the zone's areas, not its height or volume. */
+  constructionBands?: boolean;
 };
 
 /** A numeric cell that held text on load blocks, as in the converter (E055 or a schema type error). */
@@ -45,10 +47,10 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
   if (!isPositiveFinite(zone.floorArea)) {
     issues.push(issue('Floor Area cannot be 0', 'floorArea'));
   }
-  if (!isPositiveFinite(zone.height)) {
+  if (!context.constructionBands && !isPositiveFinite(zone.height)) {
     issues.push(issue('Height cannot be 0', 'height'));
   }
-  if (!isPositiveFinite(zone.volume)) {
+  if (!context.constructionBands && !isPositiveFinite(zone.volume)) {
     issues.push(issue('Volume cannot be 0', 'volume'));
   }
 
@@ -97,7 +99,7 @@ export const validateZone = (zone: Zone, context: ZoneValidationContext = {}): V
     }
   }
 
-  if (zone._heightUserOverride && zone._derivedHeight && zone._derivedHeight > 0) {
+  if (!context.constructionBands && zone._heightUserOverride && zone._derivedHeight && zone._derivedHeight > 0) {
     const heightDiff = Math.abs(zone.height - zone._derivedHeight);
     if (heightDiff > 0.005) {
       warnings.push(warn(

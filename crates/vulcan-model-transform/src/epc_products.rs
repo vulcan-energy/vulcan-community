@@ -298,6 +298,7 @@ fn error(code: &str, path: String, message: String) -> ValidationError {
 
 fn notice(path: &str, message: String) -> SchemaOmission {
     SchemaOmission {
+        label: None,
         code: crate::target_mappings::TARGET_INPUT_WARNING.into(),
         path: path.into(),
         message,
@@ -375,7 +376,7 @@ pub(crate) fn rule(
 ) -> Option<Rule> {
     match (pattern, kind) {
         // Our interpretation would be needed to tell condensing from non-condensing, so the
-        // user picks (question to Baz). The candidates listed follow the model's own facts.
+        // user picks (an open question). The candidates listed follow the model's own facts.
         // A range cooker boiler is a regular boiler's product: the Orchestrator substitutes a
         // CookerBoiler into `Boiler` and takes its pilot light from the product.
         ("HeatSourceWet/*", "Boiler") => {
@@ -429,7 +430,7 @@ pub(crate) fn rule(
         ("HeatSourceWarmAir/*", "WarmAirElectric") => pick(&["WarmAirElectric"], "the pinned HEM Database has no electric warm-air product, so there is none to pick yet"),
         ("SpaceHeatSystem/*", "CombustionRoomHeater") => no_default(&["RoomHeater"], "room heater"),
         // DESNZ: the assessor selects; high heat retention or standard is a user choice and
-        // capacity rounding would be our interpretation (question to Baz).
+        // capacity rounding would be our interpretation (not yet decided).
         ("SpaceHeatSystem/*", "ElecStorageHeater") => pick(&["StorageHeater"], "pick the storage heater product: high heat retention or standard, and its capacity"),
         // Single product for the type.
         ("SpaceHeatSystem/*", "InstantElecHeater") => auto("DirectElectricHeaters"),
@@ -460,7 +461,7 @@ pub(crate) fn rule(
         // Single product for the type.
         ("HotWaterSource/*", "SmartHotWaterTank") => auto("SmartHotWaterTank"),
         // DESNZ: the collector type is a required assessor input; nearest-coefficient matching
-        // would be our interpretation (question to Baz).
+        // would be our interpretation (not yet decided).
         ("HotWaterSource/*/HeatSource/*" | "PreHeatedWaterSource/preheated tank/HeatSource/*", "SolarThermalSystem") => {
             pick(&["SolarThermal"], "pick the solar collector type")
         }
@@ -493,7 +494,7 @@ pub(crate) fn rule(
 
 fn heat_pump_rule(system: &Map<String, Value>) -> Option<Rule> {
     // DESNZ gives no size rule: matching test data to the nearest size would be our
-    // interpretation (question to Baz, and E8 for DESNZ), so a family of sizes is a pick.
+    // interpretation (a question for DESNZ), so a family of sizes is a pick.
     let size = |table: &'static str, sink: Option<&str>| {
         Some(Rule::Pick {
             tables: std::slice::from_ref(HEAT_PUMP_TABLES.iter().find(|t| **t == table).unwrap()),
@@ -881,8 +882,8 @@ pub(crate) fn apply_weather_curves(
             .and_then(Value::as_u64)
             .unwrap_or_default();
         let path = format!("/SpaceHeatSystem/{name}/ecodesign_controller");
-        // Classes V to VIII need load compensation coefficients; DESNZ gives no value (plan
-        // question E57).
+        // Classes V to VIII need load compensation coefficients; DESNZ gives no value (a
+        // question for DESNZ).
         let load = ["load_comp_a", "load_comp_b", "load_comp_c"];
         if (5..=8).contains(&class) && load.iter().any(|k| !controller.contains_key(*k)) {
             errors.push(error("E_EPC_LOAD_COMPENSATION", path.clone(), format!("'{name}' has ecodesign class {class} (load compensation), which needs {}. There is no default: state them on its heating controls, or choose the class without load compensation.", load.join(", "))));
@@ -949,10 +950,20 @@ pub(crate) fn apply_weather_curves(
     }
 }
 
+/// The fuels HEM treats as solid (its `FuelCategory::Solid`).
+const SOLID_FUELS: [&str; 6] = [
+    "wood_logs",
+    "wood_pellets",
+    "wood_chips",
+    "house_coal",
+    "anthracite",
+    "smokeless_fuel",
+];
+
 /// The supply's fuel is what the assessor observed, and the Orchestrator prices, and counts CO2
 /// and primary energy, by it (it never reads the product's fuel). A picked product that burns
-/// another fuel fails only where the pinned data has a product of the supply's fuel to pick
-/// instead; with none, the supply's fuel stands. Single-product types and rules that already
+/// another fuel fails where the pinned data has a product of the supply's fuel to pick instead,
+/// or where one fuel is solid and the other is not; otherwise the supply's fuel stands. Single-product types and rules that already
 /// list products by the supply's fuel (boilers) are not checked again. A back boiler's supply is
 /// on its integrated room heater.
 pub(crate) fn check_product_fuels(
@@ -986,6 +997,28 @@ pub(crate) fn check_product_fuels(
             if same(burns, has) {
                 continue;
             }
+            let path = json_pointer(&[section, name, "product_id"]);
+            // HEM models a solid fuel's appliance differently (a room heater takes its warm-up
+            // time and stoking, from its product), so the product's fuel is solid exactly when
+            // the supply's is, whatever else the data offers.
+            let solid = |fuel: &str| SOLID_FUELS.contains(&fuel);
+            if solid(burns) != solid(has) {
+                let pick = if solid(has) {
+                    "a solid fuel. Pick a solid-fuel product"
+                } else {
+                    "not a solid fuel. Pick a product that burns no solid fuel"
+                };
+                errors.push(error(
+                    "E_EPC_SUPPLY_FUEL",
+                    path,
+                    format!(
+                        "'{name}': its product burns {}, but its energy supply is {}, {pick}.",
+                        burns.replace('_', " "),
+                        has.replace('_', " ")
+                    ),
+                ));
+                continue;
+            }
             let pattern = format!("{section}/*");
             let Some(rule) = rule(&pattern, text(object, "type"), name, object, model) else {
                 continue;
@@ -1001,7 +1034,6 @@ pub(crate) fn check_product_fuels(
             {
                 continue;
             }
-            let path = json_pointer(&[section, name, "product_id"]);
             errors.push(error("E_EPC_SUPPLY_FUEL", path, format!("'{name}': its product burns {}, but its energy supply is {}. Pick a product that burns {}.", burns.replace('_', " "), has.replace('_', " "), has.replace('_', " "))));
         }
     }

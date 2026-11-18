@@ -141,8 +141,9 @@ fn invalid(message: String) -> BuildError {
     BuildError::new("E068", &message)
 }
 
-/// The model's preset for this conversion. None without a `FabricPreset` row, or for a preset of
-/// the other family. A malformed preset, or any preset on an existing building, is an error.
+/// The model's preset for this conversion. None without a `FabricPreset` row, for a preset of the
+/// other family, or for any preset on an existing building converted to HEMIE (the Fabric tab says
+/// it is not used there). A malformed preset is an error.
 pub(crate) fn read(
     csv_data: &BTreeMap<String, Vec<BTreeMap<String, Value>>>,
     profile: ModelProfile,

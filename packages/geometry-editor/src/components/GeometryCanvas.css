@@ -1792,9 +1792,10 @@
   width: 100%;
   min-width: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border: 1px solid var(--surface-control-active);
   border-radius: 8px;
   background: var(--surface-control);
@@ -1824,6 +1825,25 @@
   font-size: var(--font-size-xs);
   font-weight: 600;
   line-height: 1.25;
+}
+
+/* The assembly's result, read as a fact: "U-value  0.17 W/m²K". */
+.assembly-action-control__fact {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+}
+
+.assembly-action-control__fact > span:first-child {
+  color: var(--text-secondary);
+}
+
+.assembly-action-control__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .element-editor-full-row {
@@ -1887,7 +1907,6 @@
   margin-top: 8px;
 }
 
-.element-editor-segment__label,
 .system-pcdb-card__helper,
 .system-pcdb-card__key {
   font-size: var(--font-size-xxs);
@@ -1895,37 +1914,43 @@
   color: var(--text-muted);
 }
 
+/* Same look as a form-row CompactSegmentedControl (WindowDetailControls.tsx): a field label,
+   then a full-width control with equal segments. */
 .element-editor-segment__label {
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--text-primary);
   margin-bottom: 6px;
 }
 
 .element-editor-segment__control {
   display: flex;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--surface-control-active);
-  border-radius: 8px;
-  background: var(--surface-control);
+  gap: 2px;
+  padding: 2px;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: var(--border-width-thin) solid var(--border-subtle);
+  border-radius: var(--radius-lg);
 }
 
 .element-editor-segment__button {
-  flex: 1;
-  min-height: 28px;
-  padding: 6px 10px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  line-height: 1;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 .element-editor-segment__button--active {
-  background: var(--surface-overlay-selected);
+  background: var(--row-highlight-bg);
+  box-shadow: inset 0 0 0 1px var(--row-highlight-border);
   color: var(--text-primary);
-  box-shadow: var(--shadow-subtle);
 }
 
 .system-pcdb-applied-card {
@@ -2809,16 +2834,6 @@
   min-width: 16px;
   padding: 0 4px;
   font-size: var(--font-size-xxs);
-}
-
-.element-evidence-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background-color: var(--success-text);
-  border: 1px solid var(--semantic-on-color);
-  flex-shrink: 0;
-  display: inline-block;
 }
 
 .multi-select-panel {

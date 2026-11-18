@@ -26,6 +26,7 @@ fn error(code: &str, path: String, message: String) -> ValidationError {
 
 fn notice(path: &str, message: String) -> SchemaOmission {
     SchemaOmission {
+        label: None,
         code: TARGET_INPUT_WARNING.into(),
         path: path.into(),
         message,
@@ -167,7 +168,7 @@ pub(crate) fn map_appliances(
             errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
                 format!("/Appliances/{field}"),
-                format!("HEM:EPC needs to know whether the dwelling has space for this appliance. Choose Yes or No in Global Settings > Dwelling details ({}).", appliance_label(row)),
+                format!("Choose Yes or No for '{}'.", appliance_label(row)),
             ));
             continue;
         }
@@ -175,8 +176,8 @@ pub(crate) fn map_appliances(
             None => {}
             Some(false) if drawn => errors.push(error(
                 "E_EPC_APPLIANCE_PRESENCE",
-                "/Metadata".into(),
-                format!("{} is No in Global Settings > Dwelling details, but the plan has a {} appliance. Correct one of them.", appliance_label(row), keys.join(" or ").replace('_', " ").to_lowercase()),
+                format!("/Appliances/{field}"),
+                format!("{} is No in Global Settings > Rooms and services, but the plan has a {} appliance. Correct one of them.", appliance_label(row), keys.join(" or ").replace('_', " ").to_lowercase()),
             )),
             Some(present) => {
                 appliances.insert(field.into(), json!(present));
@@ -195,7 +196,7 @@ pub(crate) fn map_appliances(
             None => errors.push(error(
                 "E_EPC_COOKING_SUPPLY",
                 format!("/Appliances/{key}"),
-                format!("State the energy supply of the {key}: add an Appliances row '{key}' with an EnergySupply. HEM:EPC requires it and there is no default."),
+                format!("Add the {key} appliance and choose its energy supply."),
             )),
         }
     }
@@ -552,7 +553,7 @@ pub(crate) fn check_solar_absorption(model: &Value, errors: &mut Vec<ValidationE
                 errors.push(error(
                     "E_EPC_SOLAR_ABSORPTION",
                     format!("{path}/solar_absorption_coeff"),
-                    format!("Element '{name}' needs its solar absorption coefficient or its surface colour (Light, Intermediate or Dark). There is no default."),
+                    format!("Choose the colour of '{name}' (Light, Intermediate or Dark), or enter its solar absorption."),
                 ));
             }
         }
@@ -564,8 +565,8 @@ pub(crate) fn check_solar_absorption(model: &Value, errors: &mut Vec<ValidationE
 /// default (None: HEMIE applies it, or asks for it). Values: direct feed maximum power 15 kW,
 /// mixer shower 9 L/min; a tank's location has none; the rest are HEMIE's (air conditioning and heat-pump warm-air convective fraction, instant
 /// heater power and convective type, storage heater units, immersion power and position, coil
-/// position, solar loop inputs, buffer tank pump flow rate).
-const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 17] = [
+/// position, a hot water heat pump's heater and thermostat positions, solar loop inputs, buffer tank pump flow rate).
+const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 21] = [
     (&["HotWaterSource", "*"], "StorageTank", "location", None),
     (
         &["HotWaterSource", "*"],
@@ -633,6 +634,31 @@ const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 17] = [
         "heater_position",
         None,
     ),
+    // A hot water heat pump: its own vessel's heater and thermostat, or the heater in a tank.
+    (
+        &["HotWaterSource", "*"],
+        "HeatPump_HWOnly",
+        "heater_position",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*"],
+        "HeatPump_HWOnly",
+        "thermostat_position",
+        None,
+    ),
+    (
+        &["HotWaterSource", "*", "HeatSource", "*"],
+        "HeatPump_HWOnly",
+        "heater_position",
+        None,
+    ),
+    (
+        &["PreHeatedWaterSource", "*", "HeatSource", "*"],
+        "HeatPump_HWOnly",
+        "heater_position",
+        None,
+    ),
     (
         &["HotWaterSource", "*", "HeatSource", "*"],
         "SolarThermalSystem",
@@ -665,7 +691,7 @@ const STATED_OR_DEFAULTED: [(&[&str], &str, &str, Option<f64>); 17] = [
     ),
 ];
 
-/// Assumption pending DESNZ E33 (Vulcan's assumption registry lists it): a combi boiler's daily hot
+/// Assumption pending DESNZ (Vulcan's assumption registry lists it): a combi boiler's daily hot
 /// water usage is not an assessor input but the HEM:EPC usage profile's daily average, the EPC
 /// wrapper's own `hot_water_volume_daily_average` for its occupancy (from the bedrooms, and for one
 /// bedroom the floor area), in whole litres because the new-build input takes an integer. The FHS
@@ -780,7 +806,7 @@ pub(crate) fn apply_desnz_defaults(
                 .all(|v| *v == Some(first))
                 .then(|| first.to_string())
         };
-        // Assumption pending DESNZ E40 (Vulcan's assumption registry lists it): with emitters of
+        // Assumption pending DESNZ (Vulcan's assumption registry lists it): with emitters of
         // different types, the first emitter's type sets the design flow temperature, as HEMIE's
         // `_serialize_design_flow_temp` does. If DESNZ gives a rule for a mix, apply it here.
         let types: Vec<Option<&str>> = system
@@ -835,7 +861,7 @@ pub(crate) fn apply_desnz_defaults(
                 );
             }
         }
-        // No DESNZ default for the rest (plan questions E40, E59): each one missing is an error
+        // No DESNZ default for the rest (questions for DESNZ): each one missing is an error
         // naming the system, before the run fails on it.
         let path = json_pointer(&["SpaceHeatSystem", name]);
         let mut need = |field: &str, why: String| {
@@ -911,7 +937,7 @@ pub(crate) fn apply_desnz_defaults(
                 (false, _) => {
                     // A blank value, so the schema adds no second error for it.
                     system.remove(field);
-                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", match kind { "" => "buffer tank", "StorageTank" => "storage tank", "SmartHotWaterTank" => "smart hot water tank", _ => kind })));
+                    errors.push(error("E_EPC_REQUIRED_INPUT", format!("{path}/{field}"), format!("'{name}' ({}) needs its {words}. A new build states it: there is no default.", match kind { "" => "buffer tank", "StorageTank" => "storage tank", "SmartHotWaterTank" => "smart hot water tank", "HeatPump_HWOnly" => "hot water heat pump", _ => kind })));
                 }
             }
         }
@@ -947,10 +973,19 @@ pub(crate) fn apply_desnz_defaults(
                 system["design_outdoor_air_flow_rate"] = json!(flow);
                 derive(path.clone(), "design_outdoor_air_flow_rate", json!(flow));
             }
-            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Dwelling details."))),
+            None => errors.push(error("E_EPC_REQUIRED_INPUT", path, format!("'{name}' does not state its design outdoor air flow rate, and the model states no number of bedrooms to estimate it from. State the flow rate on the system, or the number of bedrooms in Global Settings > Rooms and services."))),
         }
     }
-    if let Some(bedrooms) = model["NumberOfBedrooms"].as_u64().filter(|b| *b > 0) {
+    // Assumption pending DESNZ (Vulcan's assumption registry lists it): the EPC wrapper's
+    // occupancy is defined from one bedroom up, and its one-bedroom occupancy follows the floor
+    // area, so a dwelling with no bedroom (a studio) is sent as one bedroom. The design outdoor air
+    // flow estimate above keeps the stated count. If DESNZ answers differently, change or delete
+    // this.
+    if model["NumberOfBedrooms"] == json!(0) {
+        model["NumberOfBedrooms"] = json!(1);
+        notices.push(notice("/NumberOfBedrooms", "The dwelling has no bedroom, so its occupancy is that of a one-bedroom dwelling of its floor area: HEM:EPC sets the occupancy from one bedroom up.".into()));
+    }
+    if let Some(bedrooms) = model["NumberOfBedrooms"].as_u64() {
         let usage = combi_daily_hot_water(bedrooms, area);
         for (name, source) in model["HotWaterSource"]
             .as_object_mut()
@@ -969,7 +1004,7 @@ pub(crate) fn apply_desnz_defaults(
             }
         }
     }
-    // Assumption pending DESNZ E54 (Vulcan's assumption registry lists it): a heat pump's hot water
+    // Assumption pending DESNZ (Vulcan's assumption registry lists it): a heat pump's hot water
     // coil with no upper flow temperature limit takes 60 °C (DESNZ-defined for a standardised heat
     // pump cylinder; the FHS notional uses the same). HEM needs it for a heat pump and has no
     // default. If DESNZ answers differently, change or delete this; the run then reports
@@ -1023,6 +1058,26 @@ pub(crate) fn apply_desnz_defaults(
         .as_str()
         .unwrap_or_default()
         .to_string();
+    // DESNZ-defined: an HIU in a flat or maisonette states its building-level distribution losses,
+    // or on an existing building its heat network's performance category, from which HEMIE takes
+    // them. A house takes 0, which the EPC wrapper sets.
+    if ["flat", "maisonette"].contains(&build_type.as_str()) {
+        for (name, source) in model["HeatSourceWet"].as_object().into_iter().flatten() {
+            let stated = |field: &str| source.get(field).is_some_and(|v| !v.is_null());
+            if source["type"] != "HIU"
+                || stated("building_level_distribution_losses")
+                || existing && stated("performance_category")
+            {
+                continue;
+            }
+            let alternative = if existing {
+                ", or its heat network performance category"
+            } else {
+                ""
+            };
+            errors.push(error("E_EPC_REQUIRED_INPUT", json_pointer(&["HeatSourceWet", name, "building_level_distribution_losses"]), format!("Heat interface unit '{name}': state its building level distribution losses (W){alternative} on the system. A {build_type} has no default.")));
+        }
+    }
     // DESNZ-defined: an existing building may give its base storey instead, and
     // HEMIE estimates the base height from it.
     let new_build = model.get("IsExistingBuilding") != Some(&Value::Bool(true));
@@ -1049,15 +1104,15 @@ pub(crate) fn apply_desnz_defaults(
             .contains(&build_type.as_str())
             {
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No ventilation zone base height is given, so this {build_type} uses 0 m, the default for a dwelling at ground level. Give it in Global Settings > Ventilation environment to state it.")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so this {build_type} uses 0 m, the default for a dwelling at ground level. Give it in Global Settings > Site to state it.")));
             } else if storey == Some(0) {
                 // DESNZ-defined: a ground-floor flat or maisonette also defaults to 0 m.
                 ventilation.insert("ventilation_zone_base_height".into(), json!(0));
-                notices.push(notice(path, format!("No ventilation zone base height is given, so this ground-floor {build_type} uses 0 m, the default. Give it in Global Settings > Ventilation environment to state it.")));
+                notices.push(notice(path, format!("No ventilation zone base height is given, so this ground-floor {build_type} uses 0 m, the default. Give it in Global Settings > Site to state it.")));
             } else if let Some(storey) = base_storey {
                 notices.push(notice(path, format!("No ventilation zone base height is given, so the existing-building EPC estimates it from the storey of dwelling, {}.", storey + 1)));
             } else {
-                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: give it in Global Settings > Ventilation environment. An existing building may give its storey of dwelling instead, in Dwelling details.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
+                errors.push(error("E_EPC_REQUIRED_INPUT", path.into(), format!("A {} must state its ventilation zone base height: give it in Global Settings > Site. An existing building may give its storey of dwelling instead, in Property.", if build_type.is_empty() { "dwelling with no built form" } else { &build_type })));
             }
         }
         // Absent: the builder removed the template's value (`desnz_default_rows`). HEMIE
@@ -1382,6 +1437,33 @@ pub(crate) fn check_system_catalogue(
             format!("Unconditioned zone '{name}' uses method Direct, which this HEM:EPC target rejects. Use method Calculated and state the zone's envelope in building_element."),
         ));
     }
+    // ponytail: defects of the pinned Orchestrator 0.13.2a0, which stop the run inside it; drop
+    // each on a re-pin that fixes it. It has no product substitution for a back boiler, and a
+    // heat pump product with no heating circulation pump power (the air-to-air one) reaches HEM
+    // Core as null, which Core rejects; the assessor cannot state the value.
+    for (name, source) in model["HeatSourceWet"].as_object().into_iter().flatten() {
+        let product = source["product_id"]
+            .as_u64()
+            .and_then(|id| db.products.get(&id));
+        let message = match source["type"].as_str() {
+            Some("BackBoiler") => {
+                format!("Back boiler '{name}': this HEM:EPC target cannot run a back boiler, and there is no other way to enter one. Until a later HEM:EPC target supports it, remove it to run the model.")
+            }
+            Some("HeatPump")
+                if product
+                    .and_then(|p| p.fields.get("powerHeatingCirculationPump"))
+                    .is_some_and(|v| v.is_empty() || v == "NULL") =>
+            {
+                format!("Heat pump '{name}': this HEM:EPC target cannot run its product, an air-to-air heat pump that gives no heating circulation pump power, and there is no other way to enter one. Until a later HEM:EPC target supports it, remove it to run the model.")
+            }
+            _ => continue,
+        };
+        errors.push(error(
+            "E_EPC_UNSUPPORTED_SYSTEM",
+            json_pointer(&["HeatSourceWet", name]),
+            message,
+        ));
+    }
     // A room heater whose product gives auxiliary power fields (even 0) states the supply for
     // them: the wrapper rejects one without (`validate_power_aux_needs_supply`). A back
     // boiler's integrated room heater takes the back boiler's product.
@@ -1573,8 +1655,7 @@ pub(crate) fn build_type_from_party_walls(
     csv: &Rows,
     allowed: &[String],
 ) -> Result<(&'static str, usize), String> {
-    let state =
-        |why: String| format!("{why} Choose the build type in Global Settings > Dwelling details.");
+    let state = |why: String| format!("{why} Choose the built form in Global Settings > Property.");
     let mut walls = Vec::new();
     let mut midpoints = Vec::new();
     for row in csv.values().flatten() {
@@ -1833,6 +1914,30 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn an_appliance_answer_the_plan_contradicts_is_on_that_answer() {
+        let csv: Rows = BTreeMap::from([(
+            "Appliances".into(),
+            vec![BTreeMap::from([(
+                "appliancekey".into(),
+                json!("Dishwasher"),
+            )])],
+        )]);
+        let mut errors = Vec::new();
+        map_appliances(
+            &mut json!({}),
+            &csv,
+            [(true, Some(true)), (true, Some(false)), (true, Some(true))],
+            &mut errors,
+        );
+        let conflict: Vec<_> = errors
+            .iter()
+            .filter(|e| e.code == "E_EPC_APPLIANCE_PRESENCE")
+            .collect();
+        assert_eq!(conflict.len(), 1, "{errors:#?}");
+        assert_eq!(conflict[0].path, "/Appliances/has_dishwasher");
+    }
 
     fn party(coords: &str) -> BTreeMap<String, Value> {
         BTreeMap::from([
@@ -2270,6 +2375,46 @@ mod tests {
                 );
             }
             assert!(model["HotWaterSource"]["hw"].get("location").is_none());
+        }
+    }
+
+    #[test]
+    fn a_new_build_hot_water_heat_pump_states_its_positions_and_an_existing_one_leaves_them() {
+        for existing in [false, true] {
+            let hp =
+                json!({"type": "HeatPump_HWOnly", "product_id": 1, "EnergySupply": "mains elec"});
+            let mut model = json!({
+                "IsExistingBuilding": existing,
+                "HotWaterSource": {
+                    "vessel": hp,
+                    "hw": {"type": "StorageTank", "volume": 200, "daily_losses": 1.6, "location": "internal",
+                        "HeatSource": {"hp": hp}}
+                },
+                "PreHeatedWaterSource": {"preheated tank": {"type": "StorageTank", "HeatSource": {"hp": hp}}}
+            });
+            let mut errors = Vec::new();
+            apply_desnz_defaults(&mut model, &mut errors, &mut Vec::new(), &mut Vec::new());
+            let mut found: Vec<&str> = errors
+                .iter()
+                .filter(|e| e.code == "E_EPC_REQUIRED_INPUT")
+                .map(|e| e.path.as_str())
+                .filter(|p| p.ends_with("_position"))
+                .collect();
+            found.sort();
+            let expected: &[&str] = if existing {
+                &[]
+            } else {
+                &[
+                    "/HotWaterSource/hw/HeatSource/hp/heater_position",
+                    "/HotWaterSource/vessel/heater_position",
+                    "/HotWaterSource/vessel/thermostat_position",
+                    "/PreHeatedWaterSource/preheated tank/HeatSource/hp/heater_position",
+                ]
+            };
+            assert_eq!(found, expected, "{errors:#?}");
+            if !existing {
+                assert!(errors.iter().any(|e| e.message == "'vessel' (hot water heat pump) needs its thermostat position. A new build states it: there is no default."), "{errors:#?}");
+            }
         }
     }
 

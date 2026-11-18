@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { Element } from '../geometry/types';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -52,4 +54,14 @@ export function syncSpaceHeatSystemZoneNameInExtraJson(
     ...extraJson,
     SpaceHeatSystem: nextSpaceHeatSystems,
   };
+}
+
+/**
+ * The name of the model's only heating circuit (a drawn SpaceHeatSystem), the one link an emitter
+ * can take; null when there is none or several (the user picks: never a guess).
+ */
+export function onlyHeatingCircuit(elements: readonly Element[]): string | null {
+  const names = elements.flatMap((element) => (element.type === 'System' && element.subcategory === 'SpaceHeatSystem'
+    && !element.isPlaceholder && element.name ? [element.name] : []));
+  return names.length === 1 ? names[0]! : null;
 }

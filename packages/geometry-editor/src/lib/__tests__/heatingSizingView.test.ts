@@ -152,6 +152,15 @@ describe('chart height', () => {
 });
 
 describe('systemView', () => {
+  it('says when weather compensation runs a lower flow than the design flow temperature on the coldest hour', () => {
+    const caption = (over: Partial<SystemSizing>) => plain((sv(sys({ verdict: 'ok', minFlowC: 40, ...over })) as SystemView).caption);
+    expect(caption({ designFlowTempC: 55, flowTempAtDesignC: 50.2 }))
+      .toBe('Radiator output at each flow temperature. In the coldest hour, weather compensation runs 51 °C flow, not the 55 °C design flow temperature.');
+    // The pill's flow is the design flow temperature: nothing to explain.
+    expect(caption({ designFlowTempC: 45, flowTempAtDesignC: 45 })).toBe('Radiator output at each flow temperature.');
+    // A too-small verdict rounds the flow down; a design flow of 55.3 is still not weather compensation.
+    expect(caption({ verdict: 'too-small', designFlowTempC: 55.3, flowTempAtDesignC: 55.3 })).toBe('Radiator output at each flow temperature.');
+  });
   it('too small with a crossing: pill at the design flow, sentence, zones split at the crossing', () => {
     const v = sv(sys()) as SystemView;
     expect(plain(v.pill.label)).toBe('Too small at 45 \u00b0C');
@@ -183,9 +192,9 @@ describe('systemView', () => {
     expect(v.chart.cross).toBeNull();
     expect(v.chart.dot!.tone).toBe('success');
   });
-  it('fractional minFlowC keeps its decimal and sits between the whole-degree points', () => {
+  it('fractional minFlowC reads as the whole degree that is enough, and sits between the whole-degree points', () => {
     const v = sv(sys({ minFlowC: 49.3 })) as SystemView;
-    expect(plain(v.sentence)).toBe('Radiators give enough heat from 49.3 \u00b0C flow.');
+    expect(plain(v.sentence)).toBe('Radiators give enough heat from 50 \u00b0C flow.');
     const c = v.chart;
     expect(c.cross!.x).toBeGreaterThan(c.plot.x0 + ((49 - 30) / 40) * (c.plot.x1 - c.plot.x0));
     expect(c.cross!.x).toBeLessThan(c.plot.x0 + ((50 - 30) / 40) * (c.plot.x1 - c.plot.x0));
@@ -251,7 +260,13 @@ describe('the suggested lower flow', () => {
   it('replaces the sentence with one sentence and one number', () => {
     const v = sv(sys({ verdict: 'ok', designFlowTempC: 55, flowTempAtDesignC: 55, outputAtDesignKw: 9, minFlowC: 38.2, suggestedFlowC: 39 })) as SystemView;
     expect(plain(v.sentence)).toBe('You could lower the design flow temperature to 39 °C. The radiators still give enough heat, and the heat pump runs more efficiently.');
-    expect(plain((sv(sys({ verdict: 'ok', minFlowC: 38.2, outputAtDesignKw: 9 })) as SystemView).sentence)).toBe('Radiators give enough heat from 38.2 °C flow.');
+    expect(plain((sv(sys({ verdict: 'ok', minFlowC: 38.2, outputAtDesignKw: 9 })) as SystemView).sentence)).toBe('Radiators give enough heat from 39 °C flow.');
+    // The design-day flow of a weather curve reads in whole degrees, as the design flow temperature is set.
+    expect(plain((sv(sys({ verdict: 'ok', minFlowC: 38.2, flowTempAtDesignC: 50.6, outputAtDesignKw: 9 })) as SystemView).pill.label)).toBe('Big enough at 51 °C');
+    // Too small reads rounded down, so it never names the degree the sentence says is enough.
+    const small = sv(sys({ verdict: 'too-small', minFlowC: 50.8, flowTempAtDesignC: 50.6 })) as SystemView;
+    expect(plain(small.pill.label)).toBe('Too small at 50 °C');
+    expect(plain(small.sentence)).toBe('Radiators give enough heat from 51 °C flow.');
   });
 });
 

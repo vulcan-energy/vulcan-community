@@ -285,6 +285,19 @@ function tooltipHasSubstantiveContent(info: GeometrySchemaParameterInfo): boolea
 }
 
 /**
+ * A hand-written field label as shown: sentence case, no trailing colon. A capitalised word
+ * after the first goes lower case ("Floor Type" -> "Floor type", "U-Value" -> "U-value");
+ * acronyms (MVHR, CoP), single letters and anything in brackets stay as written. In a path
+ * ("Heat Pump · Type") only the last part is the label: the parts before it are user names.
+ * Display only: the label a caller passes is still what field lookups read.
+ */
+export function sentenceCaseLabel(label: string): string {
+  const parts = label.trim().replace(/:\s*$/, '').split(' · ');
+  const last = parts.pop() ?? '';
+  return [...parts, last.replace(/\([^)]*\)|(?<=[ -])[A-Z][a-z]+\b/g, (word) => (word.startsWith('(') ? word : word.toLowerCase()))].join(' · ');
+}
+
+/**
  * Canonical field metadata resolver for labels, tooltips, unit adornments and
  * completeness diagnostics. Every lookup is scoped by the concrete context.
  */

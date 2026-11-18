@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
-import { hasDoubleGlazedWindow, hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieDefaultPlaceholder, hemieValueLabel,
+import { HEMIE_CONSTRUCTION_FIELDS, hasDoubleGlazedWindow, hemieConstructionType, hemieFabric, hemieHeatCapacityBands, hemieFieldLabel, hemieLeftoverKeys, hemieDefaultPlaceholder, hemieValueLabel,
   hemieConstructionKeys, hemieDetailFields, hemieHiddenDetails, hemieFinishEnum, hemieOutsideSurface, statedOutsideSurfaceMethod, postcodeBorderArea, postcodeOutsideArea, postcodeRegion, statedBuildType } from '../hemieFabric';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
@@ -45,6 +45,7 @@ it('gives a park home its main walls, ground floor and roof the park home constr
   expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 35, is_unheated_pitched_roof: true })).toBe('park_home_pitched_roof');
   expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 35, is_unheated_pitched_roof: true, extra_json: { thatched: true } })).toBe('park_home_pitched_roof');
   expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 0, extra_json: { hemie_bundle: { kind: 'bay', role: 'roof' } } })).toBe('mini_flat_roof');
+  expect(park({ type: 'BuildingElementOpaque', coordinates: plane, pitch: 35, is_unheated_pitched_roof: true, extra_json: { hemie_bundle: { kind: 'roof', role: 'slope:Front' } } })).toBe('park_home_pitched_roof');
   expect(park({ type: 'BuildingElementTransparent' })).toBe('window');
   expect(statedBuildType({ unreadMetadataRows: { General_build_type: 'park home' } })).toBe('park home');
 });
@@ -152,13 +153,16 @@ it('offers each construction type the areal heat capacity the converter takes', 
   for (const type of ['party_floor', 'party_ceiling', undefined]) expect(hemieHeatCapacityBands(type)).toBeUndefined();
 });
 
-it('shows the door and window heat capacity the converter fills as the placeholder', () => {
+it('shows the door, window and room-in-roof slope heat capacity the converter fills as the placeholder', () => {
   const rust = readFileSync(join(import.meta.dirname, '../../../../../crates/vulcan-model-transform/src/hemie.rs'), 'utf8');
   const value = (name: string) => Number(new RegExp(`const ${name}: f64 = ([\\d_.]+);`).exec(rust)![1].replace(/_/g, '')).toLocaleString('en-GB');
   expect(hemieDefaultPlaceholder('external_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
   expect(hemieDefaultPlaceholder('party_or_sheltered_door', 'areal_heat_capacity')).toBe(`${value('DOOR_HEAT_CAPACITY')} (default)`);
   expect(hemieDefaultPlaceholder('window', 'areal_heat_capacity')).toBe(`${value('WINDOW_HEAT_CAPACITY')} (default)`);
   expect(hemieDefaultPlaceholder('window', 'glazing_type')).toBeUndefined();
+  expect(hemieDefaultPlaceholder('heated_pitched_roof', 'areal_heat_capacity')).toBe(`${value('HEATED_PITCHED_ROOF_HEAT_CAPACITY')} (default)`);
+  // The Fabric tab offers it, as it does a door's.
+  expect(HEMIE_CONSTRUCTION_FIELDS.heated_pitched_roof).toContain('areal_heat_capacity');
 });
 
 const schema = JSON.parse(readFileSync(join(import.meta.dirname, '../../../../../data/schemas/hem_epc_orchestrator_input.schema.json'), 'utf8')) as {

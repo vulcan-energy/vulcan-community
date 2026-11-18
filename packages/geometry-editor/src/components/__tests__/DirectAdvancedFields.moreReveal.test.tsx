@@ -3,7 +3,7 @@
 
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DirectAdvancedFields } from '../DirectAdvancedFields';
 import { createGeometryStore, GeometryStoreProvider } from '../../stores/geometryStore';
@@ -50,5 +50,37 @@ describe('a product the target chooses', () => {
     cleanup();
     const ruled = render(<Fields schema={productSchema} config={{ elementType: 'System', productRule: true }} />);
     expect(ruled.container.textContent).not.toContain('Required, no default');
+  });
+});
+
+describe('a laid-out "More" (a cylinder\'s coil)', () => {
+  afterEach(cleanup);
+  const coilSchema = {
+    type: 'object',
+    properties: { coil: { type: 'object', required: ['flow', 'rate'], properties: { flow: { type: 'number' }, rate: { type: 'number' }, position: { type: 'number' } } } },
+  };
+  const scope = (key: string) => `#/properties/coil/properties/${key}`;
+  const layout = { type: 'VerticalLayout' as const, elements: ['flow', 'rate', 'position'].map((key) => ({ type: 'Control' as const, scope: scope(key), label: `Coil · ${key}` })) };
+  const coilConfig = { elementType: 'System', collapsedEngineFields: new Set(['flow', 'rate', 'position']), collapsedStatedRequired: true };
+  const shown = (container: HTMLElement, key: string) => container.querySelector(`[data-field-key="${key}"]`) !== null;
+
+  it('takes a required field the data states, stays closed for it, and names the part it belongs to', () => {
+    const view = render(<Fields schema={coilSchema} layout={layout} config={coilConfig} data={{ coil: { flow: 10, rate: 300 } }} />);
+    expect(shown(view.container, 'flow')).toBe(false);
+    expect(shown(view.container, 'rate')).toBe(false);
+    expect(view.container.textContent).toContain('coil');
+    expect(view.container.textContent).not.toContain('flow, rate');
+  });
+
+  it('opens while a required field is empty, and keeps the field in place as it is filled', () => {
+    const empty = render(<Fields schema={coilSchema} layout={layout} config={coilConfig} data={{ coil: { rate: 300 } }} />);
+    const flow = empty.container.querySelector('[data-field-key="flow"]');
+    expect(flow?.closest('details')).not.toBeNull();
+    fireEvent.focus(flow!.querySelector('input')!);
+    empty.rerender(<Fields schema={coilSchema} layout={layout} config={coilConfig} data={{ coil: { flow: 5, rate: 300 } }} />);
+    expect(empty.container.querySelector('[data-field-key="flow"]')).toBe(flow);
+    cleanup();
+    const stated = render(<Fields schema={coilSchema} layout={layout} config={coilConfig} data={{ coil: { flow: 10, rate: 300, position: 0.2 } }} />);
+    expect(shown(stated.container, 'position')).toBe(false);
   });
 });

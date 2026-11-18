@@ -16,7 +16,11 @@ import { readRootCssVar } from '../lib/cssVars';
 import { targetValidationIssues, withTargetIssues } from '../lib/buildErrorDisplay';
 import { getSmartLabelDisplayName, getSmartLabelPillTexts, SMART_LABEL_METRICS, ANNOTATION_PRIORITY, calculateElementBounds, createAnnotationLayoutState, getSmartLabelCandidates, layoutCanvasAnnotations, placedAnnotationRect, resolveAnnotationPaint, type CanvasAnnotation, type RectBounds } from '../lib/labelUtils';
 import { DeleteConfirmModal } from './DeleteConfirmModal';
-import { FilenameBar, type FilenameBarActionContext } from './FilenameBar';
+import { ConservatoryQuestion, HemieBundleEditor } from './HemieBundleEditor';
+import { RoofPartChips } from './canvas/RoofPartChips';
+import { drawRoofPart, dormersOn, handDrawnRoofOver, agreedFabric, roofParameters, storeyOutline, type RoofParameters } from '../lib/roofPart';
+import { fhsFloorCodeForCanvasFloor } from '../lib/storeySemantics';
+import { FilenameBar, type FilenameBarActionContext, type FilenameBarProps } from './FilenameBar';
 import type {
   GeometryDocumentHostPort,
   GeometryDocumentHostTarget,
@@ -262,15 +266,18 @@ import {
   isValidDormerHost,
 } from '../lib/dormerGeometry';
 import {
-  BAY_DEFAULTS,
-  CONSERVATORY_DEFAULTS,
-  bayParametersProblem,
-  buildBayBundleDraft,
-  buildConservatoryBundleDraft,
-  centreOnHost,
-  conservatoryParametersProblem,
-  groundFloorUnderWall,
+  drawHemieBundle,
+  getHemieBundle,
+  getHemieBundleMembers,
+  hemieBundleDeletion,
+  hemieBundleParameters,
+  hemieBundleHost,
+  isHemieBundleAnchor,
   isHemieBundleHost,
+  onHost,
+  type HemieBundleKind,
+  type BayParameters,
+  type ConservatoryParameters,
 } from '../lib/hemieBundles';
 import {
   cascadeHostedDescendantGeometry,
@@ -585,6 +592,7 @@ export interface GeometryCanvasProps {
     saveErrorTitle?: string;
     buildError?: string | null;
     buildErrorItems?: readonly BuildErrorItem[];
+    hostIssues?: FilenameBarProps['hostIssues'];
     onOpenDefaults?: () => void;
     defaultsPath?: string | undefined;
     defaultsInvalid?: boolean;
@@ -609,7 +617,7 @@ const DEFAULT_HIDDEN_PANELS: Partial<Record<HidePanelKey, boolean>> = {
 };
 const contributionHidePanelKey = (id: string): HidePanelKey => `contribution:${id}`;
 type ActiveDrawSegmentEditorState = {
-  mode: 'room' | 'polygon' | 'sloped-polygon' | 'space-label-polygon';
+  mode: 'room' | 'polygon' | 'sloped-polygon' | 'space-label-polygon' | 'bay' | 'conservatory';
   endIndex: number;
   wallElementId?: string;
   value: string;
@@ -820,6 +828,12 @@ const getDormerBundleSelectionIds = (
   elementsById: Record<string, Element>,
 ): string[] => {
   const seed = elementsById[elementId];
+  // A bay or conservatory member selects its whole part; the clicked member stays the selection.
+  const part = getHemieBundle(seed);
+  if (part) {
+    return [elementId, ...getHemieBundleMembers(Object.values(elementsById), part.bundle_id)
+      .flatMap((member) => (member.id === elementId ? [] : [member.id]))];
+  }
   const bundleInfo = seed ? getDormerBundleInfo(seed) : null;
   if (!bundleInfo) return [elementId];
 
@@ -1242,11 +1256,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     ownerRootRef: documentSaveOwnerRootRef,
   });
   const documentFileName = fileControls?.documentHost.getSnapshot().document.fileName ?? '';
-  const {
-    lookupByElement,
-    hasLinkedDraft: hasEvidenceDraft,
-    uploadOverlayEvidence,
-  } = canvasEvidenceContribution.useEvidence(documentFileName);
+  const { uploadOverlayEvidence } = canvasEvidenceContribution.useEvidence(documentFileName);
 
   const { drawMode, setDrawMode, drawElementType, setDrawElementType: setDrawElementTypeState, drawPoints, setDrawPoints, drawCursor, setDrawCursor, setDrawAngleSnapped, drawSnapTargetRef, roomWalls, setRoomWalls, roomWallElements, setRoomWallElements, orthogonalRoomStart, setOrthogonalRoomStart, orthogonalRoomEnd, setOrthogonalRoomEnd, orthogonalRoomEditing, setOrthogonalRoomEditing, pendingHostElementCreationRef, drawPreset, setDrawPreset, drawPresetData, setDrawPresetData, resetDrawing } = useDrawingMode();
   const [drawMvhrDuctRole, setDrawMvhrDuctRole] = useState<MvhrDuctRole>('supply');
@@ -1534,7 +1544,23 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const supportsSegmentEditor = drawMode === 'room'
     || drawMode === 'polygon'
     || drawMode === 'sloped-polygon'
-    || drawMode === 'space-label-polygon';
+    || drawMode === 'space-label-polygon'
+    || drawMode === 'bay'
+    || drawMode === 'conservatory';
+  /** A one-member part's member opened in its own editor ("Edit this element"). */
+  // Forgotten once the selection moves to another element.
+  const [ownEditorId, setOwnEditorId] = useKeyedState<string | null>(selection?.id ?? 'none', null);
+  /** A roof the Roof tool is about to fit over hand-drawn planes, waiting for the user's yes. */
+  const [roofReplace, setRoofReplace] = useState<{ level: number; at: { x: number; y: number }; ids: string[] } | null>(null);
+  /** The wall a bay or conservatory being placed opens from. */
+  const [bundleHostId, setBundleHostId] = useState<string | null>(null);
+  /** The conservatory tool's first question, answered before placing: null until answered. */
+  const [conservatoryHeatedOpen, setConservatoryHeatedOpen] = useKeyedState<boolean | null>(
+    drawMode === 'conservatory' ? 'asking' : 'idle',
+    null,
+  );
+  /** The projection of the part just placed, typed where it was drawn (as the room tool's lengths). */
+  const [bundleProjectionEditor, setBundleProjectionEditor] = useState<{ anchorId: string; value: string } | null>(null);
   const [activeSegmentEditor, setActiveSegmentEditor] = useKeyedState<ActiveDrawSegmentEditorState>(
     supportsSegmentEditor ? 'supported' : 'unsupported',
     null,
@@ -1900,7 +1926,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   const [carrySources, setCarrySources] = useKeyedState<Partial<Record<OpeningKind, string>>>(carryKey, NO_CARRY_SOURCES);
   const carrySourceId = drawOpeningKind ? carrySources[drawOpeningKind] : undefined;
   const carrySourceElement = useGeometryStore((s) => (carrySourceId ? s.elementsById[carrySourceId] : undefined));
-  const drawCarry = useMemo(() => (drawPreset ? null : openingCarry(carrySourceElement)), [carrySourceElement, drawPreset]);
+  const carryHostKeys = inspectorContributions.openingFields?.carryKeys;
+  const drawCarry = useMemo(() => (drawPreset ? null : openingCarry(carrySourceElement, carryHostKeys)),
+    [carryHostKeys, carrySourceElement, drawPreset]);
   const rememberDrawnOpening = useCallback((elementId: string) => {
     if (drawOpeningKind) setCarrySources((sources) => ({ ...sources, [drawOpeningKind]: elementId }));
   }, [drawOpeningKind, setCarrySources]);
@@ -3226,13 +3254,17 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
     const element = elementsById[selection.id];
     if (!element) return;
+    if (getHemieBundle(element) && selectedElementIds.length > 1) {
+      setElementDeleteModal({ isOpen: true, elementId: null, elementName: null, isMultiDelete: true });
+      return;
+    }
 
     setElementDeleteModal({
       isOpen: true,
       elementId: selection.id,
       elementName: element.name
     });
-  }, [elementsById, selection, setElementDeleteModal]);
+  }, [elementsById, selectedElementIds.length, selection, setElementDeleteModal]);
 
   const handleConfirmElementDelete = useCallback(() => {
     if (elementDeleteModal.isMultiDelete) {
@@ -3240,13 +3272,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         selection?.type === 'dormer' && elementDeleteModal.elementId
           ? getDormerBundleElementIds(elementsById, elementDeleteModal.elementId)
           : selectedElementIds;
-      idsToDelete.forEach(id => geometryStore.getState().removeElement(id));
+      // A bay or conservatory goes whole, with any member or its host wall.
+      hemieBundleDeletion(elementsById, idsToDelete).ids.forEach(id => geometryStore.getState().removeElement(id));
       clearElementSelection();
       setSelection(null);
       setElementDeleteModal({ isOpen: false, elementId: null, elementName: null, isMultiDelete: false });
     } else if (elementDeleteModal.elementId) {
-      // Handle single delete
-      geometryStore.getState().removeElement(elementDeleteModal.elementId);
+      // Handle single delete (a host wall takes its bays and conservatories with it)
+      hemieBundleDeletion(elementsById, [elementDeleteModal.elementId]).ids.forEach(id => geometryStore.getState().removeElement(id));
       setSelection(null);
       setElementDeleteModal({ isOpen: false, elementId: null, elementName: null, isMultiDelete: false });
     }
@@ -3261,6 +3294,21 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     setElementDeleteModal,
     setSelection,
   ]);
+
+  // Bays and conservatories go whole, and with their host wall: the message names them.
+  const elementDeleteMessage = useMemo(() => {
+    if (!elementDeleteModal.isOpen) return '';
+    const ids = elementDeleteModal.isMultiDelete
+      ? (selection?.type === 'dormer' ? [] : selectedElementIds)
+      : elementDeleteModal.elementId ? [elementDeleteModal.elementId] : [];
+    const { names } = hemieBundleDeletion(elementsById, ids);
+    const others = ids.filter((id) => !getHemieBundle(elementsById[id]));
+    const elements = elementDeleteModal.isMultiDelete && selection?.type === 'dormer'
+      ? `${selectedElementIds.length} elements`
+      : others.length === 1 ? `element '${elementsById[others[0]]?.name ?? elementDeleteModal.elementName}'`
+        : others.length > 1 ? `${others.length} elements` : '';
+    return `This will delete ${[elements, ...names].filter(Boolean).join(' and ')}.`;
+  }, [elementDeleteModal, elementsById, selectedElementIds, selection?.type]);
 
   const handleCancelElementDelete = useCallback(() => {
     setElementDeleteModal({ isOpen: false, elementId: null, elementName: null, isMultiDelete: false });
@@ -3767,7 +3815,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   });
 
   const tryPopLastDrawPoint = useCallback((): boolean => {
-    if (drawMode === 'none' || drawMode === 'dormer' || drawMode === 'bay' || drawMode === 'conservatory' || drawMode === 'orthogonal-room') {
+    if (drawMode === 'none' || drawMode === 'dormer' || drawMode === 'orthogonal-room') {
       return false;
     }
     if (drawMode === 'room') {
@@ -4198,7 +4246,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       let nextSegmentLengthPreview: DrawingPreviewSegment = EMPTY_SEGMENT_LENGTH_PREVIEW;
       drawSnapTargetRef.current = chosen as any;
 
-      if (activePoints.length > 0) {
+      // A bay or conservatory draws its own lengths (`bundleDrawHost`).
+      if (activePoints.length > 0 && drawMode !== 'bay' && drawMode !== 'conservatory') {
         const lastPoint = activePoints[activePoints.length - 1];
         const verticalServicePreview = drawMode === 'tb-vertical-line';
         const previewPoint = verticalServicePreview ? lastPoint : chosen || mouseWorld;
@@ -4807,6 +4856,26 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     }
     return best?.host ?? null;
   }, [currentFloorZ, floors, geometryStore, sortedElementCanvasData]);
+
+  /** Fits a roof part (over `replace`, hand-drawn planes the user agreed to lose) and opens it. */
+  const placeRoof = useCallback((parameters: RoofParameters, replace: Element[], keepDrawing = false) => {
+    const placed = drawRoofPart(geometryStore.getState(), parameters, undefined, replace);
+    if ('problem' in placed) {
+      setDrawingTooltip({ visible: true, text: placed.problem, position: { x: 40, y: 40 } });
+      return;
+    }
+    const tag = getHemieBundle(geometryStore.getState().elementsById[placed.anchorId]);
+    const ids = tag ? getHemieBundleMembers(Object.values(geometryStore.getState().elementsById), tag.bundle_id).map((m) => m.id) : [];
+    setSelection({ type: 'element', id: placed.anchorId });
+    setSelectedElementIds([placed.anchorId, ...ids.filter((id) => id !== placed.anchorId)]);
+    setDrawingTooltip({ visible: false, text: '', position: { x: 0, y: 0 } });
+    if (!keepDrawing) setDrawMode('none');
+  }, [geometryStore, setDrawMode, setDrawingTooltip, setSelectedElementIds, setSelection]);
+
+  // Bay and conservatory placement: the wall the opening is on (the preview follows the live cursor).
+  const bundleDrawHost = (drawMode === 'bay' || drawMode === 'conservatory') && drawPoints.length > 0
+    ? elementsById[bundleHostId ?? '']
+    : undefined;
 
   const dormerDrawPreviewCutout = useMemo(() => {
     if (drawMode !== 'dormer' || !drawCursor) return null;
@@ -5635,6 +5704,40 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       const mouseWorld = drawSnapClick.point;
       const placedPoint = placedDrawPoint(drawSnapClick);
 
+        if (drawMode === 'roof') {
+          // One click inside a storey outline fits its roof; hand-drawn planes there go only on a yes.
+          const pointerPosition = getStageViewportPointer(stage);
+          const showTip = (text: string) => {
+            if (pointerPosition) setDrawingTooltip({ visible: true, text, position: { x: pointerPosition.x + 10, y: pointerPosition.y - 10 } });
+          };
+          const all = Object.values(geometryStore.getState().elementsById);
+          // On the floor the roofs sit on (no walls there), the storey below is the one roofed.
+          let level = Math.floor(currentFloorZ);
+          let outline = storeyOutline(all, level, mouseWorldRaw);
+          if (!outline && level > 0) {
+            level -= 1;
+            outline = storeyOutline(all, level, mouseWorldRaw);
+          }
+          if (!outline) {
+            showTip('Click inside a storey outline: the roof is fitted to its walls.');
+            return;
+          }
+          const ring = outline.edges.map((e) => e.a);
+          if (all.some((e) => {
+            const p = roofParameters(e);
+            return !!p && p.level === level && isPointInPolygon2D(p.at, ring);
+          })) {
+            showTip('This storey already has a roof part: select it to change it.');
+            return;
+          }
+          const replace = handDrawnRoofOver(all, outline, level);
+          if (replace.length) {
+            setRoofReplace({ level, at: mouseWorldRaw, ids: replace.map((e) => e.id) });
+            return;
+          }
+          placeRoof({ level, at: mouseWorldRaw }, [], multiDrawModifierHeldRef.current);
+          return;
+        }
         if (drawMode === 'dormer') {
           const hostRoof = findDormerHostAtPoint(mouseWorld);
           const pointerPosition = getStageViewportPointer(stage);
@@ -5715,50 +5818,89 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           }
           return;
         } else if (drawMode === 'bay' || drawMode === 'conservatory') {
-          const host = findHemieBundleHostAtPoint(mouseWorld);
+          // Click the opening start, then its end, on a wall; then drag out and click the
+          // projection. Each length can be typed in the segment editor after its click.
           const pointerPosition = getStageViewportPointer(stage);
           const showTip = (text: string) => {
             if (pointerPosition) {
               setDrawingTooltip({ visible: true, text, position: { x: pointerPosition.x + 10, y: pointerPosition.y - 10 } });
             }
           };
-          if (!host) {
-            showTip(`Place a ${drawMode === 'bay' ? 'bay window' : 'conservatory'} on a wall: click the wall.`);
+          if (drawMode === 'conservatory' && conservatoryHeatedOpen === null) {
+            showTip('First answer: heated and open to the dwelling?');
             return;
           }
           const state = geometryStore.getState();
-          const allElements = Object.values(state.elementsById);
-          const input = {
-            host,
-            groundFloor: groundFloorUnderWall(host, allElements),
-            existingNames: allElements.map((element) => element.name),
-            globalOrientationOffset: state.globalOrientationOffset,
-          };
-          let draft;
-          if (drawMode === 'bay') {
-            const parameters = { ...BAY_DEFAULTS, centre: centreOnHost(host, mouseWorld, BAY_DEFAULTS.openingWidth / 2) };
-            const problem = bayParametersProblem(host, parameters);
-            if (problem) { showTip(problem); return; }
-            draft = buildBayBundleDraft({ ...input, parameters });
-          } else {
-            const parameters = { ...CONSERVATORY_DEFAULTS, centre: centreOnHost(host, mouseWorld, CONSERVATORY_DEFAULTS.width / 2) };
-            const problem = conservatoryParametersProblem(host, parameters);
-            if (problem) { showTip(problem); return; }
-            draft = buildConservatoryBundleDraft({ ...input, parameters });
+          if (drawPoints.length === 0) {
+            const host = findHemieBundleHostAtPoint(mouseWorld);
+            if (!host) {
+              showTip('Click where the opening starts, on a straight external wall.');
+              return;
+            }
+            if (drawMode === 'conservatory' && Math.floor(host.coordinates[0].z) !== 0) {
+              showTip('A conservatory is a single storey on the ground: click a ground-floor wall.');
+              return;
+            }
+            setBundleHostId(host.id);
+            setDrawPoints([onHost(host, mouseWorld).point]);
+            setDrawingTooltip({ visible: false, text: '', position: { x: 0, y: 0 } });
+            return;
           }
-          const ids = state.addElements(draft.members.map((member) => ({
-            ...member.updates,
-            name: member.name,
-            type: member.type,
-            zoneId: host.zoneId,
-            parent_element: member.parent_element,
-          }) as ElementDraft));
-          // The front wall is the anchor: its inspector shows the bundle's parameters.
-          setSelection({ type: 'element', id: ids[0] });
-          setSelectedElementIds([ids[0]]);
+          const host = state.elementsById[bundleHostId ?? ''];
+          if (!isHemieBundleHost(host)) {
+            setDrawPoints([]);
+            return;
+          }
+          const start = onHost(host, drawPoints[0]);
+          if (drawPoints.length === 1) {
+            const end = onHost(host, mouseWorld);
+            if (Math.abs(end.along - start.along) < 0.05) return;
+            setDrawPoints([drawPoints[0], end.point]);
+            setActiveSegmentEditor({ mode: drawMode, endIndex: 1, value: formatSegmentLength(Math.abs(end.along - start.along)) });
+            setDrawingTooltip({ visible: false, text: '', position: { x: 0, y: 0 } });
+            return;
+          }
+          const end = onHost(host, drawPoints[1]);
+          // A typed width can run past the wall's end: say so rather than shorten it.
+          if (Math.hypot(end.point.x - drawPoints[1].x, end.point.y - drawPoints[1].y) > 1e-6) {
+            setDrawPoints([drawPoints[0]]);
+            showTip(`The opening runs past the end of '${host.name}': click its end again or type a shorter width.`);
+            return;
+          }
+          const depth = roundToTwoDecimals(onHost(host, mouseWorld).out);
+          if (!(depth > 0)) {
+            showTip('Drag out from the wall, then click to set the projection.');
+            return;
+          }
+          const width = roundToTwoDecimals(Math.abs(end.along - start.along));
+          const centre = Math.round(((start.along + end.along) / 2) * 1000) / 1000;
+          const kind: HemieBundleKind = drawMode;
+          const placed = drawHemieBundle(state, kind, host, kind === 'bay'
+            ? { centre, openingWidth: width, depth }
+            : { centre, width, depth, ...(conservatoryHeatedOpen ? { conservatoryType: 'non-separated' as const } : {}) });
+          if ('problem' in placed) {
+            showTip(placed.problem);
+            return;
+          }
+          const placedState = geometryStore.getState();
+          const anchor = placedState.elementsById[placed.anchorId];
+          const memberIds = getHemieBundleMembers(Object.values(placedState.elementsById), getHemieBundle(anchor)!.bundle_id).map((member) => member.id);
+          setDrawPoints([]);
+          setSegmentLengthPreview(EMPTY_SEGMENT_LENGTH_PREVIEW);
+          setActiveSegmentEditor(null);
+          // The part opens on its front, and the projection can be typed where it was drawn.
+          setSelection({ type: 'element', id: placed.anchorId });
+          setSelectedElementIds([placed.anchorId, ...memberIds.filter((id) => id !== placed.anchorId)]);
+          setBundleProjectionEditor({ anchorId: placed.anchorId, value: formatSegmentLength(depth) });
           setDrawingTooltip({ visible: false, text: '', position: { x: 0, y: 0 } });
           if (!multiDrawModifierHeldRef.current) {
             setDrawMode('none');
+            // Its editor opens on the next frame, on the first blank required field (a choice: its first option).
+            requestAnimationFrame(() => {
+              const body = document.querySelector<HTMLElement>('.part-editor__body[data-first-blank]');
+              const field = body?.querySelector<HTMLElement>(`[aria-label="${body.dataset.firstBlank}"]`);
+              (field?.getAttribute('role') === 'group' ? field.querySelector('button') : field)?.focus();
+            });
           }
           return;
         } else if (drawMode === 'point') {
@@ -6712,6 +6854,20 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     };
   }, []);
 
+  // A selected roof part, open in its part editor: its chips and parts list name its slopes.
+  const selectedRoofPart = (() => {
+    if (viewMode !== '2d' || selection?.type !== 'element') return null;
+    const tag = getHemieBundle(elementsById[selection.id]);
+    if (tag?.kind !== 'roof') return null;
+    const members = getHemieBundleMembers(Object.values(elementsById), tag.bundle_id);
+    const anchor = members.find((m) => isHemieBundleAnchor(getHemieBundle(m)));
+    const memberIds = new Set(members.map((m) => m.id));
+    // As the editor's `selectionIsPart`: not a member opened in its own editor, nor mixed with other elements.
+    if (!anchor || !selectedElementIds.includes(anchor.id) || !selectedElementIds.every((id) => memberIds.has(id))) return null;
+    if (selectedElementIds.length === 1 && (members.length > 1 || ownEditorId === anchor.id)) return null;
+    return { anchor, bundleId: tag.bundle_id, memberIds };
+  })();
+
   // Canvas annotations: every chip, badge, pill and label, painted in one group above all geometry.
   const canvasAnnotations = ((): CanvasAnnotation[] => {
     const items: CanvasAnnotation[] = [];
@@ -6978,6 +7134,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     // Element-name labels; visual-only so the geometry underneath stays interactive.
     for (const { element, canvasCoords } of sortedForLabels) {
       if (canvasCoords.length === 0 || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
+      // The selected roof part's chips stand in for its slopes' labels, which would sit under them.
+      if (selectedRoofPart?.memberIds.has(element.id)) continue;
       const isHighlighted = selectedElementIdSet.has(element.id) ||
         ((selection?.type === 'element' || selection?.type === 'global') && selection.id === element.id);
       const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
@@ -8290,6 +8448,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 multiDrawModifierHeld={multiDrawModifierHeld}
                 pvFootprintPreview={pvDrawFootprintDims}
                 dormerDrawPreviewCutout={dormerDrawPreviewCutout}
+                bundleDrawHost={isHemieBundleHost(bundleDrawHost) ? bundleDrawHost : null}
+                bundleHostAt={findHemieBundleHostAtPoint}
                 drawingTooltip={drawingTooltip}
                 canvasPalette={drawingCanvasPalette}
               />,
@@ -8757,6 +8917,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               saveErrorTitle={fileControls.saveErrorTitle}
               buildError={fileControls.buildError}
               buildErrorItems={fileControls.buildErrorItems}
+              hostIssues={fileControls.hostIssues}
               onOpenDefaults={fileControls.onOpenDefaults}
               defaultsPath={fileControls.defaultsPath}
               defaultsInvalid={fileControls.defaultsInvalid}
@@ -8902,8 +9063,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             setCurrentFloorZ={setCurrentFloorZ}
             complianceSettings={complianceSettings}
             sourceComparisonPort={sourceComparisonPort}
-            lookupByElement={lookupByElement}
-            hasEvidenceDraft={hasEvidenceDraft}
             viewMode={viewMode}
             panelHideOptions={panelHideOptions}
             hiddenPanelKeys={hiddenPanelKeys}
@@ -9220,6 +9379,83 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           );
         })()
       )}
+
+      {selectedRoofPart && (() => {
+        // A selected roof part: its edge chips, Turn and junction on the plan.
+        const { anchor, bundleId } = selectedRoofPart;
+        return (
+          <RoofPartChips
+            anchor={anchor}
+            elementsById={elementsById}
+            toScreen={(p) => worldToCanvas(p, scale, panOffset, canvasCenter)}
+            commit={(next) => {
+              const state = geometryStore.getState();
+              const current = state.elementsById[anchor.id] ?? anchor;
+              const drawn = drawRoofPart(state, { ...roofParameters(current)!, ...next }, current);
+              if ('problem' in drawn) return;
+              const ids = getHemieBundleMembers(Object.values(geometryStore.getState().elementsById), bundleId).map((m) => m.id);
+              setSelection({ type: 'element', id: drawn.anchorId });
+              setSelectedElementIds([drawn.anchorId, ...ids.filter((id) => id !== drawn.anchorId)]);
+            }}
+          />
+        );
+      })()}
+
+      {viewMode === '2d' && bundleProjectionEditor && selection?.id === bundleProjectionEditor.anchorId && (() => {
+        const anchor = elementsById[bundleProjectionEditor.anchorId];
+        const tag = getHemieBundle(anchor);
+        const side = tag && getHemieBundleMembers(Object.values(elementsById), tag.bundle_id)
+          .find((member) => getHemieBundle(member)!.role === 'right-wall');
+        if (!anchor || !tag || !side) return null;
+        const [a, b] = side.coordinates;
+        const position = worldToCanvas({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, scale, panOffset, canvasCenter);
+        const commit = (raw: string) => {
+          setBundleProjectionEditor(null);
+          const depth = Number.parseFloat(raw);
+          const state = geometryStore.getState();
+          const all = Object.values(state.elementsById);
+          const current = state.elementsById[anchor.id];
+          const host = current && hemieBundleHost(current, all);
+          const parameters = current && hemieBundleParameters(current, all) as BayParameters | ConservatoryParameters | null;
+          if (!host || !parameters || !(depth > 0) || depth === parameters.depth) return;
+          const drawn = drawHemieBundle(state, tag.kind, host, { ...parameters, depth }, current);
+          if ('problem' in drawn) setDrawingTooltip({ visible: true, text: drawn.problem, position: { x: position.x + 10, y: position.y - 10 } });
+        };
+        return (
+          <div
+            className="draw-segment-editor"
+            style={{ left: position.x, top: position.y, width: getDrawModeTooltipPillWidth(`${bundleProjectionEditor.value} m`) }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <input
+              className="draw-segment-editor-input"
+              type="text"
+              value={bundleProjectionEditor.value}
+              onChange={(event) => {
+                const value = event.target.value;
+                setBundleProjectionEditor((previous) => (previous ? { ...previous, value } : previous));
+              }}
+              onBlur={(event) => commit(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setBundleProjectionEditor(null);
+                }
+              }}
+              inputMode="decimal"
+              aria-label="Projection"
+              spellCheck={false}
+              style={{ width: `${Math.max(1, bundleProjectionEditor.value.length)}ch` }}
+            />
+            <span className="draw-segment-editor-note">m</span>
+          </div>
+        );
+      })()}
 
       {viewMode === '2d' && roofWindowDistanceEditorStyle && (
         <div
@@ -9548,12 +9784,39 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             )
           );
 
+        // A bay or conservatory: its whole part selected opens the part; one member (or a row of
+        // them) opened from the part opens that member's own editor, with a way back.
+        const selectedPart = selection?.type === 'element' ? getHemieBundle(elementsById[selection.id]) : null;
+        const partMembers = selectedPart ? getHemieBundleMembers(Object.values(elementsById), selectedPart.bundle_id) : [];
+        const partAnchor = partMembers.find((member) => isHemieBundleAnchor(getHemieBundle(member)));
+        const inPart = (id: string) => partMembers.some((member) => member.id === id);
+        // The whole part is selected with its front: a row of members, or one, is not.
+        // A one-plane roof is its own part: selected alone it opens the part, unless "Edit this element" was chosen.
+        const selectionIsPart = !!partAnchor && (selectedElementIds.length > 1 || (partMembers.length === 1 && ownEditorId !== partAnchor.id))
+          && selectedElementIds.includes(partAnchor.id) && selectedElementIds.every(inPart);
+        const selectionInPart = !!partAnchor && !selectionIsPart && selectedElementIds.every(inPart);
         const showSingle =
           (selection?.type === 'element' || selection?.type === 'global' || selection?.type === 'zone' || selection?.type === 'dormer') &&
-          (selectedElementIds.length <= 1 || selectionRepresentsSingleDormer);
+          (selectedElementIds.length <= 1 || selectionRepresentsSingleDormer || selectionIsPart);
         const showCanvasDecoration = Boolean(activeCanvasDecoration && canInteractWithCanvasDecorations && selectedCanvasDecorationContribution?.renderDetails);
-        const showMulti = selectedElementIds.length > 1 && !selectionRepresentsSingleDormer;
-        const show = showSingle || showMulti || showCanvasDecoration || (!!spaceLabellerOpen && !!spaceLabellerZoneId);
+        const showMulti = selectedElementIds.length > 1 && !selectionRepresentsSingleDormer && !selectionIsPart;
+        const backToPart = selectionInPart && partAnchor ? (
+          <div className="part-back-link">
+            <button
+              type="button"
+              className="field-source-note__link"
+              onClick={() => {
+                setOwnEditorId(null);
+                setSelectedElementIds([selection!.id, ...partMembers.flatMap((member) => (member.id === selection!.id ? [] : [member.id]))]);
+              }}
+            >
+              ‹ Back to {getHemieBundle(partAnchor)!.bundle_name ?? partAnchor.name}
+            </button>
+          </div>
+        ) : null;
+        // The conservatory tool asks its first question here, before the first click.
+        const askConservatory = drawMode === 'conservatory' && drawPoints.length === 0;
+        const show = askConservatory || showSingle || showMulti || showCanvasDecoration || (!!spaceLabellerOpen && !!spaceLabellerZoneId);
         if (!show) return null;
 
         const editorSelection =
@@ -9623,7 +9886,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               </div>
 
               <div className="details-panel-body">
-                {spaceLabellerOpen && spaceLabellerZoneId ? (
+                {askConservatory ? (
+                  <ConservatoryQuestion answer={conservatoryHeatedOpen} onAnswer={setConservatoryHeatedOpen} />
+                ) : spaceLabellerOpen && spaceLabellerZoneId ? (
                   profileGeometryCanvasNode(
                     'GeometryCanvas.details.spaceLabeller',
                     <SpaceLabellerPanel
@@ -9653,8 +9918,33 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       requestDelete: requestSelectedCanvasDecorationDelete,
                     }),
                   )
+                ) : showSingle && selectionIsPart && partAnchor && selection?.type === 'element' ? (
+                  <HemieBundleEditor
+                    key={partAnchor.id}
+                    anchor={partAnchor}
+                    markedId={selection.id}
+                    onMark={(id) => setSelection({ type: 'element', id })}
+                    onEditMembers={(ids) => {
+                      setOwnEditorId(ids[0]);
+                      setSelection({ type: 'element', id: ids[0] });
+                      setSelectedElementIds(ids);
+                    }}
+                    onRedrawn={(ids) => {
+                      // A redraw can remove the marked member (side windows off): the front takes its place.
+                      const now = geometryStore.getState().elementsById;
+                      const anchorNow = ids.find((id) => isHemieBundleAnchor(getHemieBundle(now[id]))) ?? ids[0];
+                      const marked = ids.includes(selection.id) ? selection.id : anchorNow;
+                      if (marked !== selection.id) setSelection({ type: 'element', id: marked });
+                      setSelectedElementIds([marked, ...ids.filter((id) => id !== marked)]);
+                    }}
+                    onDone={() => {
+                      clearElementSelection();
+                      setSelection(null);
+                    }}
+                    onDelete={handleElementDelete}
+                  />
                 ) : showSingle ? (
-                  profileGeometryCanvasNode(
+                  <>{backToPart}{profileGeometryCanvasNode(
                     'GeometryCanvas.details.elementCreator',
                     <ElementCreator
                       selection={editorSelection}
@@ -9679,9 +9969,9 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       externalDetailCataloguePort={externalDetailCatalogue}
                       remoteSelections={remoteSelections}
                     />,
-                  )
+                  )}</>
                 ) : (
-                  profileGeometryCanvasNode(
+                  <>{backToPart}{profileGeometryCanvasNode(
                     'GeometryCanvas.details.multiSelect',
                     <MultiSelectPanel
                       selectedElementIds={selectedElementIds}
@@ -9697,7 +9987,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                         });
                       }}
                     />,
-                  )
+                  )}</>
       )}
               </div>
             </div>
@@ -9836,14 +10126,36 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         childElements={zoneDeleteModal.childElements}
       />
 
+      {roofReplace ? (() => {
+        const replaced = roofReplace.ids.flatMap((id) => elementsById[id] ?? []);
+        const planes = replaced.filter((e) => e.type === 'BuildingElementOpaque').length;
+        const windows = replaced.length - planes;
+        const dormers = dormersOn(Object.values(elementsById), replaced);
+        return (
+          <DeleteConfirmModal
+            isOpen
+            onClose={() => setRoofReplace(null)}
+            onConfirm={() => {
+              setRoofReplace(null);
+              placeRoof({ level: roofReplace.level, at: roofReplace.at }, replaced);
+            }}
+            title={`Fit a roof over ${fhsFloorCodeForCanvasFloor(roofReplace.level)}?`}
+            message={`Its ${planes} drawn roof plane${planes === 1 ? '' : 's'} go${windows ? `; ${windows === 1 ? 'its roof window moves' : `its ${windows} roof windows move`} to the new slopes` : ''}.${dormers ? ` ${dormers === 1 ? '1 dormer loses its slope and needs' : `${dormers} dormers lose their slope and need`} Place again.` : ''} ${agreedFabric(replaced)
+              ? 'Their fabric carries over to the new slopes.'
+              : 'Their fabric differs, so the slopes take the Fabric tab default.'}`}
+            actionButtonText="Fit roof"
+            confirmVariant="primary"
+            hideIrreversibleWarning
+          />
+        );
+      })() : null}
+
       <DeleteConfirmModal
         isOpen={elementDeleteModal.isOpen}
         onClose={handleCancelElementDelete}
         onConfirm={handleConfirmElementDelete}
         title={elementDeleteModal.isMultiDelete ? "Delete Elements" : "Delete Element"}
-        message={elementDeleteModal.isMultiDelete
-          ? `This will delete ${selectedElementIds.length} elements.`
-          : `This will delete element '${elementDeleteModal.elementName}'.`}
+        message={elementDeleteMessage}
         itemName={elementDeleteModal.isMultiDelete ? undefined : (elementDeleteModal.elementName || undefined)}
         itemType="element"
         childElements={[]}

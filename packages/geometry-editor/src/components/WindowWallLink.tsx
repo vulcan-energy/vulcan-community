@@ -9,18 +9,13 @@ import { compassPoint } from '../lib/parentOrientation';
 /**
  * "On Wall (S) · faces S", first on the window panel: the wall or roof the window is in (a link
  * that selects it), ▾ to move it to another one (it takes that host's pitch and orientation and,
- * on a wall, moves onto the wall's line), and "Detach". A window whose wall was deleted reads
- * "Was on Wall (S)" with "Reattach" while a wall still lies under it. A window wider than its
- * wall says so here; nothing is moved or resized.
+ * on a wall, moves onto the wall's line), and "Detach". A window wider than its wall says so
+ * here; nothing is moved or resized.
  */
-export function WindowWallLink({ parentName, orientation, pitch, wasOn, reattachTo, tooWide, zoneId, selfId, onChange, onSelectWall }: {
+export function WindowWallLink({ parentName, orientation, pitch, tooWide, zoneId, selfId, onChange, onSelectWall }: {
   parentName: string;
   orientation: number;
   pitch: number | undefined;
-  /** The wall this window was on before that wall was deleted. */
-  wasOn?: string;
-  /** The wall the window lies on now, for "Reattach". */
-  reattachTo?: string;
   /** "2.00 m window on a 1.50 m wall". */
   tooWide?: string;
   zoneId: string;
@@ -39,11 +34,6 @@ export function WindowWallLink({ parentName, orientation, pitch, wasOn, reattach
             <span>
               <button type="button" className="field-source-note__link" onClick={onSelectWall} title={`Select ${parentName}`}>{parentName}</button>
               {` · ${faces}`}
-            </span>
-          ) : wasOn ? (
-            <span>
-              Was on {wasOn}
-              {reattachTo && <>{' · '}<button type="button" className="field-source-note__link" onClick={() => onChange(reattachTo)} title={`Put it back on ${reattachTo}`}>Reattach</button></>}
             </span>
           ) : (
             <span>No wall · {faces}</span>

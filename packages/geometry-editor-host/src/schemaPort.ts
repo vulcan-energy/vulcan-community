@@ -146,6 +146,8 @@ export interface GeometrySchemaPort {
   /** The selected target's model type; undefined when the host has no target catalogue. */
   targetSchemaMode?(): GeometrySchemaMode | undefined;
   preload(mode: GeometrySchemaMode): Promise<void>;
+  /** The schema's last load failed (its files could not be fetched); `preload` retries it. */
+  loadFailed?(mode: GeometrySchemaMode): boolean;
   getRootSchema(mode: GeometrySchemaMode): GeometrySchemaNode | null;
   getElementSubschema(
     mode: GeometrySchemaMode,

@@ -24,6 +24,7 @@ import {
   withEffectiveStoreyHeights,
 } from './zoneDerivation';
 import { fhsStoreyToCanvasFloor } from './storeySemantics';
+import { statedBuildType } from './hemieFabric';
 import { calculateDwellingLengthWidthFromGroundElements } from './buildingFootprintDimensions';
 
 /**
@@ -413,6 +414,42 @@ export type GlobalSettingsFieldSection =
   | "ventilation"
   | "thermalBridging";
 
+/** The Global Settings heading of each section: the accordion titles. */
+export const GLOBAL_SETTINGS_SECTION_TITLES: Readonly<Record<GlobalSettingsFieldSection, string>> = {
+  fabric: "Fabric",
+  target: "",
+  dwelling: "Dwelling details",
+  airTightness: "Air tightness",
+  ventilation: "Ventilation environment",
+  thermalBridging: "Thermal bridging",
+};
+
+/** HEM:EPC's Global values form groups the same rows under its own headings. */
+export const EPC_GLOBAL_VALUES_TITLES = {
+  property: "Property",
+  dwelling: "Rooms and services",
+  airTightness: "Air test",
+  ventilation: "Site",
+} as const;
+
+/** The HEM:EPC form's Property rows; the other dwelling rows are under Rooms and services. */
+export const EPC_PROPERTY_ROWS: ReadonlySet<string> = new Set(["Postcode", "General_build_type", "General_storeys_in_dwelling", "General_storey_of_dwelling", "General_storeys_in_building"]);
+
+/** Whether Global Settings shows the HEM:EPC form: the target's rules ask whether the building exists. */
+export const usesEpcGlobalValues = (requiredMetadataRows: readonly string[]): boolean =>
+  requiredMetadataRows.includes("IsExistingBuilding");
+
+/** Where Global Settings shows a row, as a Build Error location ("Global Settings > Site"). */
+export function globalSettingsLocation(key: string, epcForm: boolean): string | null {
+  const section = globalSettingsFieldSection(key);
+  if (!section) return null;
+  const title = !epcForm ? GLOBAL_SETTINGS_SECTION_TITLES[section]
+    : EPC_PROPERTY_ROWS.has(key) ? EPC_GLOBAL_VALUES_TITLES.property
+      : section === "dwelling" || section === "airTightness" || section === "ventilation" ? EPC_GLOBAL_VALUES_TITLES[section]
+        : GLOBAL_SETTINGS_SECTION_TITLES[section];
+  return title ? `Global Settings > ${title}` : "Global Settings";
+}
+
 const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
   "Postcode",
   "PartO_active_cooling_required",
@@ -431,6 +468,8 @@ const DWELLING_FIELD_KEYS: ReadonlySet<string> = new Set([
 export function globalSettingsFieldSection(key: string): GlobalSettingsFieldSection | null {
   // The fabric source, the build-ups for new elements, and an existing building's age band and constructions.
   if (key === "DefaultsPath" || key.startsWith("DefaultAssembly") || key.startsWith("FabricRow_") || key === "HEMIE_age_band" || key.startsWith("HEMIE_construction_")) return "fabric";
+  // The nation goes under the Postcode, a dwelling field.
+  if (key === "HEMIE_nation") return "dwelling";
   if (key === "TargetBundleId" || key === "IsExistingBuilding" || key.startsWith("HEMIE_")) return "target";
   if (key.startsWith("AirPermeability_test_")) return "airTightness";
   if (key.startsWith("Ventilation_") || key === "AirPermeability_ventilation_zone_height") return "ventilation";
@@ -480,6 +519,12 @@ export const METADATA_INPUT_LABELS: Readonly<Record<string, string>> = {
   Appliances_has_dryer: 'Has a clothes dryer',
   Appliances_has_dishwasher: 'Has a dishwasher',
   Appliances_has_separate_fridge_or_freezer: 'Has a separate fridge or freezer',
+};
+
+/** The words a Build Error uses for each Global Settings row a target requires: the model inputs, and the rows the form asks by choice. */
+export const REQUIRED_SETTINGS_LABELS: Readonly<Record<string, string>> = {
+  ...METADATA_INPUT_LABELS,
+  ColdWaterSource: 'Cold water source',
 };
 
 /**
@@ -593,7 +638,8 @@ export function buildTypeHasStoreyRows(targetRoot: unknown, buildType: string | 
 
 /**
  * Each compliance metadata row in file order with the user's value, or else the value the geometry
- * or space labels give (a build type only where the target takes it, see targetBuildTypes). Rows
+ * or space labels give (a build type only where the target takes it, see targetBuildTypes, and the
+ * converter does not work it out). Rows
  * that do not apply (flat-only rows on a house) are left out.
  */
 function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown, rules: MetadataRowRules): Array<[string, string | undefined]> {
@@ -605,7 +651,11 @@ function enteredOrDerivedRowValues(state: MetadataRowInputs, targetRoot: unknown
     spaceLabelIds: state.spaceLabelIds,
     complianceSettings: compliance,
   });
-  const buildType = compliance.build_type ?? (dd.buildType && targetBuildTypes(targetRoot).includes(dd.buildType) ? dd.buildType : undefined);
+  // A converter that works out the build type (HEM:EPC) gets only the stated one (a pick or the
+  // file's, such as a maisonette): the floors' `flat` would skip its flat-or-maisonette question.
+  const buildType = rules.derivedMetadataRows?.includes('General_build_type')
+    ? statedBuildType(compliance)
+    : compliance.build_type ?? (dd.buildType && targetBuildTypes(targetRoot).includes(dd.buildType) ? dd.buildType : undefined);
   const derivedGFA = calculateGroundFloorArea(state.elements);
   // A height the converter works out itself (an existing building) is written only when typed.
   const derivedVentHeight = rules.derivedMetadataRows?.includes('AirPermeability_ventilation_zone_height')

@@ -5,7 +5,7 @@ import { expect, it } from 'vitest';
 import type { Element } from '../../geometry/types';
 import { sharedRoofPlanes } from '../hemieFabric';
 import { offeredMethods, statedMethod, switchMethod, TANK_METHOD_GROUPS } from '../inputMethods';
-import { bandOnlyFields, inferThermalMethod, thermalMethods, thermalMethodSwitchPatch } from '../thermalMethod';
+import { bandOnlyFields, inferThermalMethod, thermalMethodElementType, thermalMethods, thermalMethodSwitchPatch } from '../thermalMethod';
 
 const line = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }];
 const el = (fields: Record<string, unknown>) => ({ id: 'e', name: 'E', zoneId: 'z', coordinates: line, ...fields }) as unknown as Element;
@@ -18,7 +18,11 @@ it('offers the methods each target takes', () => {
   expect(thermalMethods('BuildingElementGround', false).map((m) => m.label)).toEqual(['U-value', 'Calculation']);
   expect(thermalMethods('BuildingElementTransparent', true).map((m) => m.label)).toEqual(['Glazing description', 'U and g']);
   expect(thermalMethods('BuildingElementTransparent', false)).toEqual([]);
+  // An existing building's party wall takes only its cavity and lining: no U-value or layers, so no choice.
   expect(thermalMethods('BuildingElementPartyWall', true)).toEqual([]);
+  expect(thermalMethodElementType('BuildingElementPartyWall', true)).toBe(false);
+  expect(thermalMethodElementType('BuildingElementPartyWall', false)).toBe(true);
+  expect(thermalMethods('BuildingElementPartyWall', false).map((m) => m.label)).toEqual(['U-value', 'Layers']);
   // No calculated U-value (incomplete drawing): an existing building's floor offers no calculation.
   expect(thermalMethods('BuildingElementGround', true, false).map((m) => m.value)).toEqual(['band', 'u_value']);
 });
@@ -53,6 +57,10 @@ it('clears the old method only, in one patch', () => {
   const roof = el({ type: 'BuildingElementOpaque', pitch: 40, extra_json: { age_band: 'C', insulation_location: 'at_joists', insulation_thickness: 100 } });
   expect(thermalMethodSwitchPatch(roof, 'band', 'u_value', { constructionBands: true, constructionType: 'unheated_pitched_roof' }).extra_json)
     .toEqual({ age_band: 'C', insulation_location: 'at_joists' });
+  // A door's "insulated" goes with its U-value: HEM:EPC rejects it without one.
+  const insulatedDoor = el({ type: 'BuildingElementOpaque', pitch: 90, extra_json: { u_value: 1.2, is_insulated: true, colour: 'Dark' } });
+  expect(thermalMethodSwitchPatch(insulatedDoor, 'u_value', 'band', { constructionBands: true, constructionType: 'external_door' }).extra_json)
+    .toEqual({ colour: 'Dark' });
   const entered = el({ type: 'BuildingElementOpaque', pitch: 90, u_value: 0.4, extra_json: { u_value: 0.4, areal_heat_capacity: 'Medium' } });
   expect(thermalMethodSwitchPatch(entered, 'u_value', 'band', { constructionBands: true })).toEqual({ u_value: undefined, extra_json: { areal_heat_capacity: 'Medium' } });
   expect(thermalMethodSwitchPatch(wall({ ...assembly, u_value: 0.2, mass_distribution_class: 'IE' }), 'calculation', 'u_value', { constructionBands: false }).extra_json)
@@ -60,6 +68,20 @@ it('clears the old method only, in one patch', () => {
   const ground = el({ type: 'BuildingElementGround', extra_json: { u_value: 0.4, _ground_u_value_manual: true } });
   expect(thermalMethodSwitchPatch(ground, 'u_value', 'calculation', { constructionBands: false, groundComputedU: 0.21 }).extra_json).toEqual({ u_value: 0.21 });
   expect(thermalMethodSwitchPatch(ground, 'u_value', 'calculation', { constructionBands: true, groundComputedU: 0.21 }).extra_json).toEqual({ u_value: 0.21, _ground_u_value_manual: true });
+});
+
+it("switches a party wall's U-value inputs out with the method", () => {
+  const party = el({ type: 'BuildingElementPartyWall', pitch: 90, extra_json: {
+    u_value: 0.5, u_value_interpretation: 'half_construction', u_value_interpreted_value: 0.5, u_value_whole_wall: 0.25,
+    thermal_resistance_construction: 0.4, construction_basis: 'half', party_wall_cavity_type: 'solid', mass_distribution_class: 'D' } });
+  expect(inferThermalMethod(party, false)).toBe('u_value');
+  expect(inferThermalMethod(el({ type: 'BuildingElementPartyWall', extra_json: { u_value_whole_wall: 0.25 } }), false)).toBe('u_value');
+  // The cavity is not a U-value input: every method takes it.
+  expect(thermalMethodSwitchPatch(party, 'u_value', 'calculation', { constructionBands: false }).extra_json)
+    .toEqual({ party_wall_cavity_type: 'solid', mass_distribution_class: 'D' });
+  const layered = el({ type: 'BuildingElementPartyWall', extra_json: { ...assembly, u_value: 0.5, u_value_interpretation: 'half_construction', party_wall_cavity_type: 'solid' } });
+  expect(inferThermalMethod(layered, false)).toBe('calculation');
+  expect(thermalMethodSwitchPatch(layered, 'calculation', 'u_value', { constructionBands: false }).extra_json).toEqual({ party_wall_cavity_type: 'solid' });
 });
 
 it('keeps one cylinder size and one heat loss', () => {

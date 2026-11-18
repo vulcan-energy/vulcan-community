@@ -15,7 +15,7 @@
 //! `is_front_door` is the front door. The region comes from the model's postcode.
 
 use crate::finalization::SchemaOmission;
-use crate::target_mappings::TARGET_INPUT_WARNING;
+use crate::target_mappings::{EVIDENCE_INSTRUCTION, TARGET_EVIDENCE, TARGET_INPUT_WARNING};
 use crate::{json_pointer, ValidationError};
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -48,17 +48,20 @@ const STOREY_BELOW: f64 = 2.2 + STOREY_GAP;
 const COMMON_WALL_HEIGHT: f64 = 1.8;
 /// ours: how far a roof plane may overhang the building part it covers (m).
 const EAVES: f64 = 0.6;
-/// DESNZ-defined: the areal heat capacity (J/m².K) of a heated pitched roof, a door and a window
-/// that state none, as the field defaults of HEMIE's `HeatedPitchedRoofConstruction`,
-/// `AbstractDoorConstruction` and `WindowConstruction` from HEMIE 0.18.2. The pinned HEMIE requires
-/// the field, so the converter fills it. HEMIE reads a window's only in a party or sheltered wall.
+/// DESNZ-defined: the areal heat capacity (J/m².K) of a heated pitched roof that states none, the
+/// fallback of the pinned HEMIE's `HeatedPitchedRoof.areal_heat_capacity` (`roof.py`). Its
+/// construction schema requires the field, so the converter fills it.
 const HEATED_PITCHED_ROOF_HEAT_CAPACITY: f64 = 50_000.0;
+/// DESNZ-defined: the areal heat capacity (J/m².K) of a door and a window that state none, as the
+/// field defaults of HEMIE's `AbstractDoorConstruction` and `WindowConstruction` from HEMIE 0.18.2.
+/// The pinned HEMIE requires the field, so the converter fills it. HEMIE reads a window's only in
+/// a party or sheltered wall.
 const DOOR_HEAT_CAPACITY: f64 = 50_000.0;
 const WINDOW_HEAT_CAPACITY: f64 = 20_000.0;
-/// Assumption pending DESNZ E73 (Vulcan's assumption registry lists it): XPS edge insulation with
+/// Assumption pending DESNZ (Vulcan's assumption registry lists it): XPS edge insulation with
 /// no stated conductivity takes the DESNZ-defined conductivity of HEMIE's `Material.XPS` (W/m.K).
 const XPS_CONDUCTIVITY: f64 = 0.036;
-/// Assumption pending DESNZ E12 (Vulcan's assumption registry lists it): a solid or basement
+/// Assumption pending DESNZ (Vulcan's assumption registry lists it): a solid or basement
 /// floor of age band A to H with no stated insulation has construction resistance 0 in HEMIE (no
 /// insulation by age band, no material resistance), which the EPC wrapper and HEM reject. The
 /// converter output alone gives such a floor this insulation thickness (mm): the smallest the
@@ -71,7 +74,7 @@ const SETTING: &str = "HEMIE_";
 const RETIRED_SETTINGS: [(&str, &str); 3] = [
     ("HEMIE_region", "The region comes from the postcode. Remove the row. For a postcode area that spans two nations, choose the Nation under the Postcode in Global Settings."),
     ("HEMIE_front_door", "Remove the row and mark the front door on the door itself."),
-    ("HEMIE_infiltration_properties", "Remove the row. With no air test, enter the open fireplaces and glazing date in Global Settings > Air tightness."),
+    ("HEMIE_infiltration_properties", "Remove the row. With no air test, enter the open fireplaces and glazing date in Global Settings > Air test."),
 ];
 /// HEMIE's roof detail inputs (DESNZ-defined; `roof_construction.py`): the ceiling, the joists
 /// and the insulation's conductivity.
@@ -126,9 +129,11 @@ fn element_override_keys(construction_type: &str) -> Vec<&'static str> {
         ],
         "sheltered_wall" => vec!["wall_construction_type", "retrofit_insulation"],
         "window" => vec!["glazing_type", "frame_material", "glazing_gap"],
-        "external_door" | "park_home_wall" | "park_home_flat_roof" | "park_home_pitched_roof" => {
-            SURFACE.to_vec()
-        }
+        // HEMIE takes "insulated" only with a U-value (`door_construction.py`); the editor offers
+        // it under the U-value method.
+        "external_door" => vec![SURFACE[0], SURFACE[1], "is_insulated"],
+        "party_or_sheltered_door" => vec!["is_insulated"],
+        "park_home_wall" | "park_home_flat_roof" | "park_home_pitched_roof" => SURFACE.to_vec(),
         "flat_roof" | "mini_flat_roof" => roof(&[]),
         "unheated_pitched_roof" | "mini_pitched_roof" => roof(&LOFT_DETAILS),
         "heated_pitched_roof" => {
@@ -150,8 +155,9 @@ fn element_override_keys(construction_type: &str) -> Vec<&'static str> {
 }
 /// Fields only this converter reads from an element row; no HEM input takes them, so the
 /// full-input build leaves them out of the HEM element.
-pub(crate) const ELEMENT_ONLY_KEYS: [&str; 28] = [
+pub(crate) const ELEMENT_ONLY_KEYS: [&str; 29] = [
     "age_band",
+    "is_insulated",
     "thatched",
     "is_front_door",
     "wall_construction_type",
@@ -212,6 +218,7 @@ fn error(topic: &str, path: String, message: String) -> ValidationError {
 
 fn notice(path: &str, message: String) -> SchemaOmission {
     SchemaOmission {
+        label: None,
         code: TARGET_INPUT_WARNING.into(),
         path: path.into(),
         message,
@@ -749,19 +756,13 @@ impl<'a> Settings<'a> {
 #[derive(Default)]
 struct Constructions {
     by_name: Map<String, Value>,
-    documented: BTreeSet<String>,
     /// Walls whose applied build-up goes as their layers (`hemie_layers.rs`).
     layered: BTreeSet<String>,
-    /// Windows that state their own g-value or frame area fraction.
-    stated_glazing: BTreeSet<String>,
-    /// Elements that state their own heat capacity, mass distribution class or solar absorption.
-    stated_mass: BTreeSet<String>,
-    /// Elements whose stated U-value, thermal mass or solar absorption lodgement needs evidence for.
-    needs_evidence: BTreeSet<String>,
+    /// Lodgement evidence: each stated value (an element's, the air test's, a PV's or a battery's)
+    /// as its label ("'W00' states its U-value: 0.45"), by its field's path.
+    evidence: BTreeMap<String, String>,
     /// Party walls that state no cavity type: HEMIE takes it from the age band (DESNZ-defined).
     party_walls_by_age_band: BTreeSet<String>,
-    /// Elements whose stated heat capacity is set aside: their type sets it.
-    heat_capacity_set_aside: BTreeSet<String>,
     /// Constructions with a value from their elements, by key: the elements' paths.
     from_elements: BTreeMap<String, BTreeSet<String>>,
 }
@@ -801,13 +802,11 @@ impl Ctx<'_> {
     /// A number the element must state; a missing one is an error naming the element and field.
     fn need(&mut self, e: &El, key: &str) -> Option<f64> {
         let value = e.num(key);
+        // The path names the field, so the editor shows the message on it.
         let missing = error(
             "WALLS",
-            e.path(),
-            format!(
-                "'{}' does not state its {key}, which the existing-building converter needs.",
-                e.name
-            ),
+            format!("{}/{key}", e.path()),
+            format!("'{}' has no {key}. Enter it on the element.", e.name),
         );
         // Once per element and field, though a wall can be several outline edges.
         if value.is_none()
@@ -898,7 +897,29 @@ impl Ctx<'_> {
         // Every construction this builds takes a mass distribution class (HEMIE's own default
         // otherwise); only those with an outside surface take a colour or solar absorption, and
         // HEMIE rejects a field its construction type does not take.
-        let mut stated_mass = Vec::new();
+        // The element fields whose stated value the construction takes (element key, label, value):
+        // each is entered only if documented.
+        let mut stated: Vec<(&str, &str, String)> = Vec::new();
+        // Retrofit insulation and the insulation's thickness, type and conductivity; not their
+        // defaults (no retrofit, as built).
+        for (key, label, unit) in [
+            ("retrofit_insulation", "retrofit insulation", ""),
+            ("insulation_thickness", "insulation thickness", " mm"),
+            ("insulation_type", "insulation type", ""),
+            (
+                "insulation_thermal_conductivity",
+                "insulation conductivity",
+                " W/m.K",
+            ),
+        ] {
+            let shown = match c.get(key) {
+                Some(Value::Bool(true)) => "yes".to_string(),
+                Some(Value::String(s)) if s != "as built" => s.replace('_', " "),
+                Some(Value::Number(n)) => format!("{}{unit}", n.as_f64().unwrap_or_default()),
+                _ => continue,
+            };
+            stated.push((key, label, shown));
+        }
         if let Some(class) = self.agreed(elements, "mass_distribution_class") {
             match class
                 .as_str()
@@ -906,9 +927,10 @@ impl Ctx<'_> {
             {
                 Some(full) => {
                     c.insert("mass_distribution_class".into(), json!(full));
-                    stated_mass.push(format!(
-                        "mass distribution class {}",
-                        full.split(':').next().unwrap_or(&full)
+                    stated.push((
+                        "mass_distribution_class",
+                        "mass distribution class",
+                        full.split(':').next().unwrap_or(&full).to_string(),
                     ));
                 }
                 None => self.errors.push(error(
@@ -941,15 +963,26 @@ impl Ctx<'_> {
             }
             if let Some(coeff) = self.agreed(elements, "solar_absorption_coeff") {
                 c.insert("solar_absorption_coefficient".into(), coeff.clone());
-                stated_mass.push(format!("solar absorption {coeff}"));
+                stated.push((
+                    "solar_absorption_coeff",
+                    "solar absorption",
+                    coeff.to_string(),
+                ));
             }
         }
-        let mut stated_u = false;
+        // What each element states for its U: a U-value, a resistance, or none (the model's). Any
+        // mix differs, as `agreed` counts it.
         let u_values: BTreeSet<String> = elements
             .iter()
-            .filter_map(|e| e.num("u_value"))
-            .map(|u| u.to_string())
+            .map(
+                |e| match (e.num("u_value"), e.num("thermal_resistance_construction")) {
+                    (Some(u), _) => format!("U {u}"),
+                    (None, Some(r)) => format!("R {r}"),
+                    (None, None) => "the model's".into(),
+                },
+            )
             .collect();
+        let one_u = u_values.len() <= 1;
         // A wall's applied build-up goes as its layers, in place of the U-value it wrote.
         let build_up = first
             .get("vulcan_assembly_v1")
@@ -957,53 +990,36 @@ impl Ctx<'_> {
         if construction_type == "party_wall" {
             // DESNZ-defined: a party wall's resistance is fixed; only its cavity and lining count.
         } else if build_up.is_some() {
-            stated_u = true;
+            stated.push(("vulcan_assembly_v1", "build-up", String::new()));
         } else if u_values.len() > 1 {
-            self.errors.push(error("CONSTRUCTION", first.path(), format!("The existing-building EPC gives {} one construction, but their U-values differ ({}). Give them one U-value, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
+            self.errors.push(error("CONSTRUCTION", first.path(), format!("The existing-building EPC gives {} one construction, but their U-values or resistances differ ({}). Give them one, or draw them as separate elements.", quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>()), u_values.into_iter().collect::<Vec<_>>().join(", "))));
         } else if let Some(u) = first.num("u_value") {
-            stated_u = true;
             c.insert("u_value".into(), json!(u));
-            self.constructions.documented.insert(format!(
-                "{} (U {u})",
-                quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>())
-            ));
+            stated.push(("u_value", "U-value", u.to_string()));
         } else if let Some(r) = first.num("thermal_resistance_construction") {
-            stated_u = true;
-            // Derived from the model: U from the element's construction resistance and HEM's
-            // surface resistances (BS EN ISO 13789 coefficients: radiative 5.13, convective 2.5
-            // sideways, 5.0 upwards, 0.7 downwards; outside 20 + 4.14).
-            let h_ci = match construction_type {
-                t if t.ends_with("_roof") => 5.0,
-                t if t.ends_with("_floor") => 0.7,
-                _ => 2.5,
-            };
-            let inside = 1.0 / (5.13 + h_ci);
-            let u = 1.0 / (r + inside + 1.0 / (20.0 + 4.14));
+            let u = u_from_r(construction_type, r);
             c.insert("u_value".into(), json!(u));
-            self.constructions.documented.insert(format!(
-                "{} (U {u:.3} from R {r})",
-                quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>())
+            stated.push((
+                "thermal_resistance_construction",
+                "thermal resistance",
+                format!("{r} m²K/W (U {u:.3})"),
             ));
+        }
+        // Doors whose U-values differ already stop above: no second error for the same doors.
+        if one_u && c.get("is_insulated") == Some(&json!(true)) && !c.contains_key("u_value") {
+            self.errors.push(error("CONSTRUCTION", first.path(), format!("'{}' is marked insulated but states no U-value. The existing-building EPC takes \"insulated\" only with a U-value: enter its U-value, or set Insulated to No.", first.name)));
         }
         if construction_type == "window" {
             // DESNZ-defined: HEMIE takes the g-value and frame area fraction from the glazing
             // type and frame material unless the window states its own.
-            let mut stated = Vec::new();
             for (key, label) in [
                 ("g_value", "g-value"),
                 ("frame_area_fraction", "frame area fraction"),
             ] {
                 if let Some(v) = first.num(key) {
                     c.insert(key.into(), json!(v));
-                    stated.push(format!("{label} {v}"));
+                    stated.push((key, label, v.to_string()));
                 }
-            }
-            if !stated.is_empty() {
-                self.constructions.stated_glazing.insert(format!(
-                    "{} ({})",
-                    first.name,
-                    stated.join(", ")
-                ));
             }
         }
         if construction_type == "party_wall" {
@@ -1027,6 +1043,13 @@ impl Ctx<'_> {
                         c.insert("party_wall_type".into(), json!(filled));
                         c.insert("cavity_seal_type".into(), json!(seal));
                     }
+                    if filled == "filled_cavity" {
+                        stated.push((
+                            "party_wall_cavity_type",
+                            "party wall cavity",
+                            "filled".into(),
+                        ));
+                    }
                 }
                 None => {
                     self.constructions
@@ -1040,7 +1063,11 @@ impl Ctx<'_> {
         }
         if let Some(capacity) = self.heat_capacity(construction_type, elements) {
             c.insert("areal_heat_capacity".into(), json!(capacity));
-            stated_mass.push(format!("areal heat capacity {} kJ/m²K", capacity / 1000.0));
+            stated.push((
+                "areal_heat_capacity",
+                "areal heat capacity",
+                format!("{} kJ/m²K", capacity / 1000.0),
+            ));
         }
         if let Some(envelope) = build_up {
             let stated = c.get("areal_heat_capacity").and_then(Value::as_f64);
@@ -1068,16 +1095,18 @@ impl Ctx<'_> {
                 )),
             }
         }
-        if !stated_mass.is_empty() {
-            let names = quoted(&elements.iter().map(|e| e.name).collect::<Vec<_>>());
-            self.constructions
-                .stated_mass
-                .insert(format!("{names} ({})", stated_mass.join(", ")));
-        }
-        if stated_u || !stated_mass.is_empty() {
-            self.constructions
-                .needs_evidence
-                .extend(elements.iter().map(|e| e.name.to_string()));
+        for e in elements {
+            // Only the elements that state the value: one in the group may take it from the model.
+            for (key, label, value) in stated.iter().filter(|(key, _, _)| e.get(key).is_some()) {
+                let message = if value.is_empty() {
+                    format!("'{}' takes its U-value from its {label}", e.name)
+                } else {
+                    format!("'{}' states its {label}: {value}", e.name)
+                };
+                self.constructions
+                    .evidence
+                    .insert(format!("{}{}", e.path(), json_pointer(&[*key])), message);
+            }
         }
         for (key, value) in extra {
             c.insert((*key).into(), value.clone());
@@ -1172,15 +1201,16 @@ impl Ctx<'_> {
     fn heat_capacity(&mut self, construction_type: &str, elements: &[&El]) -> Option<f64> {
         let rule = heat_capacity_rule(construction_type);
         if rule == HeatCapacity::Fixed {
-            // A full-input model states one for every element, so it is set aside, reported once
-            // for the model. Set aside before `agreed`: values that are not used need not agree.
-            for e in elements
-                .iter()
-                .filter(|e| e.get("areal_heat_capacity").is_some())
-            {
-                self.constructions
-                    .heat_capacity_set_aside
-                    .insert(e.name.to_string());
+            // A stated one is set aside before `agreed`: values that are not used need not agree.
+            // The editor does not offer the field for these types, so only a value a build-up
+            // wrote (the assembly calculator) is said to be set aside, on its element.
+            for e in elements.iter().filter(|e| {
+                e.get("areal_heat_capacity").is_some() && e.get("vulcan_assembly_v1").is_some()
+            }) {
+                self.notices.push(notice(
+                    &format!("{}{}", e.path(), json_pointer(&["areal_heat_capacity"])),
+                    "The existing-building EPC takes this element's heat capacity from its construction type, not from its build-up.".into(),
+                ));
             }
             return None;
         }
@@ -1548,6 +1578,19 @@ fn convert_existing_building(
         ));
     }
     notices.append(&mut ctx.notices);
+    ctx.constructions
+        .evidence
+        .extend(systems::stated_values(&snapshot, csv));
+    // Each stated value is entered only if documented: one notice per field, so each lands
+    // there. Listed while the model still has errors too.
+    for (path, label) in std::mem::take(&mut ctx.constructions.evidence) {
+        notices.push(SchemaOmission {
+            code: TARGET_EVIDENCE.into(),
+            path,
+            message: format!("{label}. {EVIDENCE_INSTRUCTION}"),
+            label: Some(label),
+        });
+    }
     if !ctx.errors.is_empty() || converted.is_none() {
         errors.append(&mut ctx.errors);
         return None;
@@ -1586,43 +1629,11 @@ fn convert_existing_building(
     systems::mechanical_ventilation(&snapshot, csv, schema, &mut geometry, errors, notices);
     let (segments, shading) = shading::distant(&ctx.settings, &geometry, errors, notices)?;
     model["ExternalConditions"]["shading_segments"] = segments;
-    let documented: Vec<String> = std::mem::take(&mut ctx.constructions.documented)
-        .into_iter()
-        .collect();
-    if !documented.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These elements state their own U-value, so the existing-building EPC takes it as a documented U-value from the element: {}.", documented.join("; "))));
-    }
     let layered: Vec<String> = std::mem::take(&mut ctx.constructions.layered)
         .into_iter()
         .collect();
     if !layered.is_empty() {
         notices.push(notice("/Zone/constructions", format!("These walls take their layers from their build-up, so the existing-building EPC works out their U-value from the layers: {}.", layered.join("; "))));
-    }
-    let stated_glazing: Vec<String> = std::mem::take(&mut ctx.constructions.stated_glazing)
-        .into_iter()
-        .collect();
-    if !stated_glazing.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These windows state their own values, which the existing-building EPC uses in place of those for their glazing type and frame material: {}.", stated_glazing.join(", "))));
-    }
-    let stated_mass: Vec<String> = std::mem::take(&mut ctx.constructions.stated_mass)
-        .into_iter()
-        .collect();
-    if !stated_mass.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("These elements state their own thermal mass or solar absorption, which the existing-building EPC uses in place of its defaults: {}.", stated_mass.join("; "))));
-    }
-    let needs_evidence = std::mem::take(&mut ctx.constructions.needs_evidence);
-    if !needs_evidence.is_empty() {
-        notices.push(notice(
-            "/Zone/constructions",
-            format!(
-                "Lodgement needs evidence for the values these elements state: {}.",
-                needs_evidence.into_iter().collect::<Vec<_>>().join(", ")
-            ),
-        ));
-    }
-    let set_aside = std::mem::take(&mut ctx.constructions.heat_capacity_set_aside);
-    if !set_aside.is_empty() {
-        notices.push(notice("/Zone/constructions", format!("The existing-building EPC sets the areal heat capacity of roofs and of floors over an unheated space from their type, so the value these elements state is not used: {}.", quoted(&set_aside.iter().map(String::as_str).collect::<Vec<_>>()))));
     }
     let by_age_band = std::mem::take(&mut ctx.constructions.party_walls_by_age_band);
     if !by_age_band.is_empty() {
@@ -1634,7 +1645,6 @@ fn convert_existing_building(
             ),
         ));
     }
-    notices.push(notice("/Zone", "The existing-building EPC takes its geometry from the storey outlines. It derives thermal bridges (from the age band), internal walls and floors and lighting itself, so the model's own are not used.".into()));
     model["Zone"] = geometry;
     model["InfiltrationVentilation"] = ventilation;
     // DESNZ-defined: with HEMIE Geometry, systems take their HEMIE form, which has no zone.
@@ -2138,8 +2148,8 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
         }
         // DESNZ-defined: the wall is its edge length by the storey's ceiling height, less its
         // openings, and may not be negative. Openings drawn to the floor above (full-height
-        // glazing) exceed it; stop here, naming them, instead of failing in the run (DESNZ
-        // question E48). ponytail: a bay's opening, also netted from the wall, is not counted.
+        // glazing) exceed it; stop here, naming them, instead of failing in the run (a
+        // question for DESNZ). ponytail: a bay's opening, also netted from the wall, is not counted.
         let w = &hemie_walls[wi];
         let ceiling =
             parts[w.part].ceilings[w.value["storey_index"].as_u64().unwrap_or(0) as usize];
@@ -2254,7 +2264,21 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
             bp.insert("is_non_separated_conservatory".into(), json!(true));
         } else {
             let list: Vec<String> = part.ceilings.iter().map(|c| format!("{c} m")).collect();
-            ctx.notices.push(notice("/Zone", format!("{}: ceiling height {}, each storey's wall height less the {STOREY_GAP} m floor zone above it (a wall runs from its floor to the floor or roof above).", names[pi], list.join(", "))));
+            let heights = if list.iter().all(|h| *h == list[0]) {
+                format!("ceiling height {} on each storey", list[0])
+            } else {
+                format!(
+                    "ceiling heights {} from the lowest storey up",
+                    list.join(", ")
+                )
+            };
+            ctx.notices.push(notice(
+                "/Zone",
+                format!(
+                    "{}: {heights}, the wall height less the {STOREY_GAP} m floor zone.",
+                    names[pi]
+                ),
+            ));
         }
         bp.insert("storeys".into(), Value::Array(storeys));
         bp.insert("walls".into(), Value::Array(part_walls));
@@ -2348,7 +2372,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     }
     // DESNZ-defined: the base height, or else HEMIE's estimate from the base storey. The
     // estimate is given as the height because the pinned Orchestrator drops a Geometry's
-    // base_storey_of_dwelling before HEMIE reads it (assumption pending DESNZ E55: if the
+    // base_storey_of_dwelling before HEMIE reads it (assumption pending DESNZ: if the
     // Orchestrator keeps it, send the base storey instead).
     match (
         full_ventilation
@@ -2365,7 +2389,7 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
                 json!(storey as f64 * STOREY_BELOW),
             );
         }
-        (None, None) => ctx.errors.push(error("STOREYS", "/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or storey of dwelling, which the existing-building EPC needs. Give the ventilation zone base height in Global Settings > Ventilation environment, or the storey of dwelling in Dwelling details.".into())),
+        (None, None) => ctx.errors.push(error("STOREYS", "/InfiltrationVentilation/ventilation_zone_base_height".into(), "The model states no ventilation zone base height or storey of dwelling, which the existing-building EPC needs. Give the ventilation zone base height in Global Settings > Site, or the storey of dwelling in Global Settings > Property.".into())),
     }
     // DESNZ-defined: a part's base height defaults to the dwelling's; a part that starts higher
     // states its own. With no dwelling base the error is already reported, so 0 stands in.
@@ -2409,8 +2433,9 @@ fn convert(ctx: &mut Ctx, csv: &Rows) -> Option<(Value, Value)> {
     Some((Value::Object(geometry), ventilation?))
 }
 
-// The nation by postcode area: area level, because district boundaries cross national borders
-// and no district table is pinned here. Border areas ask the model's stated nation.
+// ours: the nation by postcode area (no published table gives it): area level, because district
+// boundaries cross national borders and no district table is pinned here. Border areas ask the
+// model's stated nation.
 const SCOTLAND_AREAS: [&str; 15] = [
     "AB", "DD", "DG", "EH", "FK", "G", "HS", "IV", "KA", "KW", "KY", "ML", "PA", "PH", "ZE",
 ];
@@ -2490,13 +2515,8 @@ fn region(ctx: &mut Ctx) -> Option<String> {
         return None;
     };
     match derived {
-        PostcodeNation::Derived(region) => {
-            ctx.notices.push(notice(
-                &path,
-                format!("Region {region}, from the postcode {postcode}."),
-            ));
-            return Some(region.into());
-        }
+        // The Postcode field shows the region it gives.
+        PostcodeNation::Derived(region) => return Some(region.into()),
         PostcodeNation::Outside => {
             ctx.errors.push(error("POSTCODE", path, format!("Postcode {area} is outside England, Wales, Scotland, Northern Ireland and the Isle of Man; HEM:EPC does not cover it.")));
             return None;
@@ -2505,13 +2525,7 @@ fn region(ctx: &mut Ctx) -> Option<String> {
     }
     let field = format!("{SETTING}nation");
     match ctx.settings.raw(&field).and_then(Value::as_str) {
-        Some(nation) if NATIONS.contains(&nation) => {
-            ctx.notices.push(notice(
-                &format!("/Metadata/{field}"),
-                format!("Region {nation}, as stated for postcode area {area}."),
-            ));
-            Some(nation.into())
-        }
+        Some(nation) if NATIONS.contains(&nation) => Some(nation.into()),
         stated => {
             ctx.errors.push(error("POSTCODE", format!("/Metadata/{field}"), format!("Postcode area {area} spans two nations{}. State the nation under the Postcode in Global Settings.", stated.map_or(String::new(), |s| format!(", and '{s}' is not England, Wales, Scotland or Northern Ireland")))));
             None
@@ -2649,6 +2663,14 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
         Some("Suspended_floor") => ("suspended", "suspended_floor"),
         Some("Heated_basement") => ("heated basement", "heated_basement_floor"),
         Some("Unheated_basement") => ("unheated basement", "unheated_basement_floor"),
+        None => {
+            ctx.errors.push(error(
+                "FLOOR",
+                format!("{}/floor_type", g.path()),
+                format!("'{}' has no floor type. Choose it on the floor.", g.name),
+            ));
+            return None;
+        }
         other => {
             ctx.errors.push(error("FLOOR", g.path(), format!("Ground floor '{}' has floor type {other:?}, which the existing-building converter does not map yet.", g.name)));
             return None;
@@ -2657,7 +2679,22 @@ fn floor(ctx: &mut Ctx, g: &El, total_area: f64) -> Option<Value> {
     let mut extra = Vec::new();
     if construction_type == "edge_insulated_ground_attached_floor" {
         match edge_insulation(ctx, g) {
-            Some(edge) => extra.push(("edge_insulation", edge)),
+            Some(edge) => {
+                let kinds: Vec<&str> = edge
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|kinds| kinds.keys().map(String::as_str))
+                    .collect();
+                ctx.constructions.evidence.insert(
+                    format!("{}{}", g.path(), json_pointer(&["edge_insulation"])),
+                    format!(
+                        "'{}' states its edge insulation: {}",
+                        g.name,
+                        kinds.join(", ")
+                    ),
+                );
+                extra.push(("edge_insulation", edge))
+            }
             None if ctx
                 .settings
                 .construction(construction_type)
@@ -2739,6 +2776,40 @@ fn edge_insulation(ctx: &mut Ctx, g: &El) -> Option<Value> {
     (!edge.is_empty()).then_some(Value::Object(edge))
 }
 
+/// Derived from the model: U from an element's construction resistance and HEM's surface
+/// resistances (BS EN ISO 13789 coefficients: radiative 5.13, convective 2.5 sideways, 5.0
+/// upwards, 0.7 downwards; outside 20 + 4.14).
+fn u_from_r(construction_type: &str, r: f64) -> f64 {
+    let h_ci = match construction_type {
+        t if t.ends_with("_roof") => 5.0,
+        t if t.ends_with("_floor") => 0.7,
+        _ => 2.5,
+    };
+    1.0 / (r + 1.0 / (5.13 + h_ci) + 1.0 / (20.0 + 4.14))
+}
+
+/// The roof part (from the geometry editor) all the planes belong to: its shape and pitch
+/// choice, when every plane is a member of the same one and they agree on both.
+fn roof_part<'a>(planes: &[&El<'a>]) -> Option<(&'a str, Option<&'a Value>)> {
+    let tags: Vec<&Value> = planes
+        .iter()
+        .map(|p| p.get("hemie_bundle").filter(|t| t["kind"] == "roof"))
+        .collect::<Option<_>>()?;
+    let first = tags.first()?;
+    tags.iter()
+        .all(|t| {
+            t["bundle_id"] == first["bundle_id"]
+                && t["shape"] == first["shape"]
+                && t.get("pitch_choice") == first.get("pitch_choice")
+        })
+        .then(|| {
+            (
+                first["shape"].as_str().unwrap_or_default(),
+                first.get("pitch_choice").filter(|v| !v.is_null()),
+            )
+        })
+}
+
 /// The pitched roof's slope orientation: an edge orientation of the top storey's minimum
 /// rectangle, as HEMIE requires (DESNZ-defined). The plane's own orientation only picks which
 /// side (rule: slope orientation comes from the ring).
@@ -2788,11 +2859,48 @@ fn roof(
         .copied()
         .filter(|p| !p.flag("is_unheated_pitched_roof"))
         .collect();
-    if let Some(p) = heated.first() {
-        // Rule: a heated pitched roof with no roof room (a vaulted ceiling) has no HEMIE form.
-        ctx.errors.push(error("ROOF", p.path(), format!("Roof '{}' is a heated pitched roof over a storey (a vaulted ceiling). The existing-building EPC has no vaulted roof type; draw the room in the roof with its knee walls or gables, or mark the roof as unheated if a loft is above.", p.name)));
-        return None;
-    }
+    // ours (interim): HEMIE has no vaulted ceiling (heated slopes over a storey), so it is
+    // entered as a loft roof whose documented U keeps the slopes' heat loss over the plan
+    // footprint HEMIE applies it to. That needs one U-value from the slopes.
+    let vault_u = match heated.first() {
+        None => None,
+        Some(p) => {
+            let us: Vec<Option<f64>> = pitched
+                .iter()
+                .map(|e| {
+                    e.num("u_value").or_else(|| {
+                        e.num("thermal_resistance_construction")
+                            .map(|r| u_from_r("unheated_pitched_roof", r))
+                    })
+                })
+                .collect();
+            // The roof part's name when every slope is in that one part (its anchor carries the
+            // name), else the slope's own.
+            let tags: Option<Vec<&Value>> = pitched
+                .iter()
+                .map(|e| e.get("hemie_bundle").filter(|t| t["kind"] == "roof"))
+                .collect();
+            let who = tags
+                .filter(|t| t.iter().all(|x| x["bundle_id"] == t[0]["bundle_id"]))
+                .and_then(|t| t.iter().find_map(|x| x["bundle_name"].as_str()))
+                .map_or_else(
+                    || format!("roof '{}' and the slopes with it", p.name),
+                    |n| format!("{n}'s slopes"),
+                );
+            match us[0] {
+                Some(u) if us.iter().all(|x| *x == Some(u)) => Some((u, p.name)),
+                _ => {
+                    let message = if us.contains(&None) {
+                        format!("Give {who} a U-value: HEM:EPC has no default for a vaulted ceiling (heated slopes over a storey).")
+                    } else {
+                        format!("Give {who} one U-value: HEM:EPC takes a vaulted ceiling (heated slopes over a storey) as one loft roof.")
+                    };
+                    ctx.errors.push(error("ROOF", p.path(), message));
+                    return None;
+                }
+            }
+        }
+    };
     let result = if !flat.is_empty() && !pitched.is_empty() {
         ctx.errors.push(error("ROOF", flat[0].path(), format!("Building part '{part}' has flat roof '{}' and pitched roof '{}'. The existing-building EPC gives each building part one roof.", flat[0].name, pitched[0].name)));
         None
@@ -2823,6 +2931,20 @@ fn roof(
             return None;
         }
         let measured = sloped_measurements(ctx, &pitched)?;
+        let part_pitch = roof_part(&pitched);
+        let two_pitch = part_pitch
+            .map(|(shape, _)| shape)
+            .filter(|shape| matches!(*shape, "mansard" | "gambrel"));
+        // Derived from the model: a roof part drawn at a picked category goes as that category;
+        // one with no pick sends no pitch (HEMIE applies its own); otherwise a custom pitch.
+        let category = match part_pitch {
+            Some((_, choice)) if two_pitch.is_none() => match choice {
+                None => Some(None),
+                Some(Value::String(c)) => Some(Some(c.as_str())),
+                Some(_) => None,
+            },
+            _ => None,
+        };
         // Sides from the planes' own orientations: one is mono, two opposite are dual.
         let mut sides: Vec<f64> = Vec::new();
         for m in &measured {
@@ -2840,16 +2962,26 @@ fn roof(
             _ => {
                 // ours: HEMIE has no hipped roof, so a hipped roof
                 // is dual pitch, reported.
-                ctx.notices.push(notice(
-                    "/Zone",
-                    format!(
-                        "{part}: hipped roof converted to dual pitch (approximation; {} slopes).",
-                        sides.len()
-                    ),
-                ));
+                if two_pitch.is_none() {
+                    ctx.notices.push(notice(
+                        "/Zone",
+                        format!(
+                            "{part}: hipped roof converted to dual pitch (approximation; {} slopes).",
+                            sides.len()
+                        ),
+                    ));
+                }
                 "dual"
             }
         };
+        // ours: HEMIE takes one pitch per roof, so a mansard or gambrel roof (two pitches) is
+        // dual at the area-weighted mean pitch, reported.
+        if let Some(shape) = two_pitch {
+            ctx.notices.push(notice(
+                "/Zone",
+                format!("{part}: {shape} roof converted to dual pitch at the area-weighted mean pitch (approximation)."),
+            ));
+        }
         let main = &measured[largest(&measured)];
         let (slope_orientation, _) = slope(top_ring, main.orientation, orient);
         // ours: one pitch per roof, the area-weighted mean of its
@@ -2857,7 +2989,7 @@ fn roof(
         let (area, weighted) = measured
             .iter()
             .fold((0.0, 0.0), |(a, w), m| (a + m.area, w + m.area * m.pitch));
-        if measured.len() > 1 {
+        if measured.len() > 1 && category.is_none() {
             let planes: Vec<String> = pitched
                 .iter()
                 .zip(&measured)
@@ -2880,7 +3012,17 @@ fn roof(
             (false, true) => "thatched_roof",
             (false, false) => "unheated_pitched_roof",
         };
-        let key = ctx.construction(construction_type, &pitched, &[]);
+        let mut extra = Vec::new();
+        if let Some((u_slope, name)) = vault_u {
+            let plan: f64 = measured
+                .iter()
+                .map(|m| m.area * m.pitch.to_radians().cos())
+                .sum();
+            let u = u_slope * area / plan;
+            extra.push(("u_value", json!(u)));
+            ctx.notices.push(notice("/Zone", format!("{part}: vaulted ceiling '{name}' entered as a loft roof with the slopes' heat loss (U {u_slope:.2} × slope area ÷ plan area = {u:.3}; interim). The heated volume under the slopes is not counted.")));
+        }
+        let key = ctx.construction(construction_type, &pitched, &extra);
         let roof_type = match (park_home, thatched) {
             (true, _) => "Park Home Pitched".to_string(),
             (false, true) => "Thatched Pitched (Unheated)".to_string(),
@@ -2889,11 +3031,17 @@ fn roof(
                 roof_kind(ctx.insulation_location(&key), false)
             ),
         };
-        Some(ctx.with_age_band(
-            &pitched,
-            json!({"roof_type": roof_type, "construction": key, "pitch_type": pitch_type,
-            "slope_orientation": slope_orientation, "pitch": "Custom", "custom_pitch": weighted / area}),
-        ))
+        let mut roof = json!({"roof_type": roof_type, "construction": key, "pitch_type": pitch_type,
+            "slope_orientation": slope_orientation});
+        match category {
+            Some(Some(c)) => roof["pitch"] = json!(c),
+            Some(None) => {}
+            None => {
+                roof["pitch"] = json!("Custom");
+                roof["custom_pitch"] = json!(weighted / area);
+            }
+        }
+        Some(ctx.with_age_band(&pitched, roof))
     } else {
         ctx.errors.push(error("ROOF", 
             "/Zone".into(),
@@ -3472,7 +3620,7 @@ fn infiltration(
                     "AIR_TEST",
                     format!("/InfiltrationVentilation/Leaks/{key}"),
                     format!(
-                        "The air test states no {}. Enter it in Global Settings > Air tightness.",
+                        "The air test states no {}. Enter it in Global Settings > Air test.",
                         key.replace('_', " ")
                     ),
                 )),
@@ -3494,7 +3642,7 @@ fn infiltration(
         }
     }
     // Derived from the model: the envelope area of the drawn elements. The schema requires it
-    // although HEMIE Geometry can give it (E9).
+    // although HEMIE Geometry can give it.
     match stated("env_area") {
         Some(v) => {
             out.insert("env_area".into(), v.clone());
@@ -3509,7 +3657,7 @@ fn infiltration(
     Some(Value::Object(iv))
 }
 
-/// Assumption pending DESNZ E52 (Vulcan's assumption registry lists it): a suspended floor's wind
+/// Assumption pending DESNZ (Vulcan's assumption registry lists it): a suspended floor's wind
 /// sheltering level follows the shield class, Shielded to Sheltered, Normal to Average, Open to
 /// Exposed, and the shield class follows the terrain class when not stated. DESNZ's method states
 /// both maps; HEMIE codes only the second and otherwise sends Average. If DESNZ keeps Average,
@@ -3548,7 +3696,7 @@ fn placed_windows<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
     }
 }
 
-/// Assumption pending DESNZ E7 (Vulcan's assumption registry lists it): the dwelling inputs the
+/// Assumption pending DESNZ (Vulcan's assumption registry lists it): the dwelling inputs the
 /// pinned Orchestrator hides from its schema and otherwise sets to 1 (building length and width,
 /// ground floor area, storeys in dwelling), which the EPC wrapper sizes the hot water pipework
 /// from. Length and width are the sides of the footprint's minimum rectangle and the ground floor
@@ -3671,7 +3819,7 @@ pub(crate) const OPEN_FIREPLACES: &str = "HEMIE_number_of_open_fireplaces";
 pub(crate) const DOUBLE_GLAZING_PERIOD: &str = "HEMIE_double_glazing_installation_period";
 pub(crate) const HEAT_LOSS_CORRIDOR: &str = "HEMIE_heat_loss_corridor";
 
-/// Assumption pending DESNZ E17 (Vulcan's assumption registry lists it). With no air test the
+/// Assumption pending DESNZ (Vulcan's assumption registry lists it). With no air test the
 /// assessor gives only the open fireplaces, the double-glazing installation period (when the
 /// windows are double glazed) and, for a flat or maisonette, the heat loss corridor; HEMIE
 /// derives every other infiltration property from the Geometry and estimates a Pulse test. The
@@ -3688,14 +3836,14 @@ fn leakage_estimate_inputs(ctx: &mut Ctx, double_glazed: bool) -> Value {
         Some(Some(count)) => {
             properties.insert("number_of_open_fireplaces".into(), json!(count));
         }
-        _ => ctx.errors.push(error("AIR_TEST", path(OPEN_FIREPLACES), "No air test is stated, so HEM:EPC estimates the airtightness. Enter the number of open fireplaces (0 or more) in Global Settings > Air tightness, or enter the air test result.".into())),
+        _ => ctx.errors.push(error("AIR_TEST", path(OPEN_FIREPLACES), "No air test is stated, so HEM:EPC estimates the airtightness. Enter the number of open fireplaces (0 or more) in Global Settings > Air test, or enter the air test result.".into())),
     }
     if double_glazed {
         match ctx.settings.raw(DOUBLE_GLAZING_PERIOD).and_then(Value::as_str) {
             Some(period) => {
                 properties.insert("double_glazing_installation_period".into(), json!(period));
             }
-            None => ctx.errors.push(error("AIR_TEST", path(DOUBLE_GLAZING_PERIOD), "No air test is stated and the windows are double glazed. Enter when the double glazing was installed in Global Settings > Air tightness (unknown is an option).".into())),
+            None => ctx.errors.push(error("AIR_TEST", path(DOUBLE_GLAZING_PERIOD), "No air test is stated and the windows are double glazed. Enter when the double glazing was installed in Global Settings > Air test (unknown is an option).".into())),
         }
     }
     if matches!(
@@ -3706,7 +3854,7 @@ fn leakage_estimate_inputs(ctx: &mut Ctx, double_glazed: bool) -> Value {
             Some(corridor) => {
                 properties.insert("heat_loss_corridor".into(), json!(corridor));
             }
-            None => ctx.errors.push(error("AIR_TEST", path(HEAT_LOSS_CORRIDOR), "No air test is stated. For a flat or maisonette, enter the heat loss corridor in Global Settings > Air tightness.".into())),
+            None => ctx.errors.push(error("AIR_TEST", path(HEAT_LOSS_CORRIDOR), "No air test is stated. For a flat or maisonette, enter the heat loss corridor in Global Settings > Air test.".into())),
         }
     }
     Value::Object(properties)
@@ -3905,14 +4053,35 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
+    fn the_ceiling_heights_are_one_short_notice() {
+        let (_, errors, notices) = run(&house(gable_roof()));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let found: Vec<&str> = notices
+            .iter()
+            .filter(|n| n.message.contains("ceiling height"))
+            .map(|n| n.message.as_str())
+            .collect();
+        assert_eq!(
+            found,
+            ["Main: ceiling height 2.55 m on each storey, the wall height less the 0.25 m floor zone."]
+        );
+    }
+
+    #[test]
     fn a_leaning_wall_takes_its_stated_pitch() {
         let text = house(gable_roof()).replace(
             "W00,Z,BuildingElementOpaque,1,90,",
             "W00,Z,BuildingElementOpaque,1,80,",
         );
         assert_ne!(text, house(gable_roof()));
-        let (model, errors, _) = run(&text);
+        let (model, errors, notices) = run(&text);
         assert!(errors.is_empty(), "{errors:#?}");
+        // Storeys of different heights are listed in the ceiling-height notice.
+        assert!(
+            notices.iter().any(|n| n.message.starts_with("Main: ceiling heights ")
+                && n.message.ends_with(" m, 2.55 m from the lowest storey up, the wall height less the 0.25 m floor zone.")),
+            "{notices:#?}"
+        );
         let walls = model["Zone"]["building_parts"]["Main"]["walls"]
             .as_array()
             .unwrap();
@@ -3972,7 +4141,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         // Each storey's ceiling is its wall height less the floor zone, reported.
         assert!(
             notices.iter().any(|n| n.message.starts_with(
-                "Main: ceiling height 2.55 m, 2.55 m, each storey's wall height less the 0.25 m"
+                "Main: ceiling height 2.55 m on each storey, the wall height less the 0.25 m"
             )),
             "{notices:#?}"
         );
@@ -4286,7 +4455,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
         assert_eq!(errors.len(), 1, "{errors:#?}");
         assert!(
-            errors[0].message.contains("vaulted ceiling"),
+            errors[0]
+                .message
+                .starts_with("Give roof 'Roof S' and the slopes with it a U-value: HEM:EPC has no default for a vaulted ceiling"),
             "{}",
             errors[0].message
         );
@@ -4325,9 +4496,12 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         exposed.extend(box_walls(&BOX, &[1]));
         exposed.extend(gable_roof());
         let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&l)));
-        let w01: Vec<_> = errors.iter().filter(|e| e.path.ends_with("/W01")).collect();
+        let w01: Vec<_> = errors
+            .iter()
+            .filter(|e| e.path.ends_with("/W01/height"))
+            .collect();
         assert_eq!(w01.len(), 1, "{errors:#?}");
-        assert!(w01[0].message.contains("does not state its height"));
+        assert!(w01[0].message.contains("has no height"));
         // The conversion goes on, naming the extension's missing roof in the same pass.
         assert!(errors
             .iter()
@@ -4437,6 +4611,33 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
+    fn a_door_with_a_u_value_says_whether_it_is_insulated() {
+        let front = door("Front", "W00", [3.5, 0.0], [4.5, 0.0]);
+        let text = house(gable_roof()).replace(
+            &front,
+            &(front.clone() + r#""{""u_value"":1.2,""is_insulated"":true}""#),
+        );
+        let (model, errors, _) = run(&text);
+        assert!(errors.is_empty(), "{errors:#?}");
+        let door = model["Zone"]["constructions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .find(|c| c["construction_type"] == "external_door")
+            .unwrap();
+        assert_eq!(
+            (&door["u_value"], &door["is_insulated"]),
+            (&json!(1.2), &json!(true))
+        );
+        // Without a U-value HEMIE rejects it: the conversion names the door.
+        let (_, errors, _) = run(&text.replace(r#"""u_value"":1.2,"#, ""));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(errors[0]
+            .message
+            .contains("'Front' is marked insulated but states no U-value"));
+    }
+
+    #[test]
     fn roof_planes_that_differ_in_age_band_or_construction_stop() {
         let mut roof = gable_roof();
         roof[0] += r#""{""age_band"":""K""}""#;
@@ -4505,7 +4706,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         // Noise nuisance shows "No (default)" on its field; the shield class is reported.
         assert!(notices.iter().any(|n| n.path.ends_with("shield_class")));
         assert!(!notices.iter().any(|n| n.path.ends_with("noise_nuisance")));
-        // No air test: HEMIE estimates the leakage from the assessor's open fireplaces (E17);
+        // No air test: HEMIE estimates the leakage from the assessor's open fireplaces;
         // without them, one error names the row.
         model["InfiltrationVentilation"]["Leaks"] = json!({"env_area": 200});
         let (_, errors, _) = run_on(&house(gable_roof()), model.clone());
@@ -4801,7 +5002,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 ["insulation_thickness"]
                 .clone()
         };
-        // Band D: HEMIE's default is no insulation, so the output alone takes the assumption (E12).
+        // Band D: HEMIE's default is no insulation, so the output alone takes the assumption.
         let band_d = house(gable_roof()).replace("HEMIE_age_band,I", "HEMIE_age_band,D");
         let rows = crate::parser::CSVParser::new()
             .parse_csv(&band_d)
@@ -4839,9 +5040,8 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert_eq!(model["InfiltrationVentilation"]["PassiveDucts"], duct);
     }
 
-    #[test]
-    fn a_vaulted_ceiling_fails_naming_the_roof() {
-        let roof = vec![
+    fn vault() -> Vec<String> {
+        vec![
             plane(
                 "Vault S",
                 2,
@@ -4858,11 +5058,197 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
                 0.0,
                 false,
             ),
-        ];
+        ]
+    }
+
+    #[test]
+    fn a_vaulted_ceiling_with_no_slope_u_value_fails_naming_the_roof() {
+        let (_, errors, _) = run(&house(vault()));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].message, "Give roof 'Vault S' and the slopes with it a U-value: HEM:EPC has no default for a vaulted ceiling (heated slopes over a storey).");
+        assert!(errors[0].path.ends_with("/Vault S"));
+        // Slopes that state different U-values fail the same way.
+        let mut roof = vault();
+        roof[0].push_str(r#""{""u_value"":0.3}""#);
+        roof[1].push_str(r#""{""u_value"":0.2}""#);
         let (_, errors, _) = run(&house(roof));
         assert_eq!(errors.len(), 1, "{errors:#?}");
-        assert!(errors[0].message.contains("vaulted ceiling"));
-        assert!(errors[0].path.ends_with("/Vault S"));
+        assert_eq!(errors[0].message, "Give roof 'Vault S' and the slopes with it one U-value: HEM:EPC takes a vaulted ceiling (heated slopes over a storey) as one loft roof.");
+        // A roof part is named by its own name, which only its anchor slope carries.
+        let mut roof = vault();
+        roof[0].push_str(r#""{""hemie_bundle"":{""kind"":""roof"",""bundle_id"":""roof-1"",""role"":""slope:S"",""bundle_name"":""Roof 1""}}""#);
+        roof[1].push_str(r#""{""hemie_bundle"":{""kind"":""roof"",""bundle_id"":""roof-1"",""role"":""slope:N""}}""#);
+        let (_, errors, _) = run(&house(roof.clone()));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert_eq!(errors[0].message, "Give Roof 1's slopes a U-value: HEM:EPC has no default for a vaulted ceiling (heated slopes over a storey).");
+        // A hand-drawn slope beside the part's: named by the slope, not the part.
+        roof[1] = vault()[1].clone();
+        let (_, errors, _) = run(&house(roof));
+        assert_eq!(errors.len(), 1, "{errors:#?}");
+        assert!(
+            errors[0].message.starts_with("Give roof '"),
+            "{}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn a_vaulted_ceiling_with_one_slope_u_value_is_a_loft_roof_with_the_slopes_heat_loss() {
+        let roof: Vec<String> = vault()
+            .into_iter()
+            .map(|p| p + roof_tag("gable", "\"Steep\"").as_str())
+            .map(|p| p.replace("}}\"", "},\"\"u_value\"\":0.3}\""))
+            .collect();
+        let (model, errors, notices) = run(&house(roof));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let main = &model["Zone"]["building_parts"]["Main"];
+        let roof = &main["roof"];
+        assert_eq!(roof["roof_type"], "Unknown Pitched (Unheated)");
+        assert_eq!(roof["pitch_type"], "dual");
+        assert_eq!(roof["pitch"], "Steep");
+        assert!(roof.get("custom_pitch").is_none(), "{roof:#?}");
+        let key = roof["construction"].as_str().unwrap();
+        let c = &model["Zone"]["constructions"][key];
+        assert_eq!(c["construction_type"], "unheated_pitched_roof");
+        // 0.3 over 20 m² of slope at 40°, entered over 20 cos 40° m² of plan.
+        let u = c["u_value"].as_f64().unwrap();
+        assert!((u - 0.3 / 40f64.to_radians().cos()).abs() < 1e-9, "{u}");
+        assert!(
+            notices.iter().any(|n| n.message
+                == "Main: vaulted ceiling 'Vault S' entered as a loft roof with the slopes' heat loss (U 0.30 × slope area ÷ plan area = 0.392; interim). The heated volume under the slopes is not counted."),
+            "{notices:#?}"
+        );
+        // A construction resistance takes the U-value a roof would have.
+        let roof: Vec<String> = vault()
+            .into_iter()
+            .map(|p| p + r#""{""thermal_resistance_construction"":3}""#)
+            .collect();
+        let (model, errors, _) = run(&house(roof));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let key = model["Zone"]["building_parts"]["Main"]["roof"]["construction"]
+            .as_str()
+            .unwrap();
+        let u = model["Zone"]["constructions"][key]["u_value"]
+            .as_f64()
+            .unwrap();
+        let slope = 1.0 / (3.0 + 1.0 / 10.13 + 1.0 / 24.14);
+        assert!((u - slope / 40f64.to_radians().cos()).abs() < 1e-9, "{u}");
+    }
+
+    /// A roof-part member's tag, CSV-escaped extra_json; `choice` is a JSON value or empty.
+    fn roof_tag(shape: &str, choice: &str) -> String {
+        let choice = if choice.is_empty() {
+            String::new()
+        } else {
+            format!(r#","pitch_choice":{choice}"#)
+        };
+        let tag = format!(
+            r#"{{"hemie_bundle":{{"kind":"roof","bundle_id":"roof-1","role":"slope:W00","shape":"{shape}"{choice}}}}}"#
+        );
+        format!("\"{}\"", tag.replace('"', "\"\""))
+    }
+
+    fn tagged(planes: Vec<String>, shape: &str, choice: &str) -> Vec<String> {
+        planes
+            .into_iter()
+            .map(|p| p + roof_tag(shape, choice).as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_roof_part_sends_its_pitch_as_picked() {
+        let roof_of = |planes: Vec<String>| {
+            let (model, errors, notices) = run(&house(planes));
+            assert!(errors.is_empty(), "{errors:#?}");
+            let weighted = notices
+                .iter()
+                .any(|n| n.message.contains("the area-weighted mean"));
+            (
+                model["Zone"]["building_parts"]["Main"]["roof"].clone(),
+                weighted,
+            )
+        };
+        // A category goes as picked: the planes are drawn at its one angle.
+        let (roof, weighted) = roof_of(tagged(gable_roof(), "gable", "\"Steep\""));
+        assert_eq!(roof["pitch"], "Steep");
+        assert!(roof.get("custom_pitch").is_none() && !weighted, "{roof:#?}");
+        // Not picked: neither goes, and HEMIE applies its own.
+        let (roof, weighted) = roof_of(tagged(gable_roof(), "gable", ""));
+        assert!(roof.get("pitch").is_none() && roof.get("custom_pitch").is_none() && !weighted);
+        // A typed angle is a custom pitch.
+        let (roof, _) = roof_of(tagged(gable_roof(), "gable", "40"));
+        assert_eq!(roof["pitch"], "Custom");
+        assert_eq!(roof["custom_pitch"], 40.0);
+        // Planes that do not all share one roof part's choice: the area-weighted mean.
+        let mut mixed = tagged(gable_roof(), "gable", "\"Steep\"");
+        mixed[1] = mixed[1].replace("Steep", "Moderate");
+        let (roof, weighted) = roof_of(mixed);
+        assert_eq!(roof["pitch"], "Custom");
+        assert!(weighted);
+        let mut part_untagged = tagged(gable_roof(), "gable", "\"Steep\"");
+        part_untagged[1] = gable_roof()[1].clone();
+        let (roof, _) = roof_of(part_untagged);
+        assert_eq!(roof["pitch"], "Custom");
+    }
+
+    #[test]
+    fn a_mansard_or_gambrel_roof_is_dual_at_the_mean_pitch_with_a_notice() {
+        let hips = vec![
+            plane(
+                "M S",
+                2,
+                &[[0.0, 0.0], [8.0, 0.0], [5.0, 3.0], [3.0, 3.0]],
+                60.0,
+                180.0,
+                true,
+            ),
+            plane(
+                "M E",
+                2,
+                &[[8.0, 0.0], [8.0, 6.0], [5.0, 3.0]],
+                30.0,
+                90.0,
+                true,
+            ),
+            plane(
+                "M N",
+                2,
+                &[[8.0, 6.0], [0.0, 6.0], [3.0, 3.0], [5.0, 3.0]],
+                60.0,
+                0.0,
+                true,
+            ),
+            plane(
+                "M W",
+                2,
+                &[[0.0, 6.0], [0.0, 0.0], [3.0, 3.0]],
+                30.0,
+                270.0,
+                true,
+            ),
+        ];
+        let (model, errors, notices) = run(&house(tagged(hips, "mansard", "\"Steep\"")));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let roof = &model["Zone"]["building_parts"]["Main"]["roof"];
+        assert_eq!(roof["pitch_type"], "dual");
+        assert_eq!(roof["pitch"], "Custom");
+        assert_eq!(roof["custom_pitch"], 45.0);
+        let messages: Vec<&str> = notices.iter().map(|n| n.message.as_str()).collect();
+        assert!(messages.contains(&"Main: mansard roof converted to dual pitch at the area-weighted mean pitch (approximation)."), "{messages:#?}");
+        assert!(
+            !messages.iter().any(|m| m.contains("hipped")),
+            "{messages:#?}"
+        );
+        assert!(messages
+            .iter()
+            .any(|m| m.starts_with("Main: roof pitch 45.0°, the area-weighted mean")));
+        let (model, errors, notices) = run(&house(tagged(gable_roof(), "gambrel", "")));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert_eq!(
+            model["Zone"]["building_parts"]["Main"]["roof"]["pitch"],
+            "Custom"
+        );
+        assert!(notices.iter().any(|n| n.message == "Main: gambrel roof converted to dual pitch at the area-weighted mean pitch (approximation)."));
     }
 
     #[test]
@@ -4900,10 +5286,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             let (model, errors, notices) = run(&text);
             assert!(errors.is_empty(), "{postcode}: {errors:#?}");
             assert_eq!(model["Zone"]["region"], region, "{postcode}");
+            // The Postcode field shows the region: no notice repeats it.
             assert!(
-                notices.iter().any(|n| n
-                    .message
-                    .contains(&format!("Region {region}, from the postcode"))),
+                !notices.iter().any(|n| n.message.contains("Region ")),
                 "{postcode}: {notices:#?}"
             );
         }
@@ -4914,12 +5299,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert_eq!(errors[0].path, "/Metadata/HEMIE_nation");
         assert!(errors[0].message.contains("CH spans two nations"));
         let stated = border.replace("Postcode,", "HEMIE_nation,Wales\nPostcode,");
-        let (model, errors, notices) = run(&stated);
+        let (model, errors, _) = run(&stated);
         assert!(errors.is_empty(), "{errors:#?}");
         assert_eq!(model["Zone"]["region"], "Wales");
-        assert!(notices.iter().any(|n| n
-            .message
-            .contains("Region Wales, as stated for postcode area CH")));
         // A retired row fails loudly, naming the row and the fix.
         for (field, fix) in [
             ("HEMIE_region", "postcode"),
@@ -5014,6 +5396,23 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
     }
 
     #[test]
+    fn a_room_in_the_roofs_slopes_with_no_heat_capacity_take_hemies_fallback() {
+        let mut exposed = heated_roof();
+        exposed.push(gable("G W", [0.0, 0.0], [0.0, 6.0]));
+        exposed.push(gable("G E", [8.0, 0.0], [8.0, 6.0]));
+        let (model, errors, _) = run(&house(exposed));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let slopes: Vec<&Value> = model["Zone"]["constructions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|c| c["construction_type"] == "heated_pitched_roof")
+            .map(|c| &c["areal_heat_capacity"])
+            .collect();
+        assert_eq!(slopes, [&json!(50_000.0)]);
+    }
+
+    #[test]
     fn a_heat_capacity_band_takes_its_construction_types_value() {
         let band = |b: &str| format!("\"{{\"\"areal_heat_capacity\"\":\"\"{b}\"\"}}\"");
         let capacity = |model: &Value, construction_type: &str| -> Vec<Value> {
@@ -5053,17 +5452,31 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             capacity(&model, "not_edge_insulated_ground_attached_floor"),
             [json!(275_000.0)]
         );
-        // A roof's stated heat capacity is set aside, reported, and need not agree; a number
-        // typed as text is read.
+        // A roof's stated heat capacity is set aside and need not agree; a number typed as text
+        // is read. The editor does not offer the roof's field, so only a value from a build-up
+        // (the assembly calculator writes one) is said to be set aside, on that roof.
         let typed = floor.replace("Medium", "300000");
         let mut roofs = roof("Light");
-        roofs[1] = roofs[1].replace("Light", "Heavy");
+        roofs[1] = roofs[1].replace(
+            "\"\"Light\"\"",
+            "\"\"Heavy\"\",\"\"vulcan_assembly_v1\"\":{}",
+        );
         let (model, errors, notices) = run(&csv(SETTINGS, &[exposed, roofs].concat(), &typed));
         assert!(errors.is_empty(), "{errors:#?}");
         assert_eq!(capacity(&model, "unheated_pitched_roof"), [Value::Null]);
-        assert!(notices
+        let set_aside: Vec<(&str, &str)> = notices
             .iter()
-            .any(|n| n.message.contains("is not used: 'Roof N', 'Roof S'")));
+            .filter(|n| n.code != TARGET_EVIDENCE && n.path.ends_with("/areal_heat_capacity"))
+            .map(|n| (n.path.as_str(), n.message.as_str()))
+            .collect();
+        assert_eq!(
+            set_aside,
+            [(
+                "/Zone/Z/BuildingElement/Roof N/areal_heat_capacity",
+                "The existing-building EPC takes this element's heat capacity from its construction type, not from its build-up."
+            )],
+            "{notices:#?}"
+        );
         assert!(notices
             .iter()
             .any(|n| n.message.contains("as text, \"300000\"")));
@@ -5133,9 +5546,10 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         assert!(notices.iter().any(|n| n
             .message
             .contains("'W00' (300 mm, R 4.83 m²K/W, insulated: PIR)")));
-        assert!(!notices
-            .iter()
-            .any(|n| n.message.contains("documented U-value")));
+        assert!(evidence(&notices).contains(&(
+            "/Zone/Z/BuildingElement/W00/vulcan_assembly_v1".into(),
+            "'W00' takes its U-value from its build-up. Enter it only if documented: keep the document.".into()
+        )));
         // A build-up with a layer of no thickness stops, naming the wall.
         let broken = exposed[0].replace("thickness_m\"\":0.1}", "kind\"\":\"\"solid\"\"}");
         assert_ne!(broken, exposed[0]);
@@ -5180,11 +5594,112 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             constructions["party_wall"],
             json!({"construction_type": "party_wall", "party_wall_type": "unfilled_cavity", "cavity_seal_type": "unsealed", "party_wall_lining_type": "wet_plaster", "mass_distribution_class": "D: Mass equally distributed"})
         );
-        assert!(notices.iter().any(|n| n.message.contains("'W00' (U 0.45)")));
+        // Each value an element states is entered only if documented: a notice on its field.
+        let w00 = |field: &str, message: &str| {
+            (
+                format!("/Zone/Z/BuildingElement/W00/{field}"),
+                format!(
+                    "'W00' states its {message}. Enter it only if documented: keep the document."
+                ),
+            )
+        };
+        let found = evidence(&notices);
+        for expected in [
+            w00("u_value", "U-value: 0.45"),
+            w00("mass_distribution_class", "mass distribution class: IE"),
+            w00("solar_absorption_coeff", "solar absorption: 0.4"),
+            (
+                "/Zone/Z/BuildingElement/PW/mass_distribution_class".into(),
+                "'PW' states its mass distribution class: D. Enter it only if documented: keep the document."
+                    .into(),
+            ),
+        ] {
+            assert!(found.contains(&expected), "{expected:?} in {found:#?}");
+        }
     }
 
     #[test]
-    fn the_u_value_note_quotes_each_shared_construction_and_separates_them() {
+    fn evidence_is_listed_while_the_model_still_has_errors() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed[0] = exposed[0].replace(
+            "\",",
+            "\",\"{\"\"u_value\"\":0.45,\"\"colour\"\":\"\"Purple\"\"}\"",
+        );
+        exposed.extend(gable_roof());
+        let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("colour \"Purple\"")),
+            "{errors:#?}"
+        );
+        assert!(
+            evidence(&notices)
+                .iter()
+                .any(|(path, _)| path == "/Zone/Z/BuildingElement/W00/u_value"),
+            "{notices:#?}"
+        );
+    }
+
+    #[test]
+    fn one_roof_plane_stating_a_u_value_and_one_not_is_an_error_not_a_claim() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        let i = exposed
+            .iter()
+            .position(|w| w.starts_with("Roof S"))
+            .expect("Roof S");
+        exposed[i] = exposed[i].replace("\",", "\",\"{\"\"u_value\"\":0.3}\"");
+        let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(
+            errors.iter().any(|e| e
+                .message
+                .contains("U-values or resistances differ (U 0.3, the model's)")),
+            "{errors:#?}"
+        );
+        assert!(
+            !evidence(&notices)
+                .iter()
+                .any(|(path, _)| path.contains("Roof N")),
+            "{notices:#?}"
+        );
+    }
+
+    #[test]
+    fn one_roof_plane_stating_a_resistance_and_one_not_is_an_error() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.extend(gable_roof());
+        let i = exposed
+            .iter()
+            .position(|w| w.starts_with("Roof S"))
+            .expect("Roof S");
+        exposed[i] =
+            exposed[i].replace("\",", "\",\"{\"\"thermal_resistance_construction\"\":3}\"");
+        let (_, errors, _) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
+        assert!(
+            errors.iter().any(|e| e
+                .message
+                .contains("U-values or resistances differ (R 3, the model's)")),
+            "{errors:#?}"
+        );
+    }
+
+    /// The lodgement-evidence notices, as (path, message). Each carries its stated value as its
+    /// label, which the message ends with the instruction after.
+    fn evidence(notices: &[SchemaOmission]) -> Vec<(String, String)> {
+        notices
+            .iter()
+            .filter(|n| n.code == TARGET_EVIDENCE)
+            .map(|n| {
+                let label = n.label.as_deref().expect("an evidence notice has a label");
+                assert_eq!(n.message, format!("{label}. {EVIDENCE_INSTRUCTION}"));
+                (n.path.clone(), n.message.clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_element_of_a_shared_construction_needs_its_own_evidence() {
         let mut exposed = box_walls(&BOX, &[0, 1]);
         exposed.extend(gable_roof());
         for w in exposed
@@ -5195,15 +5710,217 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         }
         let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &ground(&BOX)));
         assert!(errors.is_empty(), "{errors:#?}");
-        let note = notices
-            .iter()
-            .find(|n| n.message.contains("state their own U-value"))
-            .unwrap_or_else(|| panic!("{notices:#?}"));
+        let paths: Vec<String> = evidence_under(&notices, "/Zone/")
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "/Zone/Z/BuildingElement/Roof N/u_value",
+                "/Zone/Z/BuildingElement/Roof S/u_value",
+                "/Zone/Z/BuildingElement/W00/u_value"
+            ]
+        );
+    }
+
+    /// The lodgement-evidence notices whose path starts with `prefix`.
+    fn evidence_under(notices: &[SchemaOmission], prefix: &str) -> Vec<(String, String)> {
+        evidence(notices)
+            .into_iter()
+            .filter(|(path, _)| path.starts_with(prefix))
+            .collect()
+    }
+
+    #[test]
+    fn a_stated_air_test_needs_evidence_once_for_its_result_and_pressure() {
+        let (_, _, notices) = run(&house(gable_roof()));
+        assert_eq!(
+            evidence_under(&notices, "/InfiltrationVentilation"),
+            [(
+                "/InfiltrationVentilation/Leaks/test_result".into(),
+                "The air test states its result: 5 m³/(h·m²) at Standard pressure. Enter it only if documented: keep the document.".into()
+            )]
+        );
+        // No air test: HEMIE estimates the leakage, and a lone pressure is not read.
+        let mut model = full_input();
+        model["InfiltrationVentilation"]["Leaks"] =
+            json!({"test_pressure": "Pulse", "env_area": 200, "ventilation_zone_height": 5.6});
+        let (_, _, notices) = run_on(&house(gable_roof()), model);
         assert!(
-            note.message
-                .ends_with(": 'Roof S', 'Roof N' (U 0.3); 'W00' (U 0.3)."),
-            "{}",
-            note.message
+            evidence_under(&notices, "/InfiltrationVentilation").is_empty(),
+            "{notices:#?}"
+        );
+    }
+
+    #[test]
+    fn stated_slab_edge_insulation_needs_evidence_and_the_standard_one_does_not() {
+        let edge = |extra: &str| {
+            ground(&BOX)
+                .replace("floor_type,coords", "floor_type,coords,extra_json")
+                .replace("Slab_no_edge_insulation", "Slab_edge_insulation")
+                .replace("|0,6,0\"", &format!("|0,6,0\",{extra}"))
+        };
+        let exposed = [box_walls(&BOX, &[0, 1]), gable_roof()].concat();
+        let stated = r#""{""edge_insulation"":[{""type"":""vertical"",""depth"":0.5,""edge_thermal_resistance"":1.2},{""type"":""horizontal"",""width"":1,""edge_thermal_resistance"":1}]}""#;
+        let (_, _, notices) = run(&csv(SETTINGS, &exposed, &edge(stated)));
+        assert_eq!(
+            evidence_under(&notices, "/Zone/Z/BuildingElement/Floor"),
+            [(
+                "/Zone/Z/BuildingElement/Floor/edge_insulation".into(),
+                "'Floor' states its edge insulation: vertical, horizontal. Enter it only if documented: keep the document.".into()
+            )]
+        );
+        // Present with no details: the standard configuration, a default.
+        let (_, _, notices) = run(&csv(SETTINGS, &exposed, &edge("")));
+        assert!(
+            evidence_under(&notices, "/Zone/Z/BuildingElement/Floor").is_empty(),
+            "{notices:#?}"
+        );
+    }
+
+    #[test]
+    fn a_pvs_stated_peak_power_and_inverter_need_evidence() {
+        let mut model = full_input();
+        model["OnSiteGeneration"] = json!({
+            "PV 1": {"type": "PhotovoltaicSystem", "EnergySupply": "mains elec", "inverter_type": "optimised_inverter", "inverter_is_inside": false,
+                "inverter_peak_power_dc": 2.0, "inverter_peak_power_ac": 1.4, "panels": [{"mounting_type": "integrated", "peak_power": 2.5, "orientation360": 180, "base_height": 5}]},
+            "PV 2": {"type": "PhotovoltaicSystem", "EnergySupply": "mains elec",
+                "panels": [{"mounting_type": "integrated", "panel_count": 10, "orientation360": 90, "base_height": 5}]},
+            "PV 3": {"type": "PhotovoltaicSystem", "EnergySupply": "mains elec", "inverter_is_inside": false,
+                "panels": [{"mounting_type": "integrated", "orientation360": 90, "base_height": 5}]}
+        });
+        let (_, _, notices) = run_on(&house(gable_roof()), model);
+        // The inverter's location is an observation, and PV 3's string inverter the default.
+        assert_eq!(
+            evidence_under(&notices, "/OnSiteGeneration"),
+            [
+                (
+                    "/OnSiteGeneration/PV 1/inverter_peak_power_ac".into(),
+                    "'PV 1' states its inverter AC peak power: 1.4 kW. Enter it only if documented: keep the document.".into()
+                ),
+                (
+                    "/OnSiteGeneration/PV 1/inverter_peak_power_dc".into(),
+                    "'PV 1' states its inverter DC peak power: 2 kW. Enter it only if documented: keep the document.".into()
+                ),
+                (
+                    "/OnSiteGeneration/PV 1/inverter_type".into(),
+                    "'PV 1' states its inverter: optimised inverter. Enter it only if documented: keep the document.".into()
+                ),
+                (
+                    "/OnSiteGeneration/PV 1/panels/0/peak_power".into(),
+                    "'PV 1' states its peak power: 2.5 kWp. Enter it only if documented: keep the document.".into()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_batterys_stated_details_need_evidence_and_blank_or_default_ones_do_not() {
+        // Battery 3 states the defaults: age 5, grid charging yes, no export.
+        let systems = r#"Systems
+Name,Zone,Type,system_type,coords,extra_json
+Battery 1,Z,ElectricBattery,ElectricBattery,"0,0,0","{""EnergySupply"":""mains elec"",""battery_age"":3,""battery_location"":""inside"",""grid_charging_possible"":false,""grid_exporting_possible"":"""",""power_limit_battery_import"":7.2}"
+Battery 2,Z,ElectricBattery,ElectricBattery,"0,0,0","{""EnergySupply"":""second elec"",""grid_exporting_possible"":true}"
+Battery 3,Z,ElectricBattery,ElectricBattery,"0,0,0","{""EnergySupply"":""third elec"",""battery_age"":5,""grid_charging_possible"":true,""grid_exporting_possible"":false}""#;
+        let exposed = [box_walls(&BOX, &[0, 1]), gable_roof()].concat();
+        let (_, _, notices) = run(&csv(
+            SETTINGS,
+            &exposed,
+            &format!("{}\n\n{systems}", ground(&BOX)),
+        ));
+        // The location and import limit are observations: no document.
+        assert_eq!(
+            evidence_under(&notices, "/EnergySupply"),
+            [
+                (
+                    "/EnergySupply/mains elec/ElectricBattery/battery_age".into(),
+                    "'Battery 1' states its battery age: 3 years. Enter it only if documented: keep the document.".into()
+                ),
+                (
+                    "/EnergySupply/mains elec/ElectricBattery/grid_charging_possible".into(),
+                    "'Battery 1' states its grid charging: no. Enter it only if documented: keep the document.".into()
+                ),
+                (
+                    "/EnergySupply/second elec/ElectricBattery/grid_exporting_possible".into(),
+                    "'Battery 2' states its grid export: yes. Enter it only if documented: keep the document.".into()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn stated_retrofit_insulation_a_filled_party_cavity_and_thatch_insulation_are_evidence() {
+        let mut exposed = box_walls(&BOX, &[0, 1]);
+        exposed.retain(|w| !w.starts_with("W01,"));
+        for w in exposed.iter_mut() {
+            // The default (no retrofit) is not evidence.
+            let retrofit = match w.split(',').next() {
+                Some("W00") => "true",
+                Some("W02") => "false",
+                _ => continue,
+            };
+            *w = w.replace(
+                "\",",
+                &format!("\",\"{{\"\"retrofit_insulation\"\":{retrofit}}}\""),
+            );
+        }
+        exposed.push(
+            "PW,Z,BuildingElementPartyWall,1,90,1,2.8,0,0,FALSE,FALSE,,\"8,0,0|8,6,0\",\"{\"\"party_wall_cavity_type\"\":\"\"filled_sealed\"\"}\"".into(),
+        );
+        exposed.extend(
+            gable_roof().into_iter().map(|r| {
+                format!("{r}\"{{\"\"thatched\"\":true,\"\"insulation_thickness\"\":150}}\"")
+            }),
+        );
+        let floor = ground(&BOX).replace(
+            "Name,Zone,Type,area,floor_type,coords\nFloor,Z,BuildingElementGround,48,Slab_no_edge_insulation,\"0,0,0|8,0,0|8,6,0|0,6,0\"",
+            "Name,Zone,Type,area,floor_type,coords,extra_json\nFloor,Z,BuildingElementGround,48,Slab_no_edge_insulation,\"0,0,0|8,0,0|8,6,0|0,6,0\",\"{\"\"insulation_type\"\":\"\"retrofitted\"\",\"\"insulation_thickness\"\":100,\"\"insulation_thermal_conductivity\"\":0.022}\"",
+        );
+        let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &floor));
+        assert!(errors.is_empty(), "{errors:#?}");
+        let found = evidence(&notices);
+        let at = |element: &str, field: &str, message: &str| {
+            (
+                format!("/Zone/Z/BuildingElement/{element}/{field}"),
+                format!("'{element}' states its {message}. {EVIDENCE_INSTRUCTION}"),
+            )
+        };
+        for expected in [
+            at("W00", "retrofit_insulation", "retrofit insulation: yes"),
+            at("PW", "party_wall_cavity_type", "party wall cavity: filled"),
+            at(
+                "Roof S",
+                "insulation_thickness",
+                "insulation thickness: 150 mm",
+            ),
+            at(
+                "Floor",
+                "insulation_thickness",
+                "insulation thickness: 100 mm",
+            ),
+            at("Floor", "insulation_type", "insulation type: retrofitted"),
+            at(
+                "Floor",
+                "insulation_thermal_conductivity",
+                "insulation conductivity: 0.022 W/m.K",
+            ),
+        ] {
+            assert!(found.contains(&expected), "{expected:?} in {found:#?}");
+        }
+        assert!(
+            !found.iter().any(|(path, _)| path.contains("/W02/")),
+            "{found:#?}"
+        );
+        // A floor insulated as built states the default type: no notice for it.
+        let as_built = floor.replace("retrofitted", "as built");
+        let (_, errors, notices) = run(&csv(SETTINGS, &exposed, &as_built));
+        assert!(errors.is_empty(), "{errors:#?}");
+        assert!(
+            !evidence(&notices)
+                .iter()
+                .any(|(path, _)| path.ends_with("/Floor/insulation_type")),
+            "{notices:#?}"
         );
     }
 
@@ -5218,9 +5935,7 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
         let (_, errors, notices) = run(&csv(&settings, &exposed, &ground(&BOX)));
         assert!(errors.is_empty(), "{errors:#?}");
         assert!(
-            !notices
-                .iter()
-                .any(|n| n.message.contains("Lodgement needs evidence")),
+            evidence_under(&notices, "/Zone/").is_empty(),
             "{notices:#?}"
         );
     }
@@ -5315,12 +6030,19 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             (&c["g_value"], &c["frame_area_fraction"]),
             (&json!(0.63), &json!(0.2))
         );
-        assert!(
-            notices.iter().any(|n| n
-                .message
-                .contains("W1 (g-value 0.63, frame area fraction 0.2)")),
-            "{notices:#?}"
-        );
+        let found = evidence(&notices);
+        for (field, message) in [
+            ("g_value", "g-value: 0.63"),
+            ("frame_area_fraction", "frame area fraction: 0.2"),
+        ] {
+            let expected = (
+                format!("/Zone/Z/BuildingElement/W1/{field}"),
+                format!(
+                    "'W1' states its {message}. Enter it only if documented: keep the document."
+                ),
+            );
+            assert!(found.contains(&expected), "{expected:?} in {found:#?}");
+        }
     }
 
     #[test]
@@ -5586,11 +6308,9 @@ HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}""#;
             (json!("Thatched Pitched (Unheated)"), json!("thatched_roof"))
         );
         assert!(
-            notices
-                .iter()
-                .any(|n| n.message.contains("state their own thermal mass")
-                    && n.message
-                        .contains("'Roof S', 'Roof N' (mass distribution class I")),
+            notices.iter().any(|n| n.code == TARGET_EVIDENCE
+                && n.message
+                    == "'Roof S' states its mass distribution class: I. Enter it only if documented: keep the document."),
             "{notices:#?}"
         );
     }

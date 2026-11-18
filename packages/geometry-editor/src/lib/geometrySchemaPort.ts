@@ -23,6 +23,7 @@ export const canonicalGeometrySchemaPort = Object.freeze<GeometrySchemaPort>({
   preload: (mode) => usesFhsSchema(mode)
     ? schemaCache.preloadFHSSchema()
     : schemaCache.preloadSchema(),
+  loadFailed: (mode) => schemaCache.schemaLoadFailed(usesFhsSchema(mode)),
   getRootSchema: (mode) =>
     schemaCache.getSchemaObjectForMode(usesFhsSchema(mode)) as GeometrySchemaNode | null,
   getElementSubschema: (mode, elementType, subtype) =>

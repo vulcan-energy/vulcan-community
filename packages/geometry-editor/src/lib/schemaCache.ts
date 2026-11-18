@@ -116,6 +116,12 @@ function schemaStringArray(value: unknown): string[] {
 }
 
 // FHS schema cache (separate from Core schema)
+/** The last load of each schema failed (core, FHS); a successful load or a new asset source clears it. */
+const schemaLoadFailures = { core: false, fhs: false };
+/** Whether the selected schema's last load failed, so its editors say so instead of showing nothing. */
+export function schemaLoadFailed(useFHSSchema: boolean): boolean {
+  return schemaLoadFailures[useFHSSchema ? 'fhs' : 'core'];
+}
 let fhsSchemaText: string | null = null;
 let fhsSchemaObj: SchemaNode | null = null;
 let preloadFhsSchemaPromise: Promise<void> | null = null;
@@ -137,12 +143,15 @@ export async function preloadSchema(): Promise<void> {
         // Reset schema-derived node caches for core schema
         compiledPropValidatorCore = new WeakMap();
         normalizedSystemSubtypeNodesCore = new WeakMap();
+        schemaLoadFailures.core = false;
         publishSchemaChange();
       }).catch((e) => {
         if (generation !== schemaAssetGeneration) return;
         schemaText = null;
         schemaObj = null;
         console.error('[SchemaCache] Core schema load failed', e);
+        schemaLoadFailures.core = true;
+        publishSchemaChange();
         throw e;
       }).finally(() => {
       if (generation === schemaAssetGeneration) preloadCoreSchemaPromise = null;
@@ -194,6 +203,13 @@ export function getApplianceKeysForMode(useFHSSchema: boolean): string[] {
 export function applianceRequiresEnergySupply(root: unknown, applianceKey: string): boolean {
   const entry = rootAppliancesSchema(root)?.properties?.[applianceKey];
   return isRecord(entry) && Array.isArray(entry.required) && entry.required.includes('EnergySupply');
+}
+
+/** Appliances the target's schema requires by name, each with its energy supply (HEM:EPC's oven and hob). */
+export function requiredSuppliedApplianceKeys(root: unknown): string[] {
+  const required = rootAppliancesSchema(root)?.required;
+  return (Array.isArray(required) ? required : [])
+    .filter((key): key is string => typeof key === 'string' && applianceRequiresEnergySupply(root, key));
 }
 
 /**
@@ -287,12 +303,15 @@ export async function preloadFHSSchema(): Promise<void> {
         strictestIntegerKeysCache.clear();
         compiledPropValidatorFhs = new WeakMap();
         normalizedSystemSubtypeNodesFhs = new WeakMap();
+        schemaLoadFailures.fhs = false;
         publishSchemaChange();
       }).catch((e: unknown) => {
         if (generation !== schemaAssetGeneration) return;
         fhsSchemaText = null;
         fhsSchemaObj = null;
         console.error('[SchemaCache] FHS schema load failed:', errorMessageFromUnknown(e));
+        schemaLoadFailures.fhs = true;
+        publishSchemaChange();
         throw e;
       }).finally(() => { if (generation === schemaAssetGeneration) preloadFhsSchemaPromise = null; });
   }
@@ -339,6 +358,7 @@ export function __setFHSSchemaObjectForTests(obj: SchemaNode | null): void {
   normalizedSystemSubtypeNodesFhs = new WeakMap();
 }
 export function __resetFHSSchemaCacheForTests(): void {
+  schemaLoadFailures.fhs = false;
   fhsSchemaText = null;
   fhsSchemaObj = null;
   preloadFhsSchemaPromise = null;
@@ -1302,6 +1322,7 @@ export function __setSchemaObjectForTests(obj: SchemaNode | null): void {
   normalizedSystemSubtypeNodesCore = new WeakMap();
 }
 export function __resetSchemaCacheForTests(): void {
+  schemaLoadFailures.core = false;
   schemaText = null;
   schemaObj = null;
   preloadCoreSchemaPromise = null;
@@ -1447,6 +1468,21 @@ function resolveCoreElementSubschemaFromRoot(schema: SchemaNode | null, elementT
     // root-level sections rather than $defs entries.
     if (!baseSchema && schema.properties && schema.properties[schemaKey]) {
       baseSchema = schema.properties[schemaKey];
+    }
+    // HEM:EPC names each appliance under the root `Appliances` (the oven and hob take an energy
+    // supply). A row is one named appliance; with no key chosen it states nothing yet.
+    if (!baseSchema && elementType === 'Appliance') {
+      const appliances = rootAppliancesSchema(schema);
+      if (appliances) {
+        const entry = subtype ? appliances.properties?.[subtype] : undefined;
+        const named = entry ? dereferenceSchemaNodeInRoot(entry, schema) as SchemaNode : undefined;
+        return {
+          type: 'object',
+          properties: named?.properties ?? {},
+          required: Array.isArray(named?.required) ? named.required : [],
+          $defs: schema.$defs,
+        };
+      }
     }
     // HEM:EPC declares the battery only on the electricity supply.
     if (!baseSchema && elementType === 'ElectricBattery') {
@@ -1912,7 +1948,8 @@ export function getBaseFieldsForElementType(elementType: string): string[] {
       'subcategory', 'unit_number', 'parent_element', 'wet_emitter_type'
     ],
     'Appliance': [
-      'appliancekey', 'parent_element'
+      // The appliance form asks for the energy supply where the target takes one.
+      'appliancekey', 'parent_element', 'EnergySupply'
     ],
     'HotWaterDemand': [
       'subcategory', 'size', 'flowrate', 'rated_power', 'parent_element',

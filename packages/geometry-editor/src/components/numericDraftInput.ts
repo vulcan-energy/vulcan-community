@@ -6,6 +6,9 @@ import type { ChangeEvent, FocusEvent, InputHTMLAttributes } from 'react';
 
 export type NumericDraftValue = number | '';
 
+/** What committed the value: a keystroke (`commitOnChange`), or the finished edit (blur or Enter). */
+export type NumericDraftCommitTrigger = 'change' | 'commit';
+
 type NumericDraftExternalValue = number | string | '' | null | undefined;
 
 type NumericDraftBlurFormat = 'fixed2' | 'preserve' | 'number';
@@ -83,7 +86,7 @@ function formatBlurredInput(rawValue: string, parsed: NumericDraftValue, format:
 
 export function useNumericDraftInput(
   externalValue: NumericDraftExternalValue = '',
-  onCommit?: (value: NumericDraftValue) => void,
+  onCommit?: (value: NumericDraftValue, trigger: NumericDraftCommitTrigger) => void,
   options?: NumericDraftOptions,
 ) {
   const integer = options?.integer ?? false;
@@ -129,7 +132,7 @@ export function useNumericDraftInput(
     const parsed = parseCompleteNumericDraft(rawValue, { integer });
     if (parsed === null) return;
     setValueState(parsed);
-    onCommit?.(parsed);
+    onCommit?.(parsed, 'change');
   }, [commitOnChange, integer, onCommit]);
 
   const commitRawValue = useCallback((rawValue: string) => {
@@ -145,7 +148,7 @@ export function useNumericDraftInput(
 
     setValueState(parsed);
     setInputValue(formatBlurredInput(rawValue, parsed, formatOnBlur));
-    onCommit?.(parsed);
+    onCommit?.(parsed, 'commit');
   }, [currentInputValue, currentValue, formatOnBlur, integer, isEditing, onCommit]);
 
   const handleBlur = useCallback((e?: FocusEvent<HTMLInputElement>) => {

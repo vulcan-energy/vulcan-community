@@ -38,14 +38,17 @@ const EXTRA_KEYS: readonly string[] = [
 
 const stated = (value: unknown) => value !== undefined && value !== null && value !== '';
 
-/** The values a window carries to the next one of its kind; null when it states none. */
-export function openingCarry(element: Element | undefined): Partial<Element> | null {
+/**
+ * The values a window carries to the next one of its kind; null when it states none. `hostKeys`:
+ * the host's own extra_json keys that carry too (`openingFields.carryKeys`).
+ */
+export function openingCarry(element: Element | undefined, hostKeys: readonly string[] = []): Partial<Element> | null {
   const kind = openingKind(element);
   if (!kind || !element) return null;
   const record = element as unknown as Record<string, unknown>;
   const extra = (element.extra_json ?? {}) as Record<string, unknown>;
   const top = Object.fromEntries(TOP_KEYS[kind].flatMap((key) => (stated(record[key]) ? [[key, record[key]]] : [])));
-  const carriedExtra = Object.fromEntries(EXTRA_KEYS.flatMap((key) => (stated(extra[key]) ? [[key, structuredClone(extra[key])]] : [])));
+  const carriedExtra = Object.fromEntries([...EXTRA_KEYS, ...hostKeys].flatMap((key) => (stated(extra[key]) ? [[key, structuredClone(extra[key])]] : [])));
   // Security risk follows the storey unless the assessor changed it: only a stated one carries,
   // and it carries as stated, so the new window's storey does not reset it.
   const riskFlag = (element as { _windowSecurityRiskUserOverride?: boolean })._windowSecurityRiskUserOverride;

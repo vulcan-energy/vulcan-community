@@ -57,7 +57,7 @@ import type { GeometryStoreApi } from '../../stores/geometryStore';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { ResetFieldButton } from '../ResetFieldButton';
-import { DerivedSource, SourceNote } from '../FieldSource';
+import { DerivedSource, Readout, SourceNote } from '../FieldSource';
 import { WallShapeRows, type WallShapeCommit } from '../WallShapeRows';
 import {
   decimalInputProps,
@@ -354,6 +354,8 @@ export function useWallFamilyFormState({
       </div>
     ) : null;
 
+  // With an outline the width is the drawn line's (the outline sets the area), so it reads as text.
+  const widthReadout = selectedWallFace ? <Readout value={wallShared.widthInput.value} unit="m" label="Width" /> : null;
   // A sloped surface's width and height come from its drawn shape until typed over (authored markers).
   const slopedSource = (dimension: 'width' | 'height') => {
     if (!selectedSlopedDimensions) return undefined;
@@ -420,9 +422,9 @@ export function useWallFamilyFormState({
       return (
         <>
           <div data-window-size-row style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-            {cell('width', renderFieldLabel('Width (m):', elementType, 'width', slopedSource('width')), <>
-              <StandardInput {...decimalInputProps(wallShared.widthInput)} unit={fieldUnit('width')} step={options.widthStep} min="0"
-                variant="ghost" size="md" className="flex-1" aria-label="Width" />
+            {cell('width', renderFieldLabel('Width (m):', elementType, 'width', selectedWallFace ? <SourceNote>from the drawing</SourceNote> : slopedSource('width')), <>
+              {widthReadout ?? <StandardInput {...decimalInputProps(wallShared.widthInput)} unit={fieldUnit('width')} step={options.widthStep} min="0"
+                variant="ghost" size="md" className="flex-1" aria-label="Width" />}
               <FieldValidationIndicator hasIssue={!!widthValidation} issue={widthValidation?.message} variant={widthValidation?.variant} />
             </>)}
             {cell('height', renderFieldLabel('Height (m):', elementType, 'height', heightSource), <>
@@ -457,13 +459,13 @@ export function useWallFamilyFormState({
     );
     return (
       <>
-        {renderFieldLabel('Width (m):', elementType, 'width', slopedSource('width'))}
+        {renderFieldLabel('Width (m):', elementType, 'width', selectedWallFace ? <SourceNote>from the drawing</SourceNote> : slopedSource('width'))}
         <div
           className="element-input"
           style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           ref={fieldRef('width')}
         >
-          <StandardInput
+          {widthReadout ?? <StandardInput
             {...decimalInputProps(wallShared.widthInput)}
             unit={fieldUnit('width')}
             step={options.widthStep}
@@ -471,7 +473,8 @@ export function useWallFamilyFormState({
             variant="ghost"
             size="md"
             className={selectedSlopedDimensions && !showSlopedWidthReset ? 'flex-1 field-value--source' : 'flex-1'}
-          />
+            aria-label="Width"
+          />}
           <FieldValidationIndicator
             hasIssue={!!widthValidation}
             issue={widthValidation?.message}

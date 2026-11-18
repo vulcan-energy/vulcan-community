@@ -21,7 +21,8 @@ export type DrawMode =
   | 'sloped-polygon'
   | 'dormer'
   | 'bay'
-  | 'conservatory';
+  | 'conservatory'
+  | 'roof';
 
 export type OrthogonalRoomEditingState = {
   isOpen: boolean;

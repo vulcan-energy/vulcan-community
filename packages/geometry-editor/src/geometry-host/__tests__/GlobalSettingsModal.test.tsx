@@ -126,7 +126,7 @@ const EPC_ROWS = ["IsExistingBuilding", "PartGcompliance", "HasElectricitySmartM
 let epcIssues: string[] = [];
 /** The issues Global Settings reports for the model (its tab and the Global Settings button show them). */
 const issues = (pattern: RegExp) => epcIssues.filter((issue) => pattern.test(issue));
-function renderEpc(store: ReturnType<typeof createGeometryStore>, focusFieldKey?: string, extra: Record<string, unknown> = {}) {
+function renderEpc(store: ReturnType<typeof createGeometryStore>, focusFieldKey?: string, extra: Record<string, unknown> = {}, postcodeNeeded?: boolean) {
   epcIssues = [];
   return render(
     <GeometryEditorServicePortsProvider
@@ -143,7 +143,8 @@ function renderEpc(store: ReturnType<typeof createGeometryStore>, focusFieldKey?
     >
       <GeometryStoreProvider store={store}>
         <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey={focusFieldKey}
-          calculationTargetSection={<div>HEM model version</div>} onIndicatorChange={(indicator) => { epcIssues = indicator?.issues ?? []; }} />
+          calculationTargetSection={<div>HEM model version</div>} onIndicatorChange={(indicator) => { epcIssues = indicator?.issues ?? []; }}
+          postcodeNeeded={postcodeNeeded} />
       </GeometryStoreProvider>
     </GeometryEditorServicePortsProvider>
   );
@@ -168,14 +169,14 @@ describe("GlobalSettingsModal HEM:EPC Global values", () => {
     expect(screen.queryByText(/defaults template/)).not.toBeInTheDocument();
     await user.click(within(pathway).getByRole("button", { name: "A new build" }));
     expect(store.getState().complianceSettings.IsExistingBuilding).toBe(false);
-    // A new build's EPC input takes no postcode.
+    // A new build's EPC input takes no postcode: it is asked only when the host needs it (below).
     expect(screen.queryByLabelText("Postcode")).not.toBeInTheDocument();
     await user.click(within(pathway).getByRole("button", { name: "An existing building" }));
     expect(store.getState().complianceSettings.IsExistingBuilding).toBe(true);
     expect(await screen.findByLabelText("Postcode")).toBeInTheDocument();
   });
 
-  it("asks each required Yes/No as two segments, none chosen until picked; a default shows chosen with its source", async () => {
+  it("asks each required Yes/No as two segments, none chosen until picked; the noise nuisance input HEM:EPC is removing is not asked", async () => {
     const user = userEvent.setup();
     const store = createGeometryStore();
     store.getState().setComplianceSettings({ IsExistingBuilding: true });
@@ -184,14 +185,9 @@ describe("GlobalSettingsModal HEM:EPC Global values", () => {
     for (const group of ["Smart electricity meter", "Clothes dryer", "Dishwasher", "Separate fridge or freezer", "Cross ventilation"]) {
       expect(pressed(group)).toEqual([]);
     }
-    expect(pressed("Noise nuisance")).toEqual(["No"]);
-    expect(within(screen.getByRole("group", { name: "Noise nuisance" }).parentElement!).getByText("default")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Noise nuisance" })).not.toBeInTheDocument();
     await user.click(within(screen.getByRole("group", { name: "Cross ventilation" })).getByRole("button", { name: "Yes" }));
-    await user.click(within(screen.getByRole("group", { name: "Noise nuisance" })).getByRole("button", { name: "Yes" }));
-    expect(store.getState().complianceSettings).toMatchObject({ Ventilation_cross_vent_possible: true, Ventilation_noise_nuisance: true });
-    // The default stays one click away.
-    await user.click(screen.getByRole("button", { name: /Noise nuisance: use the default, No/ }));
-    expect(store.getState().complianceSettings.Ventilation_noise_nuisance).toBeUndefined();
+    expect(store.getState().complianceSettings).toMatchObject({ Ventilation_cross_vent_possible: true });
   });
 
   it("asks for the GUID once the dwelling has a smart meter, and checks its format", async () => {
@@ -293,14 +289,14 @@ describe("GlobalSettingsModal HEM:EPC Global values", () => {
     expect(store.getState().complianceSettings.Appliances_has_dishwasher).toBeUndefined();
   });
 
-  it("shows the conversion's storey count, which the user cannot change", async () => {
+  it("asks no storey count on an existing building, and shows the built form the party walls give", async () => {
     const store = createGeometryStore();
     // A stated count from an older file: the existing-building conversion never reads it.
     store.getState().setComplianceSettings({ IsExistingBuilding: true, storeys_in_dwelling: 3 });
-    store.getState().setTargetValidation({ hemVersion: "x", items: [], storeysInDwelling: 2, builtForm: "semi_detached" });
-    renderEpc(store, "General_storeys_in_dwelling");
-    expect(await screen.findByLabelText("Storeys in dwelling")).toHaveTextContent(/^2$/);
-    expect(screen.queryByRole("textbox", { name: /Storeys in dwelling/ })).not.toBeInTheDocument();
+    store.getState().setTargetValidation({ hemVersion: "x", items: [], builtForm: "semi_detached" });
+    renderEpc(store, "General_build_type");
+    await screen.findByLabelText("Built form");
+    expect(screen.queryByText("Storeys in dwelling")).not.toBeInTheDocument();
     // The built form the party walls give is the placeholder, with its source.
     expect((screen.getByLabelText("Built form") as HTMLSelectElement).selectedOptions[0]).toHaveTextContent("Semi detached");
     expect(screen.getByText("from the party walls")).toBeInTheDocument();
@@ -328,7 +324,6 @@ describe("GlobalSettingsModal existing building storeys", () => {
       </GeometryEditorServicePortsProvider>
     );
     expect(await screen.findByDisplayValue("3")).toBeInTheDocument();
-    expect(screen.queryByRole("status", { name: "Storeys in dwelling" })).not.toBeInTheDocument();
   });
 });
 
@@ -403,16 +398,26 @@ describe("GlobalSettingsModal border postcode", () => {
     expect(store.getState().complianceSettings.hemieSettings).toEqual({ HEMIE_nation: "Wales" });
   });
 
-  it("asks no nation on an FHS model, whose postcode is metadata only", async () => {
+  it("asks the postcode, and the nation of a border area, on a HEM:EPC new build when the host needs them", async () => {
+    const store = createGeometryStore();
+    store.getState().setPropertyPostcode("CH4 1AA");
+    store.getState().setComplianceSettings({ IsExistingBuilding: false });
+    renderEpc(store, "HEMIE_nation", {}, true);
+    expect(await screen.findByLabelText("Postcode")).toHaveValue("CH4 1AA");
+    await waitFor(() => expect(screen.getByLabelText("Nation")).toHaveFocus());
+  });
+
+  it("asks the nation under the postcode on an FHS model too, and a link to it lands there", async () => {
+    // Part O reads the nation on any target.
     const store = createGeometryStore();
     store.getState().setPropertyPostcode("CH4 1AA");
     render(
       <GeometryStoreProvider store={store}>
-        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="Postcode" />
+        <GlobalSettingsModal isOpen onClose={vi.fn()} workspaceResourcePort={createResources()} focusFieldKey="HEMIE_nation" />
       </GeometryStoreProvider>
     );
     await screen.findByLabelText("Property postcode");
-    expect(screen.queryByLabelText("Nation")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Nation")).toHaveFocus());
   });
 });
 

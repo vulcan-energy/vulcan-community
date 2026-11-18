@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import type { ElementType } from '../geometry/types';
 import {
@@ -25,6 +25,18 @@ type ElementTypePickerProps = {
   ariaLabel?: string;
   className?: string;
   triggerClassName?: string;
+  /** Entries that are not element types (a bay, a conservatory), listed after the type they draw. */
+  extraOptions?: readonly ElementTypePickerExtra[];
+};
+
+export type ElementTypePickerExtra = {
+  key: string;
+  label: string;
+  subtitle: string;
+  /** Listed after this type, in its section. */
+  after: ElementType;
+  selected: boolean;
+  onSelect: () => void;
 };
 
 type MenuPosition = {
@@ -33,6 +45,9 @@ type MenuPosition = {
   width: number;
   maxHeight: number;
 };
+
+/** The group of the last type picked for something new: "+ Element" opens on it next time. */
+let lastNewTypeSectionId: ElementTypeSectionId | undefined;
 
 const MENU_MARGIN = 8;
 const MENU_MIN_WIDTH = 390;
@@ -48,6 +63,7 @@ export function ElementTypePicker({
   className,
   triggerClassName,
   valueLabel,
+  extraOptions = [],
 }: ElementTypePickerProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -56,7 +72,8 @@ export function ElementTypePicker({
   const sections = useMemo(() => getElementTypeMenuSections(options), [options]);
   const selectedOption = value ? getElementTypeMenuOption(value) : null;
   const selectedSection = value ? sections.find((section) => section.types.includes(value)) : undefined;
-  const fallbackSectionId = sections[0]?.id ?? getElementTypeSectionId(value ?? ELEMENT_TYPE_ORDER[0]);
+  const lastNewSection = value === null ? sections.find((section) => section.id === lastNewTypeSectionId) : undefined;
+  const fallbackSectionId = lastNewSection?.id ?? sections[0]?.id ?? getElementTypeSectionId(value ?? ELEMENT_TYPE_ORDER[0]);
   const [expandedSectionId, setExpandedSectionId] = useState<ElementTypeSectionId>(
     selectedSection?.id ?? fallbackSectionId,
   );
@@ -112,8 +129,8 @@ export function ElementTypePicker({
     };
   }, [open, updatePosition]);
 
-  const handleSelect = (type: ElementType) => {
-    onChange(type);
+  const extraSelected = extraOptions.some((extra) => extra.selected);
+  const close = () => {
     setOpen(false);
     const focusTrigger = () => triggerRef.current?.focus();
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
@@ -164,21 +181,17 @@ export function ElementTypePicker({
                   <div className="element-type-picker__options">
                     {section.types.map((type) => {
                       const option = getElementTypeMenuOption(type);
-                      const selected = type === value;
+                      const picked = () => {
+                        if (value === null) lastNewTypeSectionId = section.id;
+                        close();
+                      };
                       return (
-                        <button
-                          type="button"
-                          key={type}
-                          role="option"
-                          aria-selected={selected}
-                          className={`element-type-picker__option${selected ? ' is-selected' : ''}`}
-                          onClick={() => handleSelect(type)}
-                        >
-                          <span className="element-type-picker__option-text">
-                            <span className="element-type-picker__option-label">{option.label}</span>
-                            <span className="element-type-picker__option-subtitle">{option.subtitle}</span>
-                          </span>
-                        </button>
+                        <Fragment key={type}>
+                          <PickerOption label={option.label} subtitle={option.subtitle} selected={type === value && !extraSelected} onClick={() => { onChange(type); picked(); }} />
+                          {extraOptions.flatMap((extra) => (extra.after !== type ? [] : [
+                            <PickerOption key={extra.key} label={extra.label} subtitle={extra.subtitle} selected={extra.selected} onClick={() => { extra.onSelect(); picked(); }} />,
+                          ]))}
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -214,5 +227,22 @@ export function ElementTypePicker({
       </button>
       {menu}
     </div>
+  );
+}
+
+function PickerOption({ label, subtitle, selected, onClick }: { label: string; subtitle: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      className={`element-type-picker__option${selected ? ' is-selected' : ''}`}
+      onClick={onClick}
+    >
+      <span className="element-type-picker__option-text">
+        <span className="element-type-picker__option-label">{label}</span>
+        <span className="element-type-picker__option-subtitle">{subtitle}</span>
+      </span>
+    </button>
   );
 }

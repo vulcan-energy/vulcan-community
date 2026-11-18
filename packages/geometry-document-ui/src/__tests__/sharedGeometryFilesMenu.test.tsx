@@ -104,11 +104,14 @@ describe('shared Geometry Files menu', () => {
   it('New Model with host starts asks which start, then creates it', () => {
     const onNewDocument = vi.fn();
     render(<GeometryFilesMenu {...defaultProps} onNewDocument={onNewDocument}
-      newDocumentStarts={[{ id: 'a', label: 'Start A' }, { id: 'b', label: 'Start B' }]} />);
+      newDocumentStarts={[{ id: 'a', label: 'Start A' }, { id: 'b', label: 'Start B', detail: 'Version 2 · values' }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'Files menu' }));
     fireEvent.click(screen.getByRole('button', { name: 'New Model' }));
     expect(onNewDocument).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Start B' }));
+    // Each start says what it sets; the note says none of it is final.
+    expect(screen.getByText('Version 2 · values')).toBeInTheDocument();
+    expect(screen.getByText('The HEM version and defaults can be changed later in Global Settings.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start B Version 2 · values' }));
     expect(onNewDocument).toHaveBeenCalledWith('b');
     expect(screen.queryByRole('button', { name: 'Start A' })).not.toBeInTheDocument();
   });

@@ -46,14 +46,15 @@
 // family (Opaque/Transparent/Ground/adjacent) — read/written ONLY via
 // ctx.shared, same precedent as Vents/MechanicalVentilation's parentElement.
 //
-// The UFH<->polygon and radiator/fancoil<->line window.confirm() shape-
-// conversion prompts in hydrate() move verbatim, including the try/swallow —
-// legacy behaviour, not new. hydrate() needs updateElement for that side
-// effect, so it is captured into this module's own state during useFormState
-// — the module contract's hydrate(state, element) receives no ctx.
+// The UFH<->polygon and radiator/fancoil<->line shape follows a change of
+// emitter type in the type dropdown, with Undo (selecting an emitter writes
+// nothing). It needs updateElement and the store, captured into this module's
+// own state during useFormState.
 
 import { useState } from 'react';
 import { getElementShape, convertShapeCoordinates } from '../../lib/shapeUtils';
+import { changeWithUndo } from '../../lib/undoToast';
+import { useGeometryStoreApi, type GeometryStoreApi } from '../../stores/geometryStore';
 import type { Element } from '../../geometry/types';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
@@ -83,9 +84,9 @@ export interface WetEmitterFormState {
   setSpaceHeatSystem: (value: string) => void;
   /** Shared with the not-yet-extracted wall family — see module header comment. */
   areaInput: NumericDraftInputBinding;
-  /** Captured for hydrate()'s shape-conversion window.confirm() prompts — see
-   * module header comment. */
+  /** For the shape that follows a change of emitter type (Undo offered, not asked first). */
   updateElement: ElementFormStateCtx['updateElement'];
+  geometryStore: GeometryStoreApi;
 }
 
 function useFormState(ctx: ElementFormStateCtx): WetEmitterFormState {
@@ -99,6 +100,7 @@ function useFormState(ctx: ElementFormStateCtx): WetEmitterFormState {
     setSpaceHeatSystem: ctx.shared.setSpaceHeatSystem,
     areaInput: ctx.shared.areaInput,
     updateElement: ctx.updateElement,
+    geometryStore: useGeometryStoreApi(),
   };
 }
 
@@ -112,24 +114,6 @@ export const wetEmitterFormModule: ElementFormModule<WetEmitterFormState> = {
     state.setSpaceHeatSystem('space_heat_system' in element ? (element.space_heat_system ?? '') : '');
     state.areaInput.setValue('area' in element ? element.area ?? '' : '');
     state.unitNumberInput.setValue('unit_number' in element ? element.unit_number ?? '' : '');
-    try {
-      const currentElement = element as any;
-      const coords = currentElement.coordinates || [];
-      const shape = getElementShape(currentElement);
-      if (currentElement.subcategory === 'ufh' && shape !== 'polygon' && coords.length >= 2) {
-        const ok = window.confirm('Underfloor heating works best as a polygon. Convert this to a polygon now?');
-        if (ok) {
-          const next = convertShapeCoordinates(currentElement as any, 'polygon');
-          state.updateElement(currentElement.id, { coordinates: next });
-        }
-      } else if ((currentElement.subcategory === 'radiator' || currentElement.subcategory === 'fancoil') && shape !== 'line' && coords.length >= 1) {
-        const ok = window.confirm('Radiator/Fan coil works best as a line. Convert this to a line now?');
-        if (ok) {
-          const next = convertShapeCoordinates(currentElement as any, 'line');
-          state.updateElement(currentElement.id, { coordinates: next });
-        }
-      }
-    } catch { /* swallow: best-effort */ }
   },
 
   reset(state) {
@@ -168,6 +152,17 @@ export const wetEmitterFormModule: ElementFormModule<WetEmitterFormState> = {
               const nextValue = value as ElementOfType<'WetEmitter'>['subcategory'];
               setSubcategory(nextValue);
               commitExistingElementDraft({ subcategory: nextValue });
+              // Underfloor heating is drawn as an area, a radiator or fan coil as a line: the
+              // shape follows the type as its own step, with Undo (not asked first).
+              const emitter = selectedElement?.type === 'WetEmitter' ? selectedElement : null;
+              const shape = emitter ? getElementShape(emitter) : null;
+              const coords = emitter?.coordinates ?? [];
+              const target = nextValue === 'ufh' ? (shape !== 'polygon' && coords.length >= 2 ? 'polygon' : null)
+                : shape !== 'line' && coords.length >= 1 ? 'line' : null;
+              if (emitter && target) {
+                changeWithUndo(state.geometryStore, target === 'polygon' ? 'Changed to an area, as underfloor heating is drawn.' : 'Changed to a line, as a radiator or fan coil is drawn.',
+                  () => state.updateElement(emitter.id, { coordinates: convertShapeCoordinates(emitter, target) }));
+              }
             }}
             options={[
               { value: 'radiator', label: 'Radiator' },

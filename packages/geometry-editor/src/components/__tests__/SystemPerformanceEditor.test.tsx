@@ -53,7 +53,7 @@ it.each([true, false])('edits heater performance and keeps explicit profile/imme
   expect(container.querySelectorAll('[data-field-key="cop_dhw"]')).toHaveLength(2);
   fireEvent.click(screen.getByRole('button', { name: 'Remove profile L' }));
   fireEvent.change(screen.getByRole('combobox', { name: 'Heater to add to hw cylinder' }), { target: { value: '__dhw_immersion__' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Add heater' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
   expect(input('power')).toHaveValue('3');
   fireEvent.click(screen.getByRole('button', { name: 'Remove heater immersion' }));
   fireEvent.change(input('volume'), { target: { value: '210' } });
@@ -152,7 +152,7 @@ it('offers "Use default" only on edited fields, through reset and an added immer
   await waitFor(() => expect(useDefault('cop_dhw')).toBeNull());
   expect(within(field('cop_dhw')).getByRole('textbox')).toHaveValue('2.5');
   fireEvent.change(screen.getByRole('combobox', { name: 'Heater to add to hw cylinder' }), { target: { value: '__dhw_immersion__' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Add heater' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
   await waitFor(() => expect(useDefault('power')).not.toBeNull());
   expect(useDefault('cop_dhw')).toBeNull();
 });

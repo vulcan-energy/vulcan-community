@@ -22,7 +22,6 @@ import {
 } from '../lib/heatSourceWetNamesFromProject';
 import {
   pruneHotWaterSourceHwCylinderSchemaForInstance,
-  inlineHwCylinderColdWaterSourceEnumOnHotWaterSubschema,
   inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema,
 } from '../lib/systemHotWaterAdvancedSchema';
 import {
@@ -31,6 +30,7 @@ import {
   JUNCTION_TYPE_ENUM,
 } from '../lib/simplifiedFabricMap';
 import { useGeometryStore, useGeometryStoreApi } from '../stores/geometryStore';
+import { changeWithUndo } from '../lib/undoToast';
 import type { TargetValidation } from '../types/buildErrors';
 import { derivedFieldDefaults, systemFieldDefaults } from '../lib/systemSchemaFlatten';
 import { useTargetRules } from '../hooks/useTargetRules';
@@ -140,10 +140,21 @@ const COLLAPSED_HEATING_FIELDS: ReadonlySet<string> = new Set([
   'thermal_mass', 'min_flow_temp', 'min_outdoor_temp', 'max_outdoor_temp', 'product_id', 'weather_compensation_curve_id',
   'weather_comp_a', 'weather_comp_b', 'weather_comp_c', 'load_comp_a', 'load_comp_b', 'load_comp_c', 'dispatch_mode',
 ]);
-/** An existing building's PV: HEM:EPC defaults the inverter unless stated. */
-const COLLAPSED_PV_FIELDS: ReadonlySet<string> = new Set(['inverter_peak_power_ac', 'inverter_peak_power_dc', 'inverter_is_inside', 'inverter_type']);
+/** An existing building's PV: HEM:EPC defaults the inverter's powers and the supply unless stated. */
+const COLLAPSED_PV_FIELDS: ReadonlySet<string> = new Set(['inverter_peak_power_ac', 'inverter_peak_power_dc', 'EnergySupply']);
+/** A cylinder's detail under "More": its heaters' settings, coil area, pipework and tank controls. */
+const COLLAPSED_TANK_FIELDS: ReadonlySet<string> = new Set([
+  'heater_position', 'thermostat_position', 'name', 'primary_flow_rate', 'heat_transfer_rate_W_per_K', 'temp_flow_limit_upper',
+  'power', 'EnergySupply', 'pv_diverter', 'heat_exchanger_surface_area', 'primary_pipework', 'tank_controls',
+]);
+/** A products target's tank location has no default, new build or existing (a second tank shows it here). */
+/** A tank method's fields as the Undo toast names them. */
+const TANK_FIELD_WORDS: Readonly<Record<string, string>> = {
+  tank_volume_category: 'volume category', external_diameter: 'dimensions', external_height: 'dimensions',
+  daily_losses: 'standing heat loss', energy_efficiency_class: 'energy label', installation_year: 'install year',
+};
+const TANK_NO_DEFAULT: ReadonlySet<string> = new Set(['location']);
 const stated = (value: unknown) => value !== undefined && value !== null && value !== '';
-const NEW_BUILD_TANK_NO_DEFAULT: ReadonlySet<string> = new Set(['location']);
 /** The solar absorption coefficient each outside colour gives (DESNZ-defined). */
 const COLOUR_ABSORPTION: Readonly<Record<string, number>> = { Light: 0.3, Intermediate: 0.6, Dark: 0.9 };
 const PARTY_WALL_HALF_CONSTRUCTION_NOTE =
@@ -504,7 +515,7 @@ const ELECTRIC_ONLY_TYPES = new Set([
 // eslint-disable-next-line react-refresh/only-export-components -- schema helper shared with tests.
 export function applyEcodesignControlClassEnum(
   schema: Record<string, unknown>,
-  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], coldWaterNames = [], allElectric = false, dropKeys, pvDiverter = false }: {
+  { weatherCurves, existing = false, supplyNames = [], electricSupplyNames = [], allElectric = false, dropKeys, pvDiverter = false }: {
     /** The target's weather compensation curves: the curve field picks one. */
     weatherCurves?: WeatherCurves;
     existing?: boolean;
@@ -512,8 +523,6 @@ export function applyEcodesignControlClassEnum(
     supplyNames?: readonly string[];
     /** The model's electricity supplies: an electric-only system picks one of them. */
     electricSupplyNames?: readonly string[];
-    /** The model's cold water sources: a cylinder picks one of them. */
-    coldWaterNames?: readonly string[];
     /** Every EnergySupply in the schema is electric-only (fans, PV). */
     allElectric?: boolean;
     /** Fields nothing reads for this model, left out of the form. */
@@ -560,13 +569,6 @@ export function applyEcodesignControlClassEnum(
         if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
           const names = allElectric || ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
           const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: names.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
-          delete picker.anyOf;
-          nextProperties[key] = picker;
-          changed = true;
-          continue;
-        }
-        if (key === 'ColdWaterSource' && coldWaterNames.length && child && typeof child === 'object' && !Array.isArray(child)) {
-          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: coldWaterNames.map((name) => ({ const: name, title: name === 'mains water' ? 'Mains water' : name === 'header tank' ? 'Header tank' : name })) };
           delete picker.anyOf;
           nextProperties[key] = picker;
           changed = true;
@@ -979,7 +981,8 @@ interface AdvancedFieldsEditorProps {
   collapsible?: boolean; // when false, keep advanced fields always visible
   useFHSSchema?: boolean; // when true, use FHS schema for Advanced Fields (still curated Standard fields)
   fieldIndicators?: Readonly<Record<string, readonly string[]>>;
-  evidenceFieldKeys?: ReadonlySet<string>;
+  /** The host's evidence line for a field, beside its label. */
+  renderEvidence?: (fieldKey: string) => React.ReactNode;
   focusFieldKey?: string | null;
   focusFieldVersion?: number;
   inspectorContributions?: GeometryInspectorContributions;
@@ -992,7 +995,7 @@ interface AdvancedFieldsEditorProps {
   /** Host fields for the element, shown after its fields and before "More". */
   hostFields?: React.ReactNode;
   /** Host fields for the element's "More" group; `stated` opens it. */
-  hostMoreFields?: { fields: React.ReactNode; stated: boolean; labels: readonly string[] };
+  hostMoreFields?: { fields: React.ReactNode; stated: boolean; labels: readonly string[]; keys?: readonly string[] };
   /** Show only these fields (a window's thermal values, placed with its other thermal inputs). */
   onlyFields?: readonly string[];
   /** Leave these fields out (shown by another editor instance). */
@@ -1009,7 +1012,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   collapsible = true,
   useFHSSchema = false,
   fieldIndicators,
-  evidenceFieldKeys,
+  renderEvidence,
   focusFieldKey,
   focusFieldVersion,
   inspectorContributions = emptyGeometryInspectorContributions,
@@ -1038,7 +1041,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const energySupplies = useMemo(() => (hemDatabaseProducts ? readExtraJsonRecord(readExtraJsonRecord(defaultsJson).EnergySupply) : {}), [hemDatabaseProducts, defaultsJson]);
   const energySupplyNames = useMemo(() => Object.keys(energySupplies), [energySupplies]);
   const electricSupplyNames = useMemo(() => energySupplyNames.filter((name) => readExtraJsonRecord(energySupplies[name]).fuel === 'electricity'), [energySupplies, energySupplyNames]);
-  const coldWaterNames = useMemo(() => (hemDatabaseProducts ? Object.keys(readExtraJsonRecord(readExtraJsonRecord(defaultsJson).ColdWaterSource)) : []), [hemDatabaseProducts, defaultsJson]);
   const existingBuilding = useGeometryStore(isExistingBuilding);
   const systemDefaults = useGeometryStore((state) => state.targetValidation?.systemDefaults);
   const productPickerOwnsId = useGeometryStore((state) => newBuildPickerOwnsProductId(existingBuilding, state.targetValidation?.productSlots, currentData.name));
@@ -1160,6 +1162,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     );
   const radiatorThermalMode = radiatorThermalModeOverride ?? inferredRadiatorThermalMode;
   // A hot water cylinder's alternatives (size, heat loss): the method the user picks for each group.
+  const geometryStore = useGeometryStoreApi();
   const [tankMethodChosen, setTankMethodChosen] = useKeyedState<Record<string, string>>(currentData?.id ?? '', {});
   // One field for the U-value or the construction resistance: the schema takes one or the other.
   const [resistanceChosen, setResistanceChosen] = useKeyedState<boolean>(currentData?.id ?? '', false);
@@ -1607,9 +1610,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       result = applyEcodesignControlClassEnum(result as Record<string, unknown>, {
         supplyNames: energySupplyNames,
         electricSupplyNames,
-        coldWaterNames,
         // A new build picks each product with its chip: the raw product id beside it is a second surface.
-        dropKeys: new Set([...unusedHeatPumpFields(advancedFieldsData, cooled), ...(productPickerOwnsId ? ['product_id'] : [])]),
+        // The cylinder's cold water follows the model's (Global values): the conversion replaces its own.
+        dropKeys: new Set([...unusedHeatPumpFields(advancedFieldsData, cooled), ...(productPickerOwnsId ? ['product_id'] : []), 'ColdWaterSource']),
         pvDiverter: subtype === 'HotWaterSource',
       }) as typeof result;
     }
@@ -1623,12 +1626,8 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         result = pr as typeof result;
       }
       if (useFHSSchema) {
-        const rootFhs = schemaPort.availability === 'available'
-          ? schemaPort.getRootSchema('fhs') as Record<string, unknown> | null
-          : null;
-        if (rootFhs) {
-          inlineHwCylinderColdWaterSourceEnumOnHotWaterSubschema(result as Record<string, unknown>, rootFhs);
-        }
+        // The conversion gives every hot water source the model's cold water source (Global values), replacing its own.
+        result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { dropKeys: new Set(['ColdWaterSource']) }) as typeof result;
         inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema(result as Record<string, unknown>, {
           definedNames: projectHeatSourceWetNames,
           currentCombiLink: currentHotWaterCombiHeatSourceWetLink || null,
@@ -1660,7 +1659,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     getActiveElementSubschema,
     getActiveRootSchema,
     getBaseFields,
-    schemaPort,
     mechanicalVentilationVentType,
     shouldRenderMechanicalVentilationFixedEnergySupply,
     shouldRenderMechanicalVentilationFanMode,
@@ -1677,7 +1675,6 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     systemDefaults,
     energySupplyNames,
     electricSupplyNames,
-    coldWaterNames,
     cooled,
     hemDatabaseProducts,
     productPickerOwnsId,
@@ -1692,18 +1689,22 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const tankGroups = tank ? TANK_METHOD_GROUPS.flatMap((group) => {
     const offered = offeredMethods(group, tankSchemaProperties);
     if (offered.length < 2) return [];
-    // Unstated, an existing building's tank takes the volume category "Inaccessible" and install year "unknown".
-    const current = offered.find((method) => method.value === tankMethodChosen[group.key])
-      ?? statedMethod(offered, tank[1], existingBuilding ? (group.key === 'size' ? 'category' : 'year') : undefined);
+    // The data's method wins (an Undo restores it); with nothing stated, the user's last choice, else
+    // an existing building's tank takes the volume category "Inaccessible" and install year "unknown".
+    const chosen = tankMethodChosen[group.key];
+    const current = statedMethod(offered, tank[1], chosen ?? (existingBuilding ? (group.key === 'size' ? 'category' : 'year') : undefined));
     return [{ group, offered, current }];
   }) : [];
+  const tankDetailsUnderMore = !!tank && hemDatabaseProducts;
   const tankMethodFields = tankGroups.flatMap(({ offered }) => offered.flatMap((method) => method.fields)).join(' ');
   const systemLayout = useMemo<AdvancedFieldsLayoutNode | undefined>(() => {
     if (elementType !== 'System' || !subtype || !subschema) return undefined;
     return buildSystemAdvancedUischema(subtype, subschema as Record<string, unknown>);
   }, [elementType, subtype, subschema]);
-  const systemAdvancedUischema = systemLayout && tankMethodFields
-    ? withoutLayoutLeaves(systemLayout, tankScope, new Set(tankMethodFields.split(' '))) ?? undefined
+  // A products target shows the tank's location beside its type (`elementForms/system.tsx`).
+  const tankShownElsewhere = [...tankMethodFields.split(' ').filter(Boolean), ...(tank && hemDatabaseProducts ? ['location'] : [])];
+  const systemAdvancedUischema = systemLayout && tankShownElsewhere.length
+    ? withoutLayoutLeaves(systemLayout, tankScope, new Set(tankShownElsewhere)) ?? undefined
     : systemLayout;
   const patchTank = (next: Record<string, unknown>) => {
     if (!tank) return;
@@ -1947,7 +1948,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         subtype,
         opaqueFabricVariant,
         fieldIndicators,
-        evidenceFieldKeys,
+        renderEvidence,
         openRuCalculator:
           elementType === 'BuildingElementAdjacentUnconditionedSpace_Simple'
             ? openRuCalculator
@@ -1989,11 +1990,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         // Under "More": an existing building's construction-table values, a colour's coefficient,
         // and a heating circuit's less common inputs.
         collapsedEngineFields: elementType === 'System'
-          ? (subtype === 'SpaceHeatSystem' ? COLLAPSED_HEATING_FIELDS : undefined)
+          ? (subtype === 'SpaceHeatSystem' ? COLLAPSED_HEATING_FIELDS : tankDetailsUnderMore ? COLLAPSED_TANK_FIELDS : undefined)
           : existingBuilding && hemDatabaseProducts
             ? (elementType === 'OnSiteGeneration' ? COLLAPSED_PV_FIELDS
               : thermalMethod === 'band' && elementType === 'BuildingElementTransparent' ? COLLAPSED_BAND_WINDOW_FIELDS : COLLAPSED_ENGINE_FIELDS)
             : colourAbsorption !== undefined ? COLLAPSED_COLOUR_FIELDS : undefined,
+        // The cylinder's coil states its required settings from the start: they sit under More too.
+        collapsedStatedRequired: tankDetailsUnderMore,
         derivedDefaults: elementType === 'System'
           ? systemFieldDefaults(advancedFieldsData, existingBuilding)
           // The converter gives a blank ground U-value the floor calculation's (`ground_u_value.rs`).
@@ -2001,15 +2004,15 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? { u_value: Number(groundUComputedWPerM2K.toFixed(4)) }
             : groundUDerivedWithoutNumber ? { u_value: GROUND_U_DERIVED_TEXT }
             : colourAbsorption !== undefined ? { solar_absorption_coeff: colourAbsorption } : undefined,
-        // A combi's daily hot water comes from the occupancy (`combi_daily_hot_water`, DESNZ question E33).
+        // A combi's daily hot water comes from the occupancy (`combi_daily_hot_water`, assumption pending DESNZ).
         derivedSourceNotes: elementType === 'System' ? { daily_HW_usage: 'from occupancy' }
           : colourAbsorption !== undefined ? { solar_absorption_coeff: 'from the colour' } : undefined,
-        // A new build's tank states its location: the converter has no default for it.
-        noDefaultFields: elementType === 'System' && subtype === 'HotWaterSource' && hemDatabaseProducts && !existingBuilding ? NEW_BUILD_TANK_NO_DEFAULT : undefined,
+        noDefaultFields: elementType === 'System' && subtype === 'HotWaterSource' && hemDatabaseProducts ? TANK_NO_DEFAULT : undefined,
         labelAdornment: takesResistance ? {
           field: resistanceShown ? 'thermal_resistance_construction' : 'u_value',
           node: (
             <CompactSegmentedControl
+              compact
               ariaLabel="Enter as"
               value={resistanceShown ? 'r' : 'u'}
               options={[{ value: 'u', label: 'U', title: 'U-value (W/m²·K)' }, { value: 'r', label: 'R', title: 'Construction resistance (m²·K/W)' }]}
@@ -2030,12 +2033,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         productRule: elementType === 'System' && hemDatabaseProducts,
       }),
     [
+      tankDetailsUnderMore,
       flat,
       elementType,
       subtype,
       opaqueFabricVariant,
       fieldIndicators,
-      evidenceFieldKeys,
+      renderEvidence,
       schemaPort,
       openRuCalculator,
       openGroundUCalculator,
@@ -2500,7 +2504,18 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     shouldRenderMechanicalVentilationFanMode,
   ]);
 
-  if (!subschema) return null;
+  if (!subschema) {
+    // The target's files did not load: say so, never an empty panel.
+    return schemaPort.loadFailed?.(schemaMode) ? (
+      <div className="field-source-note" role="alert" data-schema-load-failed>
+        This model's HEM files could not load, so its inputs cannot show.{' '}
+        <button type="button" className="field-source-note__link"
+          onClick={() => { schemaPort.preload(schemaMode).catch(() => { /* the failure shows here again */ }); }}>
+          Retry
+        </button>
+      </div>
+    ) : null;
+  }
 
   // Check if there are any advanced fields to show
   // Include manually rendered fields (like junction_type for ThermalBridgeLinear)
@@ -2520,8 +2535,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
 
   const isPartyWallAdvancedFields = elementType === 'BuildingElementPartyWall';
   const isInternalHeatedAdjacentAdvancedFields = elementType === 'BuildingElementAdjacentConditionedSpace';
+  // A party wall's half values are typed only under its U-value method: layers are halved by the
+  // calculator, and an existing building's party wall takes no U-value.
   const showHalfConstructionManualWarning =
-    isPartyWallAdvancedFields || isInternalHeatedAdjacentAdvancedFields;
+    (isPartyWallAdvancedFields && thermalMethod === 'u_value') || isInternalHeatedAdjacentAdvancedFields;
 
   // Removed required fields badge logic - validation is now purely schema-driven
 
@@ -2631,6 +2648,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
           elementType={elementType}
           elementKey={currentElementData?.id}
           flat={flat}
+          renderEvidence={renderEvidence}
         />
       )}
 
@@ -2790,7 +2808,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
                 size="md"
                 variant="ghost"
               />
-              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+              <div className="field-source-note" style={{ marginTop: 4 }}>
                 Multiple source details match this junction. Pick one to use its ψ and provenance.
               </div>
             </div>
@@ -2862,7 +2880,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
               elementsById={elementsById}
               systemElement={currentElementData as System}
               flat={flat}
-              heatPumpFlowLimitDefaulted={hemDatabaseProducts}
+              epcDefaulted={hemDatabaseProducts}
               onPatchExtraJson={(fn) => {
                 const base = readExtraJsonRecord(currentData.extra_json);
                 onChange({ ...currentData, extra_json: fn(base) });
@@ -2897,7 +2915,12 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             onChange={(to) => {
               setTankMethodChosen((chosen) => ({ ...chosen, [group.key]: to }));
               const next = switchMethod(offered, to, tank[1]);
-              if (Object.keys(next).length !== Object.keys(tank[1]).length) patchTank(next);
+              const cleared = Object.keys(tank[1]).filter((key) => !(key in next) && stated(tank[1][key]));
+              // The other method's value goes in one step, with Undo to take it back.
+              if (cleared.length) {
+                const label = offered.find((method) => method.value === to)?.label.toLowerCase() ?? to;
+                changeWithUndo(geometryStore, `${group.label} ${label}: ${[...new Set(cleared.map((key) => TANK_FIELD_WORDS[key] ?? key.replace(/_/g, ' ')))].join(' and ')} cleared.`, () => patchTank(next));
+              } else if (Object.keys(next).length !== Object.keys(tank[1]).length) patchTank(next);
             }}
           />
           <DirectAdvancedFields

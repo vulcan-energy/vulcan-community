@@ -55,6 +55,8 @@ interface SearchableDescribedSelectProps {
   'aria-labelledby'?: string;
   /** Accessible name for the trigger button, when no element exists for `aria-labelledby` to reference. */
   'aria-label'?: string;
+  /** Opens the menu on mount. */
+  defaultOpen?: boolean;
 }
 
 const focusOnMount = (node: HTMLElement | null) => node?.focus();
@@ -83,11 +85,14 @@ export const SearchableDescribedSelect: React.FC<SearchableDescribedSelectProps>
   'aria-describedby': ariaDescribedBy,
   'aria-labelledby': ariaLabelledBy,
   'aria-label': ariaLabel,
+  defaultOpen = false,
 }) => {
   const selectedValueId = useId();
   const listboxId = useId();
   const optionIdPrefix = useId();
-  const [isOpen, setIsOpen] = useState(false);
+  // Open or closed by the user; until then, as `defaultOpen` says.
+  const [openChosen, setIsOpen] = useState<boolean | null>(null);
+  const isOpen = openChosen ?? defaultOpen;
   const [searchQuery, setSearchQuery] = useState('');
   /** null until the keyboard or pointer moves: the current answer, else the first match. */
   const [activeIndex, setActiveIndex] = useState<number | null>(null);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from 'vitest';
-import { displayBuildErrorRows, targetValidationIssues, withTargetIssues } from '../buildErrorDisplay';
+import { buildErrorListItems, displayBuildErrorRows, globalSettingsFieldOf, targetValidationIssues, withTargetIssues } from '../buildErrorDisplay';
 import { resolveIssueTarget } from '../issueTarget';
 
 const model = {
@@ -70,6 +70,14 @@ describe('targetValidationIssues', () => {
     expect(result.issues).toHaveLength(1);
     expect(withTargetIssues(clean, elements.get('pw')?.filter((issue) => issue.warning))).toMatchObject({ hasIssues: false, hasWarnings: true });
   });
+
+  it('leaves lodgement evidence to the check list: it is no warning on the element', () => {
+    const { elements } = targetValidationIssues({
+      hemVersion: '0.13.2',
+      items: [{ source: 'schema', severity: 'warning', code: 'W_TARGET_EVIDENCE', path: '/Zone/Zone 1/BuildingElement/Party Wall/u_value', message: "'Party Wall' states its U-value: 0.5. Enter it only if documented: keep the document." }],
+    }, model);
+    expect(elements.get('pw')).toBeUndefined();
+  });
 });
 
 describe('displayBuildErrorRows', () => {
@@ -109,5 +117,80 @@ describe('displayBuildErrorRows', () => {
     expect(location('/InfiltrationVentilation/ventilation_zone_base_height')).toBe('Global Settings > Ventilation environment');
     expect(location('/InfiltrationVentilation/Leaks/ventilation_zone_height')).toBe('Global Settings > Ventilation environment');
     expect(location('/Metadata/NumberOfBedrooms')).toBe('Global Settings > Dwelling details');
+  });
+
+  it('names the HEM:EPC form groups for the same rows', () => {
+    const location = (path: string) => displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_REQUIRED_INPUT', path, message: 'm' }],
+      (p) => resolveIssueTarget(p, model),
+      { epcForm: true },
+    )[0]?.location;
+    expect(location('/InfiltrationVentilation/Leaks')).toBe('Global Settings > Air test');
+    expect(location('/InfiltrationVentilation/cross_vent_possible')).toBe('Global Settings > Site');
+    expect(location('/InfiltrationVentilation/Leaks/ventilation_zone_height')).toBe('Global Settings > Site');
+    expect(location('/Metadata/NumberOfBedrooms')).toBe('Global Settings > Rooms and services');
+    expect(location('/Metadata/General_build_type')).toBe('Global Settings > Property');
+    // An appliance presence row is the Rooms and services question, not an Appliances section.
+    expect(location('/Appliances/has_dryer')).toBe('Global Settings > Rooms and services');
+    // An untested building's leakage inputs are asked with the air test.
+    expect(location('/Metadata/HEMIE_number_of_open_fireplaces')).toBe('Global Settings > Air test');
+    expect(location('/Metadata/HEMIE_double_glazing_installation_period')).toBe('Global Settings > Air test');
+    expect(location('/Metadata/HEMIE_heat_loss_corridor')).toBe('Global Settings > Air test');
+  });
+
+  it('names an unstated HEM:EPC input by its label, where the form asks it', () => {
+    const [row] = displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_REQUIRED_INPUT', path: '/Metadata/ColdWaterSource', message: 'ColdWaterSource is not stated. Enter it in Global Settings.' }],
+      (p) => resolveIssueTarget(p, model),
+      { epcForm: true },
+    );
+    expect(row).toMatchObject({ userMessage: 'Enter cold water source.', location: 'Global Settings > Rooms and services' });
+  });
+
+  it('links a zone row to the one element its message names', () => {
+    const walls = { zones: [{ id: 'z1', name: 'Floor 0' }], elements: [
+      { id: 'n2', name: 'Wall (N) 2', zoneId: 'z1' }, { id: 'w', name: 'Wall (W)', zoneId: 'z1' }] };
+    const [row] = displayBuildErrorRows([{ source: 'build', path: '/Zone/Floor 0',
+      message: "The walls 'Wall (N) 2' do not join end to end into one closed outline." }], (p, m) => resolveIssueTarget(p, walls, m));
+    expect(row?.target).toMatchObject({ zoneId: 'z1', elementId: 'n2' });
+    expect(row?.target.fieldKey).toBeUndefined();
+    // A schema row names fields, not elements.
+    const [schema] = displayBuildErrorRows([{ source: 'schema', keyword: 'additionalProperties', path: '/Zone/Floor 0',
+      message: "Additional properties are not allowed ('Wall (W)' was unexpected)" }], (p, m) => resolveIssueTarget(p, walls, m));
+    expect(schema?.target.elementId).toBeUndefined();
+  });
+});
+
+describe('globalSettingsFieldOf', () => {
+  it('names the Global Settings field a model-settings path comes from', () => {
+    expect(globalSettingsFieldOf('/Metadata/NumberOfBedrooms')).toBe('NumberOfBedrooms');
+    expect(globalSettingsFieldOf('/InfiltrationVentilation/Leaks')).toBe('AirPermeability_test_result');
+    expect(globalSettingsFieldOf('/InfiltrationVentilation/Leaks/test_pressure')).toBe('AirPermeability_test_pressure');
+    expect(globalSettingsFieldOf('/InfiltrationVentilation/terrain_class')).toBe('Ventilation_terrain_class');
+    expect(globalSettingsFieldOf('/Zone/Zone 1/Lighting')).toBeUndefined();
+    expect(globalSettingsFieldOf('/Appliances/has_dishwasher')).toBe('Appliances_has_dishwasher');
+    expect(globalSettingsFieldOf('/Appliances/Oven')).toBeUndefined();
+    // A top-level input Global Settings asks for, named by its path.
+    expect(globalSettingsFieldOf('/ElectricitySmartMeterGUID')).toBe('ElectricitySmartMeterGUID');
+    expect(globalSettingsFieldOf('/Zone')).toBeUndefined();
+  });
+
+  it('places a missing top-level dwelling input at its Global Settings field, worded as the form asks', () => {
+    const item = { source: 'schema' as const, keyword: 'required', path: '', message: '"NumberOfHotTappedRooms" is a required property' };
+    expect(globalSettingsFieldOf(item.path, item.message)).toBe('NumberOfHotTappedRooms');
+    expect(displayBuildErrorRows([item], (p) => resolveIssueTarget(p, model))[0]?.userMessage).toBe('Enter number of hot-tapped rooms.');
+    expect(globalSettingsFieldOf('', '"Zone" is a required property')).toBeUndefined();
+  });
+});
+
+describe('buildErrorListItems', () => {
+  const live = [{ source: 'schema' as const, message: 'live' }, { source: 'schema' as const, message: 'notice', severity: 'warning' as const }];
+  it("lists the last save's errors, else the live check's errors and notices, then the save's other notices", () => {
+    const saved = [{ source: 'build' as const, message: 'saved' }];
+    expect(buildErrorListItems(saved, live)).toBe(saved);
+    const notices = [{ source: 'build' as const, message: 'n', severity: 'warning' as const }, live[1]!];
+    expect(buildErrorListItems(notices, live).map((item) => item.message)).toEqual(['live', 'notice', 'n']);
+    expect(buildErrorListItems([], live.slice(1)).map((item) => item.message)).toEqual(['notice']);
+    expect(buildErrorListItems(notices, undefined)).toBe(notices);
   });
 });

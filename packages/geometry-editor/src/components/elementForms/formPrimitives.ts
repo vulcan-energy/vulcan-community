@@ -7,12 +7,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
-import { useNumericDraftInput } from '../numericDraftInput';
+import { useNumericDraftInput, type NumericDraftCommitTrigger } from '../numericDraftInput';
 
 // Custom hook for decimal input handling with proper typing support.
 export const useDecimalInput = (
   initialValue: number | '' = '',
-  onCommit?: (value: number | '') => void,
+  onCommit?: (value: number | '', trigger: NumericDraftCommitTrigger) => void,
   options?: { commitOnChange?: boolean; formatOnBlur?: 'fixed2' | 'preserve' | 'number' },
 ) => useNumericDraftInput(initialValue, onCommit, {
   commitOnChange: options?.commitOnChange,

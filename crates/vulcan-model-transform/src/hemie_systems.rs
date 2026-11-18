@@ -320,6 +320,109 @@ pub(super) fn map_systems(
     }
 }
 
+/// The values outside the fabric that an existing building states in place of a default, each
+/// with its lodgement-evidence label by its field's path: the air test (result and pressure, one
+/// certificate), each PV's peak power and inverter, and each battery's age, grid charging and
+/// export. Observations (the inverter's and battery's location, the grid import limit) and values
+/// equal to the DESNZ-defined default are left out.
+pub(super) fn stated_values(model: &Value, csv: &Rows) -> Vec<(String, String)> {
+    fn shown(value: &Value) -> String {
+        match value {
+            Value::Bool(true) => "yes".into(),
+            Value::Bool(false) => "no".into(),
+            Value::String(s) => s.replace('_', " "),
+            // 2.0 reads 2.
+            Value::Number(n) => n.as_f64().map_or_else(|| n.to_string(), |f| f.to_string()),
+            other => other.to_string(),
+        }
+    }
+    let claim =
+        |name: &str, label: &str, value: String| format!("{name} states its {label}: {value}");
+    let mut out = Vec::new();
+    let leaks = &model["InfiltrationVentilation"]["Leaks"];
+    let stated = |key: &str| leaks.get(key).filter(|v| !v.is_null());
+    // Without a result HEMIE estimates the leakage and reads no pressure.
+    if let Some(result) = stated("test_result") {
+        let pressure = stated("test_pressure")
+            .map(|p| format!(" at {} pressure", shown(p)))
+            .unwrap_or_default();
+        out.push((
+            "/InfiltrationVentilation/Leaks/test_result".into(),
+            claim(
+                "The air test",
+                "result",
+                format!("{} m³/(h·m²){pressure}", shown(result)),
+            ),
+        ));
+    }
+    for (name, pv) in model["OnSiteGeneration"].as_object().into_iter().flatten() {
+        let who = format!("'{name}'");
+        let path =
+            |rest: &[&str]| json_pointer(&[&["OnSiteGeneration", name.as_str()], rest].concat());
+        let field = |key: &str| pv.get(key).filter(|v| !v.is_null());
+        // The default is a string inverter (DESNZ-defined).
+        if let Some(kind) = field("inverter_type").filter(|t| t.as_str() != Some("string_inverter"))
+        {
+            out.push((
+                path(&["inverter_type"]),
+                claim(&who, "inverter", shown(kind)),
+            ));
+        }
+        for (key, label) in [
+            ("inverter_peak_power_dc", "inverter DC peak power"),
+            ("inverter_peak_power_ac", "inverter AC peak power"),
+        ] {
+            if let Some(v) = field(key) {
+                out.push((path(&[key]), claim(&who, label, format!("{} kW", shown(v)))));
+            }
+        }
+        for (i, panel) in pv["panels"].as_array().into_iter().flatten().enumerate() {
+            if let Some(v) = panel.get("peak_power").filter(|v| !v.is_null()) {
+                let i = i.to_string();
+                out.push((
+                    path(&["panels", &i, "peak_power"]),
+                    claim(&who, "peak power", format!("{} kWp", shown(v))),
+                ));
+            }
+        }
+    }
+    // A battery's details are on its Systems row; the model no longer names it.
+    for row in csv.get("Systems").into_iter().flatten() {
+        let routed = ["Type", "system_type", "subcategory"]
+            .into_iter()
+            .find_map(|key| row.get(key)?.as_str());
+        if routed != Some("ElectricBattery") {
+            continue;
+        }
+        let who = format!("'{}'", text(row, "Name").unwrap_or_default());
+        // As the builder reads the row: its battery fields and supply from extra_json only.
+        let extra = &row.get("extra_json").cloned().unwrap_or_default();
+        let supply = extra["EnergySupply"].as_str().unwrap_or("mains elec");
+        let cell = |key: &str| {
+            extra
+                .get(key)
+                .filter(|v| !v.is_null() && v.as_str() != Some(""))
+        };
+        // DESNZ-defined defaults: age 5 years, grid charging possible, no export.
+        for (key, label, unit, default) in [
+            ("battery_age", "battery age", " years", json!(5.0)),
+            ("grid_charging_possible", "grid charging", "", json!(true)),
+            ("grid_exporting_possible", "grid export", "", json!(false)),
+        ] {
+            if let Some(v) = cell(key).filter(|v| {
+                v.as_f64()
+                    .map_or(**v != default, |f| Some(f) != default.as_f64())
+            }) {
+                out.push((
+                    json_pointer(&["EnergySupply", supply, "ElectricBattery", key]),
+                    claim(&who, label, format!("{}{unit}", shown(v))),
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// An existing building's direct electric boiler: its size category or rated power is an
 /// assessor input with no default; with neither its circulation pump power nor its manufacture
 /// year, the year is unknown (DESNZ-defined). False when it cannot convert.

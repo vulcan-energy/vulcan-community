@@ -40,6 +40,23 @@ describe('resolveIssueTarget', () => {
       .toMatchObject({ elementId: 'slash', fieldKey: 'window_part_list' });
   });
 
+  it('lands a system plant issue on the System row that holds the plant', () => {
+    const tank = { id: 'tank', name: 'Storage Tank', zoneId: 'z1', extra_json: { HotWaterSource: { 'hw cylinder': { type: 'StorageTank' } } } };
+    expect(resolveIssueTarget('/HotWaterSource/hw cylinder/location', { ...model, elements: [...model.elements, tank] }))
+      .toMatchObject({ section: 'HotWaterSource', elementId: 'tank', fieldKey: 'location' });
+    const circuit = { id: 'circuit', name: 'Heating', extra_json: { SpaceHeatSystem: { 'Zone 1 circuit': { type: 'WetDistribution' } } } };
+    const rad = { id: 'rad', name: 'Rad 1' };
+    const withCircuit = { ...model, elements: [...model.elements, tank, circuit, rad] };
+    // The row the message names wins over the system holding it.
+    expect(resolveIssueTarget('/SpaceHeatSystem/Zone 1 circuit/emitters/0/n', withCircuit, "Wet Emitters row 'Rad 1' (system 'Zone 1 circuit'): n is required."))
+      .toMatchObject({ elementId: 'rad' });
+    expect(resolveIssueTarget('/SpaceHeatSystem/Zone 1 circuit/emitters/0/n', withCircuit)).toMatchObject({ elementId: 'circuit', fieldKey: undefined });
+    // Only the section the plant is in, and only one holder.
+    expect(resolveIssueTarget('/HeatSourceWet/hw cylinder/location', withCircuit).elementId).toBeUndefined();
+    const twoTanks = { ...model, elements: [tank, { ...tank, id: 'tank2', name: 'Tank 2' }] };
+    expect(resolveIssueTarget('/HotWaterSource/hw cylinder/location', twoTanks).elementId).toBeUndefined();
+  });
+
   it('maps zone-level keys to the zone panel and gives each object its own owner', () => {
     const bridge = resolveIssueTarget('/Zone/Zone 1/ThermalBridging', model);
     expect(bridge).toMatchObject({ zoneId: 'z1', fieldKey: 'simplifiedThermalBridging' });

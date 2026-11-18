@@ -31,7 +31,7 @@ describe.each([
     act(() => result.current.handleInputChange(typed('3')));
     act(() => result.current.handleBlur());
     act(() => vi.runAllTimers());
-    expect(onCommit).toHaveBeenCalledWith(3);
+    expect(onCommit.mock.calls.at(-1)?.[0]).toBe(3);
     vi.useRealTimers();
   });
 });

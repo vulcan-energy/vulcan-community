@@ -114,6 +114,8 @@ export interface AssemblyCalculatorModalProps {
    * suspended floors — when this is not `Suspended_floor`, the calculator uses a single construction R only.
    */
   groundFloorType?: GroundFloorType | null;
+  /** Opens with the library list open, to change the assembly. */
+  openLibrary?: boolean;
 }
 
 function newBridgeId(): string {
@@ -223,6 +225,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
   externalDetailCataloguePort,
   initialOpaqueSubtype = null,
   groundFloorType = null,
+  openLibrary = false,
 }) => {
   // The target takes areal heat capacity as a number or as a class on its own scale.
   // The rule follows the target alone, not the model settings, so the modal needs no store.
@@ -1074,6 +1077,7 @@ export const AssemblyCalculatorModal: React.FC<AssemblyCalculatorModalProps> = (
               <label style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>Load from library</label>
               <SearchableDescribedSelect
                 key={`starter-${libraryElementType}`}
+                defaultOpen={openLibrary}
                 value=""
                 placeholder="Search assemblies…"
                 searchPlaceholder="Filter by name…"

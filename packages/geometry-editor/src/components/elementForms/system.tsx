@@ -119,6 +119,8 @@ import { collectHeatSourceWetNamesFromProject } from '../../lib/heatSourceWetNam
 import { useKeyedState } from '../../hooks/useKeyedState';
 import { systemPlantTypes, withSystemPlantType } from '../../lib/systemSchemaFlatten';
 import { readRecord } from '../../lib/jsonTypes';
+import { storageTank } from '../../lib/inputMethods';
+import { CompactSegmentedControl } from '../WindowDetailControls';
 import { StandardDropdown } from '../StandardDropdown';
 import { HeatingSizingBlock } from '../HeatingSizingBlock';
 import {
@@ -927,6 +929,36 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
 
     // Products take no sample preset, so the type is chosen here.
     const showType = !!(hemDatabaseProducts && systemPlantCount <= 1 && systemSubcategory && selectedSystemElementFull && systemTypeOptions.length);
+    const typeField = showType ? (
+      <>
+        <div className="element-label">Type</div>
+        <div className="element-input">
+          <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
+        </div>
+      </>
+    ) : null;
+    // A products target's cylinder states where it is beside its type; the conversion has no default.
+    const tank = hemDatabaseProducts && systemSubcategory === 'HotWaterSource' ? storageTank(selectedSystemElementFull?.extra_json) : undefined;
+    const tankLocation = tank && selectedSystemElementFull ? (
+      <div data-tank-location ref={ctx.registerBaseFieldRef('location')}>
+        <div className="element-label">{systemPlantCount > 1 ? `${tank[0]} · Location` : 'Location'}</div>
+        <div className="element-input">
+          <CompactSegmentedControl
+            ariaLabel="Location"
+            value={typeof tank[1].location === 'string' ? tank[1].location : ''}
+            options={[{ value: 'internal', label: 'Inside' }, { value: 'external', label: 'Outside' }]}
+            onChange={(location) => {
+              const extra = readRecord(selectedSystemElementFull.extra_json);
+              ctx.updateElement(selectedSystemElementFull.id, { extra_json: { ...extra, HotWaterSource: { ...readRecord(extra.HotWaterSource), [tank[0]]: { ...tank[1], location } } } } as Partial<Element>);
+            }}
+          />
+        </div>
+        {typeof tank[1].location === 'string' ? null : <div className="field-source-note">Required, no default</div>}
+      </div>
+    ) : null;
+    const typeRow = tankLocation
+      ? <div style={{ display: 'grid', gridTemplateColumns: typeField ? 'minmax(0, 1fr) auto' : '1fr', gap: 8, alignItems: 'start' }}>{typeField ? <div>{typeField}</div> : null}{tankLocation}</div>
+      : typeField;
     return (
       <>
         {productCatalogue ? (
@@ -956,28 +988,14 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
 
         {systemHasProductSlot ? (
           <>
-            {showType ? (
-          <>
-            <div className="element-label">Type</div>
-            <div className="element-input">
-              <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
-            </div>
-          </>
-        ) : null}
+            {typeRow}
             {sizing}
             {systemSubcategory === 'SpaceHeatSystem' ? renderSpaceHeatSystemEmitterManager() : null}
           </>
         ) : !productCatalogue || systemUiMode === 'presets' ? (
           <>
             {categoryField}
-            {showType ? (
-          <>
-            <div className="element-label">Type</div>
-            <div className="element-input">
-              <StandardDropdown value={systemPlantType} onChange={handleSystemTypeChange} options={systemTypeOptions} placeholder="Select type…" variant="ghost" size="md" />
-            </div>
-          </>
-        ) : null}
+            {typeRow}
             {/* The sample presets are FHS inputs; a HEM Database products target takes none. */}
             {hemDatabaseProducts ? null : (
               <>
@@ -1011,6 +1029,8 @@ export const systemFormModule: ElementFormModule<SystemFormState> = {
           elementVersion: selectedElementV,
           onApply: handlePcdbSystemApply,
         })}
+        {/* A PCDB plant: its sizing under the product source, as the other branches show it. */}
+        {!systemHasProductSlot && productCatalogue && systemUiMode !== 'presets' ? sizing : null}
       </>
     );
   },

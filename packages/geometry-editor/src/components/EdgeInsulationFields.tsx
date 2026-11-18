@@ -32,6 +32,8 @@ export interface EdgeInsulationFieldsProps {
   /** The element the fields edit; the chosen method is held per element. */
   elementKey?: string;
   flat?: boolean;
+  /** The host's evidence line for the field, beside its label. */
+  renderEvidence?: (fieldKey: string) => React.ReactNode;
 }
 
 /** Match JsonForms `NumberControl` row spacing in Advanced Fields (`jsonformsRenderers.tsx`). */
@@ -53,6 +55,7 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
   elementType,
   elementKey,
   flat = false,
+  renderEvidence,
 }) => {
   const schemaPort = useGeometrySchemaPort();
   const schemaMode = targetSchemaMode(schemaPort);
@@ -155,13 +158,15 @@ export const EdgeInsulationFields: React.FC<EdgeInsulationFieldsProps> = ({
     );
   };
 
+  const evidenceLine = renderEvidence?.('edge_insulation');
   return (
     <div data-field-key="edge_insulation" style={{ width: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', margin: ROW_MARGIN(compact) }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, margin: ROW_MARGIN(compact) }}>
         {renderFieldLabelWithTooltip('Edge Insulation', elementType)}
+        {evidenceLine}
       </div>
       {existing && (
-        <p style={{ margin: ROW_MARGIN(compact), fontSize: 12, color: 'var(--text-secondary)' }}>
+        <p className="field-source-note" style={{ margin: ROW_MARGIN(compact) }}>
           Leave blank for the default: vertical, 0.26 m deep, 25 mm mineral wool. Horizontal edge insulation has no default width.
         </p>
       )}

@@ -11,9 +11,10 @@
   width: 100%;
 }
 
+/* The same size and weight as an editor field label (.element-label). */
 .standard-input-label {
   font-family: var(--font-family);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   margin-bottom: var(--spacing-xs);

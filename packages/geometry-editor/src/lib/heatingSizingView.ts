@@ -27,6 +27,13 @@ export function fmtTemp(v: number): string {
   return `${rounded < 0 ? MINUS : ''}${Math.abs(rounded)}${NBSP}°C`;
 }
 
+/**
+ * A flow temperature, in whole degrees as a design flow temperature is set. Rounded up where the
+ * flow is enough (the lowest flow that is enough stays enough), down where it is too small, so a
+ * verdict never reads at a flow on the other side of the lowest flow that is enough.
+ */
+export const fmtFlow = (v: number, enough = true): string => fmtTemp(enough ? Math.ceil(v - 1e-9) : Math.floor(v + 1e-9));
+
 export type PillTone = 'success' | 'error' | 'warning';
 export interface SizingPill { label: string; tone: PillTone }
 
@@ -104,7 +111,7 @@ const leaderCandidates = (text: string, x: number, y: number, points: { x: numbe
   return [...beside, ...centred];
 };
 
-const labelRect = (l: SvgLabel, fontSize: number): Rect => {
+export const labelRect = (l: SvgLabel, fontSize: number): Rect => {
   const w = textWidth(l.text, fontSize);
   const x = l.anchor === 'start' ? l.x : l.anchor === 'end' ? l.x - w : l.x - w / 2;
   return { x, y: l.y - fontSize - 2, w, h: fontSize + 8 };
@@ -201,23 +208,23 @@ export const isSized = (s: SystemSizing): s is SizedSystem =>
 /** Where the radiators start to give enough heat, against the curve the chart draws. */
 export function emitterSentence(s: Pick<SystemSizing, 'minFlowC' | 'curve' | 'flowTempAtDesignC'>): string {
   if (s.minFlowC === null) {
-    return `Radiators do not give enough heat at any flow temperature up to ${fmtTemp(Math.max(MIN_FLOW_SEARCH_MAX_C, s.flowTempAtDesignC ?? 0))}.`;
+    return `Radiators do not give enough heat at any flow temperature up to ${fmtFlow(Math.max(MIN_FLOW_SEARCH_MAX_C, s.flowTempAtDesignC ?? 0))}.`;
   }
   const first = s.curve[0].flowC;
   return s.minFlowC <= first
-    ? `Radiators give enough heat at any flow temperature from ${fmtTemp(first)}.`
-    : `Radiators give enough heat from ${fmtTemp(s.minFlowC)} flow.`;
+    ? `Radiators give enough heat at any flow temperature from ${fmtFlow(first)}.`
+    : `Radiators give enough heat from ${fmtFlow(s.minFlowC)} flow.`;
 }
 
 /** The system's one sentence: the lower design flow temperature when one is suggested (SystemSizing.suggestedFlowC), else where the radiators start to give enough heat. */
 export const systemSentence = (s: SystemSizing): string =>
   s.suggestedFlowC === null
     ? emitterSentence(s)
-    : `You could lower the design flow temperature to ${fmtTemp(s.suggestedFlowC)}. The radiators still give enough heat, and the heat pump runs more efficiently.`;
+    : `You could lower the design flow temperature to ${fmtFlow(s.suggestedFlowC)}. The radiators still give enough heat, and the heat pump runs more efficiently.`;
 
 /** The emitters' output at the design flow temperature against the need. */
 export function emitterOutputSentence(s: SizedSystem, zoneCount: number): string {
-  return `Radiators give ${fmtKw(s.outputAtDesignKw)} at ${fmtTemp(s.flowTempAtDesignC)} flow. ${subject(zoneCount)} needs ${fmtKw(s.designLossKw)}.`;
+  return `Radiators give ${fmtKw(s.outputAtDesignKw)} at ${fmtFlow(s.flowTempAtDesignC, s.verdict === 'ok')} flow. ${subject(zoneCount)} needs ${fmtKw(s.designLossKw)}.`;
 }
 
 // ---- Heat source ----
@@ -338,7 +345,7 @@ export function yTickStep(max: number): { step: number; decimals: number } {
 }
 
 const systemPill = (s: SizedSystem): SizingPill => ({
-  label: `${s.verdict === 'ok' ? 'Big enough' : 'Too small'} at ${fmtTemp(s.flowTempAtDesignC)}`,
+  label: `${s.verdict === 'ok' ? 'Big enough' : 'Too small'} at ${fmtFlow(s.flowTempAtDesignC, s.verdict === 'ok')}`,
   tone: s.verdict === 'ok' ? 'success' : 'error',
 });
 
@@ -454,6 +461,14 @@ function emitterChart(s: SizedSystem, zoneCount: number): EmitterChart {
   };
 }
 
+/** Why the pill's flow is not the design flow temperature: weather compensation lowers it on the coldest hour. */
+function weatherCompensatedFlow(s: SizedSystem): string | null {
+  const flow = fmtFlow(s.flowTempAtDesignC, s.verdict === 'ok');
+  // Without weather compensation the flow is the design flow temperature itself (`flowAtDesign`).
+  if (s.designFlowTempC === null || Math.abs(s.flowTempAtDesignC - s.designFlowTempC) < 1e-9 || flow === fmtFlow(s.designFlowTempC)) return null;
+  return `In the coldest hour, weather compensation runs ${flow} flow, not the ${fmtFlow(s.designFlowTempC)} design flow temperature.`;
+}
+
 export function systemView(entry: SystemSizing, sizing: Pick<HeatingSizing, 'zoneCount'>): SystemView | SizingNote {
   if (!isSized(entry)) return note(entry.status === 'ok' ? 'The result is incomplete' : entry.reason);
   return {
@@ -461,7 +476,7 @@ export function systemView(entry: SystemSizing, sizing: Pick<HeatingSizing, 'zon
     pill: systemPill(entry),
     sentence: systemSentence(entry),
     chart: emitterChart(entry, sizing.zoneCount),
-    caption: 'Radiator output at each flow temperature.',
+    caption: ['Radiator output at each flow temperature.', weatherCompensatedFlow(entry)].filter(Boolean).join(' '),
   };
 }
 

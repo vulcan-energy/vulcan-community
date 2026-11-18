@@ -92,7 +92,7 @@ import {
 } from '../../lib/roofCutouts';
 import { inferPsiSourceFromValue } from '../../lib/simplifiedFabricMap';
 import { type HeatingSizing, type HeatSourceSizing, type SystemSizing } from '../../lib/heatingSizing';
-import { fmtTemp, subjectOf } from '../../lib/heatingSizingView';
+import { fmtFlow, subjectOf } from '../../lib/heatingSizingView';
 import { getEffectiveLinearPsiFromWorkspaceSparseMap } from '../../lib/junctionPsiDefaultsCsv';
 import { getPApportionedLinearPsiForEditor } from '../thermalBridge/linearTbPsi';
 import { AREAL_HEAT_CAPACITY_CLASSES, arealHeatCapacityWrite, computeOpaqueUAndTotals, matchesArealHeatCapacityClass } from '../../lib/assemblyCalculator';
@@ -103,7 +103,7 @@ import { thermalBridgeLinearHasPositiveRun } from '../../lib/thermalBridgeLinear
 import { elementBaseElevationMForTb } from '../../lib/geometry3dMapper';
 import { findSuspendedGroundSurfaceForLineElement } from '../../lib/suspendedFloorGeometry';
 import { findLinkedBasementGroundForLineElement, isBasementGroundElement } from '../../lib/basementGeometry';
-import { computeGroundExposedPerimeterDetails } from '../../lib/groundExposedPerimeter';
+import { GROUND_FLOOR_TYPE_LABELS } from '../../lib/groundFloor';
 import { isExternalLineWall } from '../thermalBridge/proposeExternalCorners';
 import type { LinearThermalBridgeIssue } from '../thermalBridge/findLinearThermalBridgeIssues';
 import { findLinearThermalBridgeIssues } from '../thermalBridge/findLinearThermalBridgeIssues';
@@ -138,7 +138,7 @@ import {
   terminalConnectsToDuctEndpoint,
 } from '../../lib/mvhrDuctwork';
 import { MVHR_DUCT_ROLES, isMvhrDuctRole, isMvhrTerminalRole } from '../../lib/mvhrRoles';
-import { getHemieBundle, hemieBundleHostProblem } from '../../lib/hemieBundles';
+import { getHemieBundle, hemieBundleHostProblem, hemieBundleMissing } from '../../lib/hemieBundles';
 import { hemieConstructionType, hemieHeatCapacityBands, statedBuildType } from '../../lib/hemieFabric';
 import { resolveFieldLabelContent } from '../../lib/schemaDescriptionOverrides';
 import { adjacentUnconditionedZone, takesUnconditionedZones, unconditionedZoneIssues, unconditionedZoneNames, ZONE_UNCONDITIONED } from '../../lib/unconditionedZones';
@@ -593,8 +593,8 @@ export function heatingSizingWarnings(
   const add = (id: string, message: string) => out.set(id, [...(out.get(id) ?? []), { message, source: 'sizing' }]);
 
   const subject = subjectOf(sizing.result.zoneCount);
-  // The flag says the verdict only. The numbers, the range and the basis live in the element panel's
-  // Sizing block, so the two never repeat each other.
+  // The flag says the verdict only, for the elements list. The element panel shows its Sizing
+  // block (the verdict, numbers, range and basis) instead of this flag.
   for (const s of sizing.result.heatSources) {
     if (s.status !== 'ok' || s.designLossKw === null) continue;
     const kind = s.kind === 'HeatPump' ? 'heat pump' : 'boiler';
@@ -613,7 +613,7 @@ export function heatingSizingWarnings(
   for (const s of sizing.result.systems) {
     if (s.status !== 'ok' || s.verdict !== 'too-small') continue;
     if (s.outputAtDesignKw === null || s.flowTempAtDesignC === null || s.designLossKw === null) continue;
-    const message = `The radiators are too small at ${fmtTemp(s.flowTempAtDesignC)} flow.`;
+    const message = `The radiators are too small at ${fmtFlow(s.flowTempAtDesignC, false)} flow.`;
     for (const e of elements) if (systemKey(e).has(s.name)) add(e.id, message);
   }
   return out;
@@ -1327,6 +1327,11 @@ export const validateElementCore = (
     ? hemieBundleHostProblem(element, Object.values(context.elementsById))
     : null;
   if (bundleHostIssue) issues.push(geoIssue(bundleHostIssue, 'coordinates'));
+  // A required input the part still lacks: nothing is drawn or entered for it.
+  const bundleMissing = context.elementsById && getHemieBundle(element)?.role === 'front-wall'
+    ? hemieBundleMissing(element, Object.values(context.elementsById), targetRules(context.schemaPort, context.complianceSettings ?? {}).hemieBundles)
+    : null;
+  if (bundleMissing) issues.push(geoIssue(bundleMissing, 'coordinates'));
   const warnings: ValidationIssue[] = [];
   // Local aliases for the module-level helpers (geoIssue/schemaIssue/fhsIssue) so the long
   // switch below stays readable. Per-type validators in subsequent refactors call the
@@ -1616,19 +1621,6 @@ export const validateElementCore = (
               ),
             );
           }
-        }
-      }
-      if (elementsById && el.name && el.zoneId) {
-        const hasAttachedShading = Object.values(elementsById).some(
-          (candidate): candidate is WindowShading =>
-            candidate.type === 'WindowShading' &&
-            !candidate.isPlaceholder &&
-            candidate.zoneId === el.zoneId &&
-            candidate.parent_element === el.name,
-        );
-        // An existing building takes close shading as categories on the window, not drawn reveals.
-        if (!hasAttachedShading && !isExistingBuildingContext(context)) {
-          warnings.push(geo('Consider adding shading, most windows have reveals', 'shading'));
         }
       }
       if (el.parent_element && elementsById && el.coordinates && el.coordinates.length >= 3) {
@@ -2643,10 +2635,20 @@ export const validateElementCore = (
         }
       }
 
+      // A floor with no type yet: a field only some floor types take waits for the type.
+      const requiredByEveryFloorType = element.type === 'BuildingElementGround' && !schemaSubtype
+        ? (Object.keys(GROUND_FLOOR_TYPE_LABELS) as string[])
+          .map((floorType) => schemaPort.getElementSubschema(schemaMode, element.type, floorType)?.required)
+          .reduce<Set<string> | null>((common, required) => {
+            const fields = new Set(Array.isArray(required) ? required.filter((f): f is string => typeof f === 'string') : []);
+            return common ? new Set([...common].filter((f) => fields.has(f))) : fields;
+          }, null)
+        : null;
       for (const field of allRequiredFields) {
         // The converter builds it from other inputs, or the target hides it or leaves it optional:
         // no panel asks for it, so it is never "Enter the …".
         if (converterBuilds(element.type, field) || hiddenFields.has(field)) continue;
+        if (requiredByEveryFloorType && field !== 'floor_type' && !requiredByEveryFloorType.has(field)) continue;
         // Check if field exists in element directly or in extra_json
         // Also check for null/undefined values (they count as missing)
         // NOTE: OnSiteGeneration has a naming collision:
@@ -2729,6 +2731,8 @@ export const validateElementCore = (
               : (elementData[field] ?? extraJson[field])
           );
         if (fieldValue === null || fieldValue === undefined) continue;
+        // A wall's area comes from its width and height: with no height, the height message says it.
+        if (element.type === 'BuildingElementOpaque' && field === 'area' && fieldValue === 0 && !(Number(elementData.height) > 0)) continue;
 
         // Only run AJV validation for fields that actually declare constraints,
         // to keep this lightweight.
@@ -2873,21 +2877,6 @@ export const validateElementCore = (
 
     if (element.type === 'BuildingElementGround' && !element.isPlaceholder) {
       const ground = element as BuildingElementGround;
-      const details = computeGroundExposedPerimeterDetails(elementsById, ground);
-      const perimeter = typeof ground.perimeter === 'number' && Number.isFinite(ground.perimeter)
-        ? ground.perimeter
-        : null;
-      const hasReliableExposedPerimeter =
-        details.valueM > 0 ||
-        (details.shapePerimeterM > 0 && details.linkedBoundaryPerimeterM >= Math.max(0, details.shapePerimeterM - 0.05));
-      if (hasReliableExposedPerimeter && perimeter != null && Math.abs(perimeter - details.valueM) > 0.05 && !leftToTarget(element.type, 'perimeter')) {
-        warnings.push(
-          geo(
-            `Perimeter ${formatNumberForIssue(perimeter)} m differs from exposed wall-linked perimeter ${formatNumberForIssue(details.valueM)} m`,
-            'perimeter',
-          ),
-        );
-      }
       // A non-basement ground element drawn on an upper canvas storey is almost always a legacy
       // room-tool artefact — it exports ground-contact fabric on a floor that isn't the ground.
       // Basements (z < 0) and the ground storey (z = 0) never warn.
@@ -2946,8 +2935,10 @@ export const validateElementCore = (
       }
     }
 
+    // A bay's or conservatory's members are drawn by the part, not snapped by hand.
+    const drawnByPart = getHemieBundle(element) !== null;
     // Warning 2: BuildingElementOpaque (line type) not external doors missing snaps
-    if (element.type === 'BuildingElementOpaque') {
+    if (element.type === 'BuildingElementOpaque' && !drawnByPart) {
       const opaque = element as BuildingElementOpaque;
       if (!opaque.is_external_door && opaque.coordinates && opaque.coordinates.length === 2) {
         const snappedCount = getWallSupportedSnappedVertices(opaque, elementsById).size;
@@ -2991,7 +2982,7 @@ export const validateElementCore = (
       'BuildingElementAdjacentUnconditionedSpace_Simple',
       'BuildingElementPartyWall',
     ];
-    if (element.coordinates && element.coordinates.length >= 3 && polygonCapableTypes.includes(element.type)) {
+    if (!drawnByPart && element.coordinates && element.coordinates.length >= 3 && polygonCapableTypes.includes(element.type)) {
       const shape = getElementShape(element);
       if (shape === 'polygon') {
         const snappedCount = getWallSupportedSnappedVertices(element, elementsById).size;
@@ -3221,6 +3212,7 @@ export const collectGeometryValidation = (
       complianceValidationEnabled,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: bridgingOffered,
+      constructionBands: targetRules(options.schemaPort, options.complianceSettings ?? {}).constructionBands,
     });
     warnings.push(...validation.warnings.map(w => w.message));
     criticalIssues.push(...validation.issues.map(i => i.message));

@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, applianceRequiresEnergySupply, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile, validateValueAgainstPropertyNode } from '../schemaCache';
+import { configureGeometrySchemaAssetSource, preloadSchema, preloadFHSSchema, getSchemaObject, getFHSSchemaObject, resetGeometrySchemaAssetsForTests, subscribeGeometrySchema, getGeometrySchemaRevision, getApplianceKeysForMode, applianceRequiresEnergySupply, thermalBridgingAcceptsTotal, elementTypeAvailability, resolveElementSubschemaForProfile, validateValueAgainstPropertyNode, schemaLoadFailed } from '../schemaCache';
 import { ELEMENT_TYPE_ORDER } from '../elementTypeMetadata';
 import type { GeometrySchemaMode, GeometrySchemaPort } from '../../../../geometry-editor-host/src/schemaPort';
 import { ensureRootSchema, getAjvInstance, resetGeometrySchemaValidators } from '../ajvCache';
@@ -169,8 +169,17 @@ describe('elementTypeAvailability', () => {
     ['fhs', 'data/schemas/input_fhs.schema.json', ['CombustionAppliances']],
     ['core', 'hem_engine_upstream/schemas/core-input.schema.json', ['Lighting', 'Appliance', 'CombustionAppliances']],
     ['core', 'data/schemas/core-input.schema.json', ['Lighting', 'Appliance', 'CombustionAppliances']],
+    // The oven and hob are HEM:EPC appliances, so a drawn house needs the Appliance type.
+    ['core', 'data/schemas/hem_epc_orchestrator_input.schema.json', ['MechanicalVentilationDuctwork', 'CombustionAppliances']],
   ] as const)('%s %s offers every type it has a section for', (mode, path, absent) => {
     expect(unavailable(port(mode, root(path)))).toEqual(absent);
+  });
+
+  it('reads a named HEM:EPC appliance as its own entry: the oven asks for its energy supply', () => {
+    const epc = root('data/schemas/hem_epc_orchestrator_input.schema.json');
+    expect(resolveElementSubschemaForProfile(epc, 'core', 'Appliance', 'Oven')?.required).toEqual(['EnergySupply']);
+    // With no key chosen, the dwelling's presence answers are not the element's to give.
+    expect(resolveElementSubschemaForProfile(epc, 'core', 'Appliance')?.required ?? []).toEqual([]);
   });
 
   it('hides a type the host excludes, with its reason, and offers nothing else before the schema loads', () => {
@@ -199,5 +208,23 @@ describe('FHS building element U-value or resistance', () => {
   });
   it('requires neither when both are allowed', () => {
     expect(required({ u_value_whole_wall: {} })).toEqual(['type', 'u_value_whole_wall']);
+  });
+});
+
+describe('schemaLoadFailed', () => {
+  it('says a load failed, tells the editors, and clears when a retry loads', async () => {
+    let fail = true;
+    configureGeometrySchemaAssetSource({ loadText: async () => { if (fail) throw new Error('Target manifest unavailable'); return JSON.stringify(schema(0)); } });
+    const listener = vi.fn();
+    const unsubscribe = subscribeGeometrySchema(listener);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(preloadFHSSchema()).rejects.toThrow('Target manifest unavailable');
+    expect(schemaLoadFailed(true)).toBe(true);
+    expect(schemaLoadFailed(false)).toBe(false);
+    expect(listener).toHaveBeenCalled();
+    fail = false;
+    await preloadFHSSchema();
+    expect(schemaLoadFailed(true)).toBe(false);
+    unsubscribe();
   });
 });

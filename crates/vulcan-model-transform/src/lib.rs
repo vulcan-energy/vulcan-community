@@ -143,6 +143,16 @@ impl ModelProfile {
         }
     }
 
+    /// A hot water source that states no cold water source takes the model's, as one that states
+    /// it does (`apply_wrapper_cold_water_source`): every FHS hot water source type requires one.
+    /// EPC differs: its tanks are built by the converter with the model's source.
+    pub(crate) fn fills_hot_water_cold_water_source(self) -> bool {
+        match self {
+            Self::Core | Self::Epc => false,
+            Self::Fhs => true,
+        }
+    }
+
     /// Every wet heat source states `is_heat_network` (false unless authored).
     /// EPC differs: only its HIU and DirectFeed definitions declare it, and require it, so it
     /// is authored on those systems and never inserted.
@@ -656,7 +666,7 @@ pub struct TransformOutput {
     pub weather_curves: Vec<WeatherCurve>,
     /// HEM:EPC dwelling inputs the pinned Orchestrator accepts but its schema hides, for the host
     /// to add after validation where the job input lacks them (`hemie::hidden_dwelling_inputs`,
-    /// DESNZ question E7).
+    /// assumption pending DESNZ).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hidden_inputs: Option<Value>,
 }

@@ -152,30 +152,6 @@ export function openingTooWide(opening: Element | undefined, parent: Element | u
   return typeof width === 'number' && width > wall + 0.005 ? `${width.toFixed(2)} m window on a ${wall.toFixed(2)} m wall` : undefined;
 }
 
-/** The line wall a window lies on, on its storey: where "Reattach" puts a window whose wall was deleted. */
-export function wallUnderOpening(opening: Element | undefined, elements: readonly Element[]): Element | undefined {
-  const line = opening?.type === 'BuildingElementTransparent' ? opening.coordinates : undefined;
-  if (line?.length !== 2) return undefined;
-  // Its middle on the wall, both ends on the wall's line, on the same storey.
-  const distance = (point: { x: number; y: number }, [a, b]: Array<{ x: number; y: number }>, clamp: boolean) => {
-    const vx = b!.x - a!.x;
-    const vy = b!.y - a!.y;
-    const lengthSq = vx * vx + vy * vy;
-    if (lengthSq === 0) return Infinity;
-    const raw = ((point.x - a!.x) * vx + (point.y - a!.y) * vy) / lengthSq;
-    const t = clamp ? Math.min(1, Math.max(0, raw)) : raw;
-    return Math.hypot(point.x - (a!.x + t * vx), point.y - (a!.y + t * vy));
-  };
-  const middle = { x: (line[0]!.x + line[1]!.x) / 2, y: (line[0]!.y + line[1]!.y) / 2 };
-  return elements.find((wall) => wall.type === 'BuildingElementOpaque'
-    && !(wall as BuildingElementOpaque).is_external_door
-    && wall.zoneId === opening!.zoneId
-    && wall.coordinates?.length === 2
-    && Math.abs((wall.coordinates[0]!.z ?? 0) - (line[0]!.z ?? 0)) < 0.01
-    && distance(middle, wall.coordinates, true) < 0.05
-    && line.every((point) => distance(point, wall.coordinates, false) < 0.05));
-}
-
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
 /** The nearest of eight compass points for an orientation in degrees (0 = north): "faces S". */
 export const compassPoint = (degrees: number): string => COMPASS[Math.round((((degrees % 360) + 360) % 360) / 45) % 8]!;

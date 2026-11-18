@@ -74,6 +74,8 @@
 
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { useKeyedState } from '../../hooks/useKeyedState';
+import { useGeometryStoreApi } from '../../stores/geometryStore';
+import { changeWithUndo } from '../../lib/undoToast';
 import { roundToTwoDecimals } from '../../geometry/constants';
 import {
   applyCompassOrientationToLineCoords,
@@ -90,7 +92,7 @@ import type { BuildingElementOpaque, BuildingElementTransparent, Element, Elemen
 // it) because this hook is the single-instance call site the wall family's three pitch-field
 // copies (Opaque/Transparent/Adjacent-like) all read from — same "only one renders at a time,
 // hooks must run unconditionally" reasoning that motivated PR #31's own single call site.
-import { useNumericDraftInput } from '../numericDraftInput';
+import { useNumericDraftInput, type NumericDraftCommitTrigger } from '../numericDraftInput';
 import { useDecimalInput, type NumericDraftInputBinding } from './formPrimitives';
 import { ADJACENT_LIKE_ELEMENT_TYPES } from '../../lib/elementArea';
 import type { ElementFormSelection } from './types';
@@ -160,6 +162,7 @@ export function useWallSharedFormState(args: {
     getGlobalOrientationOffset,
     getCurrentOrientation,
   } = args;
+  const geometryStore = useGeometryStoreApi();
 
   const isSelectedSlopedFabricPolygon = () => {
     if (!isExistingElementSelection()) return false;
@@ -203,7 +206,7 @@ export function useWallSharedFormState(args: {
     commitExistingElementDraft(overrides as Partial<Element>);
   };
 
-  const commitElementHeightField = (value: number | '') => {
+  const commitElementHeightField = (value: number | '', trigger: NumericDraftCommitTrigger) => {
     if (value === '') return;
     const height = typeof value === 'number' ? value : undefined;
     const isSlopedPolygon = isSelectedSlopedFabricPolygon();
@@ -225,6 +228,10 @@ export function useWallSharedFormState(args: {
       overrides.area = width !== undefined && height !== undefined ? width * height : undefined;
     }
     commitExistingElementDraft(overrides as Partial<Element>);
+    // The finished edit (never a keystroke) fills the storey's walls that have no height.
+    if (trigger === 'commit' && !isSlopedPolygon && isExistingElementSelection()) {
+      geometryStore.getState().fillHeightlessStoreyWalls((selection as ElementFormSelection).id);
+    }
   };
 
   const widthInput = useDecimalInput('', commitElementWidthField, { commitOnChange: true });
@@ -298,15 +305,13 @@ export function useWallSharedFormState(args: {
         const currentShape = getElementShape(currentElement);
 
         // A flat polygon's surface is a 0°/180° dropdown, so a typed pitch never reaches one.
-        // For lines: suggest polygon conversion for horizontal surfaces
+        // A line given a horizontal pitch becomes a polygon: the pitch is kept, then the shape
+        // changes as its own step, with Undo (not asked first).
         if (currentShape === 'line' && (newPitch === 0 || newPitch === 180)) {
-          const ok = window.confirm(
-            `Pitch ${newPitch}° suggests a horizontal surface. Convert to polygon shape?`
-          );
-          if (ok) {
-            const nextCoords = convertShapeCoordinates(currentElement as any, 'polygon');
-            updateElement(currentElement.id, { coordinates: nextCoords, pitch: newPitch });
-          }
+          updateElement(currentElement.id, { pitch: newPitch });
+          changeWithUndo(geometryStore, `Changed to a flat surface to take a ${newPitch}° pitch.`, () => {
+            updateElement(currentElement.id, { coordinates: convertShapeCoordinates(currentElement as any, 'polygon') });
+          });
         }
       }
     }

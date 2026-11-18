@@ -177,6 +177,7 @@ export const WindowTreatmentFields: React.FC<WindowTreatmentFieldsProps> = ({
         <>
           {form.enabled ? (
             <CompactSegmentedControl
+              compact
               ariaLabel="Blinds or curtains source"
               value={tableMode ? 'table' : 'custom'}
               onChange={(value) => (value === 'custom' ? goCustom() : goTable())}

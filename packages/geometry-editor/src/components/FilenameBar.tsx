@@ -13,18 +13,17 @@ import { StandardDropdown } from './StandardDropdown';
 import { useKeyedState } from '../hooks/useKeyedState';
 import { useGeometryStore } from '../stores/geometryStore';
 import type { BuildErrorItem } from '../types/buildErrors';
-import { issuePathSegments, resolveIssueTarget, type IssueTarget } from '../lib/issueTarget';
-import { displayBuildErrorRows as toDisplayBuildErrorRows, type DisplayBuildError } from '../lib/buildErrorDisplay';
+import { resolveIssueTarget, type IssueTarget } from '../lib/issueTarget';
+import { buildErrorListItems, displayBuildErrorRows as toDisplayBuildErrorRows, globalSettingsFieldOf, type DisplayBuildError } from '../lib/buildErrorDisplay';
+import { usesEpcGlobalValues } from '../lib/globalSettingsValidation';
+import { useTargetRules } from '../hooks/useTargetRules';
 import type { GeometryDocumentHostPort } from '../../../geometry-document/src';
 import './GlobalButtonSystem.css';
 import './FilenameBar.css';
 import { csvMigrationIssues, type UValueInterpretation, type CsvMigrationIssue } from '../geometry/io/csvSemanticMigration';
+import { EVIDENCE_CODE } from '../types/buildErrors';
 
 /** A Metadata row lives in Global Settings: the host opens it at that field. */
-const metadataRowOf = (path?: string) => {
-  const [section, row] = issuePathSegments(path);
-  return section === 'Metadata' ? row : undefined;
-};
 
 export type FilenameBarActionContext = Readonly<{
   documentHost: GeometryDocumentHostPort;
@@ -36,6 +35,15 @@ export type FilenameBarActionContext = Readonly<{
   onOpenDefaults?: () => void;
   defaultsInvalid?: boolean;
   globalSettingsIndicator?: { variant: 'error' | 'warning' | 'info'; issues: string[] } | null;
+}>;
+
+/** A row a host adds to the Build Error list: where, what to do, and the action that goes there. */
+export type HostIssueRow = Readonly<{
+  /** Unique within the list: two rows can share a location name (same-named elements in two zones). */
+  key: string;
+  location: string;
+  message: string;
+  select?: () => void;
 }>;
 
 export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Readonly<{
@@ -50,6 +58,8 @@ export type FilenameBarProps = Omit<FilenameBarActionContext, 'filename'> & Read
   saveErrorTitle?: string;
   buildError?: string | null;
   buildErrorItems?: readonly BuildErrorItem[];
+  /** Issues that block a task the host runs, listed under their heading. They do not raise the chip. */
+  hostIssues?: Readonly<{ heading: string; rows: readonly HostIssueRow[] }>;
   defaultsPath?: string | undefined;
   filenameActionContributions?: FilenameActionContributions<
     FilenameBarActionContext,
@@ -219,6 +229,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   globalSettingsIndicator,
   buildError,
   buildErrorItems: reportedBuildErrorItems = EMPTY_BUILD_ERROR_ITEMS,
+  hostIssues,
   filenameActionContributions = EMPTY_FILENAME_ACTION_CONTRIBUTIONS,
 }) => {
   const documentSnapshot = useSyncExternalStore(
@@ -237,14 +248,16 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   const elementsById = useGeometryStore((s) => s.elementsById);
   // The live target check's errors show from the moment a model opens, until a Save reports its own.
   const targetValidationItems = useGeometryStore((s) => s.targetValidation?.items);
-  const buildErrorItems = useMemo(() => {
-    if (reportedBuildErrorItems.some((item) => item.severity !== 'warning')) return reportedBuildErrorItems;
-    const live = (targetValidationItems ?? []).filter((item) => item.severity !== 'warning');
-    return live.length ? [...live, ...reportedBuildErrorItems] : reportedBuildErrorItems;
-  }, [reportedBuildErrorItems, targetValidationItems]);
+  const buildErrorItems = useMemo(
+    () => buildErrorListItems(reportedBuildErrorItems, targetValidationItems),
+    [reportedBuildErrorItems, targetValidationItems],
+  );
   // Notices (severity 'warning') never raise the chip: the Save button's unsaved state already asks for a Save.
   // They are listed under the errors when that list is open.
-  const hasBuildIssues = buildErrorItems.length > 0 ? buildErrorItems.some((item) => item.severity !== 'warning') : !!buildError;
+  // A rejected save with no items still says so (`buildError`), though the live notices are listed.
+  const hasBuildIssues = buildErrorItems.some((item) => item.severity !== 'warning') || (!reportedBuildErrorItems.length && !!buildError);
+  const zones = useGeometryStore((s) => s.zones);
+  const elementIds = useGeometryStore((s) => s.elementIds);
   const sourceCsvVersion = useGeometryStore((s) => s.sourceCsvVersion);
   const migrationIssues = useMemo(() => csvMigrationIssues(Object.values(elementsById), sourceCsvVersion), [elementsById, sourceCsvVersion]);
   const reviewDocumentKey = documentSnapshot.activeDocument?.id ?? filename;
@@ -258,13 +271,12 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     && !hasBuildIssues
     && !showSaveErrorIndicator
     && currentSaveStatus !== 'saving';
-  const hasSaveErrorDropdownContent =
-    showSaveErrorIndicator || hasBuildIssues || showLastSaveValidationFailure;
+  const hasErrorContent = showSaveErrorIndicator || hasBuildIssues || showLastSaveValidationFailure;
+  const hostIssueRows = hostIssues?.rows ?? [];
+  const hasSaveErrorDropdownContent = hasErrorContent || hostIssueRows.length > 0;
   const [isSaveErrorModalOpen, setIsSaveErrorModalOpen] = useState(false);
   const [saveErrorCopied, setSaveErrorCopied] = useState(false);
   const [prevHasSaveErrorDropdownContent, setPrevHasSaveErrorDropdownContent] = useState(hasSaveErrorDropdownContent);
-  const zones = useGeometryStore((s) => s.zones);
-  const elementIds = useGeometryStore((s) => s.elementIds);
   const requestCsvUpgrade = useGeometryStore((s) => s.requestCsvUpgrade);
   const getCsvMigrationIssues = useGeometryStore((s) => s.getCsvMigrationIssues);
   const resolveCsvMeaning = useGeometryStore((s) => s.resolveCsvUValueInterpretation);
@@ -416,20 +428,25 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     }
     return currentSaveError || buildError || '';
   }, [buildErrorItems, buildError, currentSaveError]);
+  const epcForm = usesEpcGlobalValues(useTargetRules().requiredMetadataRows);
   const resolveTarget = useCallback(
-    (path?: string) => resolveIssueTarget(path, { zones, elements: elementIds.map((id) => elementsById[id]) }),
+    (path?: string, message?: string) => resolveIssueTarget(path, { zones, elements: elementIds.map((id) => elementsById[id]) }, message),
     [zones, elementIds, elementsById],
   );
   const displayBuildErrorRows = useMemo(() => {
-    const rows = toDisplayBuildErrorRows(buildErrorItems, resolveTarget);
+    const rows = toDisplayBuildErrorRows(buildErrorItems, resolveTarget, { epcForm });
     // Keep each location's rows together, in first-seen order.
     const locationOrder = new Map<string, number>();
     for (const row of rows) if (!locationOrder.has(row.location)) locationOrder.set(row.location, locationOrder.size);
     return rows.sort((a, b) => locationOrder.get(a.location)! - locationOrder.get(b.location)!);
-  }, [buildErrorItems, resolveTarget]);
+  }, [buildErrorItems, resolveTarget, epcForm]);
   const errorRows = displayBuildErrorRows.filter((row) => row.item.severity !== 'warning');
-  const noticeRows = displayBuildErrorRows.filter((row) => row.item.severity === 'warning');
+  // Lodgement evidence is listed in the lodge journey, not here.
+  const noticeRows = displayBuildErrorRows.filter((row) => row.item.severity === 'warning' && row.item.code !== EVIDENCE_CODE);
   const displayedErrorCount = errorRows.length;
+  const showBuildErrorChip = hasBuildIssues && currentSaveStatus !== 'saving';
+  // The chip's tooltip names the errors only; Copy keeps the whole list.
+  const errorChipTitle = errorRows.map((row, index) => `${index + 1}. ${row.item.message}`).join('\n');
   const openSettingsField = useCallback((field: string) => {
     window.dispatchEvent(new CustomEvent('open-global-settings', { detail: { field } }));
     closeSaveErrorDropdown();
@@ -556,7 +573,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
   };
 
   const renderBuildErrorRow = (error: (typeof displayBuildErrorRows)[number]) => {
-    const settingsField = metadataRowOf(error.item.path);
+    const settingsField = globalSettingsFieldOf(error.item.path, error.item.message);
     const canNavigate = !!(error.target.elementId || error.target.zoneId || settingsField);
     return (
     <div
@@ -595,6 +612,8 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     );
   };
 
+  // The title names the build errors when there are any, else the host's heading: its count follows it.
+  const headerCount = hasErrorContent ? displayedErrorCount : hostIssueRows.length;
   const saveErrorDropdownElement = isSaveErrorDropdownOpen ? (
     <div
       ref={saveErrorDropdownRef}
@@ -611,13 +630,11 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
     >
       <div className="files-dropdown-header">
         <div className="files-dropdown-title">
-          {showLastSaveValidationFailure ? 'Validation' : saveErrorTitle}
-          {displayedErrorCount > 0 && (
-            <span className="save-error-header-count">{countText(displayedErrorCount, 'error')}</span>
-          )}
+          {showLastSaveValidationFailure ? 'Validation' : hasErrorContent ? saveErrorTitle : hostIssues!.heading}
+          {headerCount > 0 && <span className="save-error-header-count">{countText(headerCount, 'error')}</span>}
         </div>
         <div className="files-dropdown-header-actions">
-          {buildErrorCopyText !== '' && (
+          {hasErrorContent && buildErrorCopyText !== '' && (
           <button
             className="files-dropdown-refresh"
             onClick={async () => {
@@ -659,16 +676,14 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
       </div>
       <div className="files-dropdown-content">
         <div className="files-dropdown-item" style={{ cursor: 'default' }}>
-          {showLastSaveValidationFailure ? (
+          {!hasErrorContent ? null : showLastSaveValidationFailure ? (
             <div className="save-error-details">
               {LAST_SAVE_VALIDATION_MESSAGE}
             </div>
-          ) : buildErrorItems.length > 0 ? (
+          ) : errorRows.length > 0 ? (
             <div className="save-error-details">
               <div className="save-error-rows">
                 {errorRows.map(renderBuildErrorRow)}
-                {noticeRows.length > 0 && <div className="save-error-notices-heading">Notices</div>}
-                {noticeRows.map(renderBuildErrorRow)}
               </div>
             </div>
           ) : saveErrorFocusTarget ? (
@@ -682,6 +697,33 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             </button>
           ) : (
             <div className="save-error-details">{saveErrorSummary}</div>
+          )}
+          {hostIssueRows.length > 0 && (
+            <div className="save-error-details">
+              <div className="save-error-rows">
+                {hasErrorContent && <div className="save-error-notices-heading">{hostIssues!.heading}</div>}
+                {hostIssueRows.map((row) => (
+                  <div className="save-error-row" key={row.key}>
+                    <div className="save-error-location">{row.location}</div>
+                    <div className="save-error-row-content">
+                      {row.select ? (
+                        <button type="button" className="save-error-details save-error-details-button" title="Go to this input"
+                          onClick={() => { row.select!(); closeSaveErrorDropdown(); }}>
+                          {row.message}
+                        </button>
+                      ) : <div className="save-error-user-message">{row.message}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Notes that are not an action: after the errors. Lodgement evidence goes to the lodge journey. */}
+          {noticeRows.length > 0 && (
+            <div className="save-error-details save-error-rows save-error-notices">
+              <div className="save-error-notices-heading">Notices</div>
+              {noticeRows.map(renderBuildErrorRow)}
+            </div>
           )}
         </div>
       </div>
@@ -805,7 +847,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
         </div>
         {/* One chip: live build errors, else a saved file that failed validation
             (a saved flag, not a current error: it may pass now; Saved stands beside it). */}
-        {(hasBuildIssues && currentSaveStatus !== 'saving') || showLastSaveValidationFailure ? (
+        {showBuildErrorChip || showLastSaveValidationFailure ? (
           <button
             ref={buildErrorChipRef}
             type="button"
@@ -815,7 +857,7 @@ export const FilenameBar: React.FC<FilenameBarProps> = ({
             }}
             title={showLastSaveValidationFailure
               ? 'The saved file failed validation; save again to re-check'
-              : buildErrorCopyText || buildError || undefined}
+              : errorChipTitle || buildError || undefined}
           >
             {showLastSaveValidationFailure
               ? 'Not validated'

@@ -16,10 +16,19 @@ export type ThermalMethod = 'band' | 'calculation' | 'u_value';
 
 const METHOD_TYPES: ReadonlySet<string> = new Set([
   'BuildingElementOpaque', 'BuildingElementTransparent', 'BuildingElementGround', 'BuildingElementAdjacentUnconditionedSpace_Simple',
+  'BuildingElementPartyWall',
 ]);
+const PARTY_WALL = 'BuildingElementPartyWall';
+/** A party wall's U-value inputs: its half or whole U, or its resistance, with how the U was read. */
+const PARTY_WALL_U_KEYS = ['u_value', 'u_value_whole_wall', 'thermal_resistance_construction',
+  'u_value_interpretation', 'u_value_interpreted_value', 'construction_basis'] as const;
 
-/** Element types whose thermal values the "Thermal values from" block shows. */
-export const thermalMethodElementType = (type: string | undefined): boolean => !!type && METHOD_TYPES.has(type);
+/**
+ * Element types whose thermal values the "Thermal values from" block shows. An existing building's
+ * party wall is not one: the converter fixes its resistance and takes only its cavity and lining.
+ */
+export const thermalMethodElementType = (type: string | undefined, constructionBands: boolean): boolean =>
+  !!type && METHOD_TYPES.has(type) && !(constructionBands && type === PARTY_WALL);
 
 /**
  * The methods an element type offers, in order; fewer than two means no choice to show. An
@@ -31,7 +40,7 @@ export function thermalMethods(
   /** A ground floor on an existing building has a calculated U-value to take (its drawing is complete). */
   groundCalculated = true,
 ): { value: ThermalMethod; label: string }[] {
-  if (!METHOD_TYPES.has(elementType)) return [];
+  if (!thermalMethodElementType(elementType, constructionBands)) return [];
   const band = { value: 'band' as const, label: 'Age band' };
   const entered = { value: 'u_value' as const, label: 'U-value' };
   const calculation = {
@@ -69,7 +78,8 @@ export function inferThermalMethod(
     if (u === undefined) return 'band';
     return groundComputedU != null && Math.abs(groundComputedU - u) < 5e-4 ? 'calculation' : 'u_value';
   }
-  if (u !== undefined || stated(element, 'thermal_resistance_construction') !== undefined) return 'u_value';
+  if (u !== undefined || stated(element, 'thermal_resistance_construction') !== undefined
+    || (element.type === PARTY_WALL && stated(element, 'u_value_whole_wall') !== undefined)) return 'u_value';
   return constructionBands ? 'band' : 'u_value';
 }
 
@@ -111,8 +121,10 @@ export function thermalMethodSwitchPatch(
     }
   };
   const ground = element.type === 'BuildingElementGround';
-  if (from === 'calculation') clear(['vulcan_assembly_v1', 'u_value', 'thermal_resistance_construction']);
-  if (from === 'u_value') clear(['u_value', 'thermal_resistance_construction']);
+  // A door's "insulated" is taken only with its U-value (HEM:EPC), so it goes with it.
+  const uKeys = element.type === PARTY_WALL ? PARTY_WALL_U_KEYS : ['u_value', 'thermal_resistance_construction', 'is_insulated'];
+  if (from === 'calculation') clear(['vulcan_assembly_v1', ...uKeys]);
+  if (from === 'u_value') clear(uKeys);
   if (from === 'band') clear(bandOnlyFields(options.constructionType));
   if (ground) {
     delete extra[GROUND_U_VALUE_MANUAL_KEY];

@@ -22,8 +22,8 @@ import {
 } from "../../../geometry-editor-host/src/editorServicePorts";
 import type { GeometrySchemaPort } from "../../../geometry-editor-host/src/schemaPort";
 import { targetFieldAvailability } from "../lib/schemaCache";
-import { HEMIE_NATION, NATIONS, hasDoubleGlazedWindow, postcodeBorderArea, postcodeRegion, postcodeUnrecognised } from "../lib/hemieFabric";
-import { FieldLabelRow, Readout, SourceNote } from "./FieldSource";
+import { HEMIE_DOUBLE_GLAZING_PERIOD, HEMIE_HEAT_LOSS_CORRIDOR, HEMIE_NATION, HEMIE_OPEN_FIREPLACES, NATIONS, hasDoubleGlazedWindow, postcodeBorderArea, postcodeRegion, postcodeUnrecognised } from "../lib/hemieFabric";
+import { FieldLabelRow, SourceNote } from "./FieldSource";
 import { calculateDwellingLengthWidthFromGroundElements } from "../lib/buildingFootprintDimensions";
 
 import { resolveFieldPresentation } from "../lib/fieldPresentation";
@@ -36,6 +36,9 @@ import {
   smartMeterGuidIssue,
   targetBuildTypes,
   buildTypeHasStoreyRows,
+  EPC_GLOBAL_VALUES_TITLES,
+  GLOBAL_SETTINGS_SECTION_TITLES,
+  usesEpcGlobalValues,
 } from "../lib/globalSettingsValidation";
 import {
   DEFAULT_JUNCTION_PSI_CSV_RELATIVE_PATH,
@@ -76,9 +79,6 @@ import { useTargetRules } from "../hooks/useTargetRules";
 import { getElementEffectiveArea } from "../lib/elementArea";
 
 /** Global Settings rows of HEMIE's leakage-estimate inputs (hemie.rs `leakage_estimate_inputs`). */
-const HEMIE_OPEN_FIREPLACES = "HEMIE_number_of_open_fireplaces";
-const HEMIE_DOUBLE_GLAZING_PERIOD = "HEMIE_double_glazing_installation_period";
-const HEMIE_HEAT_LOSS_CORRIDOR = "HEMIE_heat_loss_corridor";
 
 /** Element types the converter counts in the envelope area (a party adjacent element counts too). */
 const ENVELOPE_TYPES: ReadonlySet<string> = new Set(["BuildingElementOpaque", "BuildingElementTransparent", "BuildingElementGround",
@@ -104,10 +104,7 @@ export type GlobalSettingsModalProps = Readonly<{
     path: string,
     compatibility: GlobalSettingsDefaultsCompatibility | undefined
   ) => void;
-  evidenceSection?: ReactNode;
   calculationTargetSection?: ReactNode;
-  /** Host groups at the end of the Fabric tab, such as emitter defaults. */
-  defaultsSection?: ReactNode;
   /** An existing building's fabric (age band and constructions): the Fabric tab's body under construction bands. */
   fabricSection?: ReactNode;
   renderEvidencePill?: (fieldKey: string, label: string) => ReactNode;
@@ -117,6 +114,8 @@ export type GlobalSettingsModalProps = Readonly<{
   focusFieldKey?: string;
   /** HEM:EPC Site: the distant shading the model has, with the way to edit it on the plan. */
   distantShadingSection?: ReactNode;
+  /** The host reads the postcode (and, in a border area, the nation) on a HEM:EPC new build, whose input takes none. */
+  postcodeNeeded?: boolean;
 }>;
 
 const ROOM_COUNT_COMPLIANCE_ROWS: {
@@ -272,7 +271,6 @@ function YesNoField({ label, fieldKey, value, given, source, useLabel, onChange 
     <div data-field-key={fieldKey} style={EPC_FIELD}>
       <span className="standard-input-label">{label}</span>
       <CompactSegmentedControl
-        fullWidth
         ariaLabel={label}
         value={shown === undefined ? "" : shown ? "yes" : "no"}
         options={[{ value: "yes", label: "Yes" }, { value: "no", label: "No" }]}
@@ -594,15 +592,14 @@ export function GlobalSettingsModal({
   fallbackDefaultsPath,
   inspectDefaultsCompatibility,
   onEditDefaults,
-  evidenceSection,
   calculationTargetSection,
-  defaultsSection,
   fabricSection,
   renderEvidencePill = () => null,
   externalDetailProfileSection,
   onIndicatorChange,
   focusFieldKey,
   distantShadingSection,
+  postcodeNeeded,
 }: GlobalSettingsModalProps) {
   const schemaPort = useGeometrySchemaPort();
   const targetRoot = schemaPort.availability === "available" ? schemaPort.getRootSchema(targetSchemaMode(schemaPort)) : null;
@@ -619,7 +616,7 @@ export function GlobalSettingsModal({
   const { requiredMetadataRows, storeyBuildTypes, desnzDefaultRows, derivedMetadataRows, fhsInputRules } = useTargetRules();
   const requiredRows = useMemo(() => new Set(requiredMetadataRows), [requiredMetadataRows]);
   // HEM:EPC reads neither the SAP built form nor the thermal bridging settings of an existing building.
-  const epcTarget = requiredMetadataRows.includes("IsExistingBuilding");
+  const epcTarget = usesEpcGlobalValues(requiredMetadataRows);
   // Dwelling fields show only where the target's root schema has them (no schema says nothing).
   // HEM:EPC's schema states no storey row, but a flat or maisonette still takes one (`storeyBuildTypes`).
   const showStoreyOfDwelling = epcTarget || targetFieldAvailability(targetRoot, ["General", "storey_of_dwelling"]) !== "absent";
@@ -865,16 +862,17 @@ export function GlobalSettingsModal({
     complianceSettings.build_type ?? dwellingDetailsSuggestion.buildType;
   // The target's build types; the geometry's suggestion only where the target takes it.
   const buildTypes = targetBuildTypes(targetRoot);
-  const suggestedBuildType =
+  const floorsBuildType =
     dwellingDetailsSuggestion.buildType && buildTypes.includes(dwellingDetailsSuggestion.buildType)
       ? dwellingDetailsSuggestion.buildType
       : undefined;
+  // A converter that works out the build type (HEM:EPC) gets only the user's pick: the floors'
+  // suggestion is shown, not saved (metadataRowValues).
+  const suggestedBuildType = derivedRows.has("General_build_type") ? undefined : floorsBuildType;
   const shownBuildType = complianceSettings.build_type ?? fileBuildType ?? suggestedBuildType;
   const effectiveStoreysInDwelling =
     complianceSettings.storeys_in_dwelling ??
     dwellingDetailsSuggestion.storeysInDwelling;
-  // An existing building's conversion counts the storeys itself and reads no stated count: shown as is.
-  const convertedStoreysInDwelling = useGeometryStore((state) => state.targetValidation?.storeysInDwelling);
   // The built form the conversion works out from the party walls (HEM:EPC).
   const convertedBuiltForm = useGeometryStore((state) => state.targetValidation?.builtForm);
   const storeysFromConversion = constructionBands;
@@ -1315,8 +1313,8 @@ export function GlobalSettingsModal({
             }
             setComplianceSettings(patch);
   };
-  // In a postcode area that spans two nations, the model states the nation.
-  const nationField = constructionBands && borderArea ? (
+  // In a postcode area that spans two nations, the model states the nation, on any target (Part O reads it). It goes under the Postcode.
+  const nationField = borderArea ? (
         <StandardDropdown
           label={<span data-field-key={HEMIE_NATION}>Nation</span>}
           value={complianceSettings.hemieSettings?.[HEMIE_NATION] ?? ""}
@@ -1663,11 +1661,11 @@ export function GlobalSettingsModal({
           setPropertyPostcode(value || undefined);
         }}
         placeholder="e.g. MK40 1AA"
-        helperText="Used only as property metadata in the SAP report. It does not select the native SAP calculator's climate data."
         autoComplete="postal-code"
         variant="ghost"
         size="md"
       />
+      {nationField}
 
       <div
         style={{
@@ -1768,9 +1766,9 @@ export function GlobalSettingsModal({
     .some((key) => requiredRows.has(key) && complianceSettings[key] === undefined)
     || (requiredRows.has("AirPermeability_ventilation_zone_height") && complianceSettings.AirPermeability_ventilation_zone_height === undefined
       && !(suggestedVentHeight > 0));
-  // A field's label, with its evidence pill where the host links evidence.
+  // A field's label, with the host's evidence line where its value expects evidence.
   const epcLabel = (text: string, key: string) => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+    <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       <span data-field-key={key}>{text}</span>
       {renderEvidencePill(key, text)}
     </span>
@@ -1783,7 +1781,6 @@ export function GlobalSettingsModal({
       <div data-field-section="target" data-field-key="IsExistingBuilding" style={EPC_FIELD}>
         <span className="standard-input-label">The dwelling is</span>
         <CompactSegmentedControl
-          fullWidth
           ariaLabel="The dwelling is"
           value={complianceSettings.IsExistingBuilding === undefined ? "" : existingBuilding ? "existing" : "new"}
           options={[{ value: "existing", label: "An existing building" }, { value: "new", label: "A new build" }]}
@@ -1792,25 +1789,22 @@ export function GlobalSettingsModal({
         <span style={EPC_HELP}>An existing building uses age bands and descriptions. A new build uses entered values and products.</span>
       </div>
 
-      {evidenceSection}
-
       <section style={EPC_GROUP}>
-        <h3 style={EPC_GROUP_TITLE}>Property</h3>
+        <h3 style={EPC_GROUP_TITLE}>{EPC_GLOBAL_VALUES_TITLES.property}</h3>
         <div style={EPC_COLUMNS}>
-          {constructionBands ? (
-            <StandardInput
-              type="text"
-              label={<span data-field-key="Postcode">Postcode</span>}
-              value={propertyPostcode ?? ""}
-              onChange={(event) => setPropertyPostcode(event.target.value.toUpperCase() || undefined)}
-              placeholder="e.g. MK40 1AA"
-              helperText={borderArea ? undefined : region}
-              autoComplete="postal-code"
-              error={postcodeUnrecognised(propertyPostcode) ? "Postcode not recognised" : undefined}
-              variant="ghost"
-              size="md"
-            />
-          ) : null}
+          {/* An existing building's region comes from it; a new build's input takes none, unless the host reads it. */}
+          {(constructionBands || postcodeNeeded) && <StandardInput
+            type="text"
+            label={<span data-field-key="Postcode">Postcode</span>}
+            value={propertyPostcode ?? ""}
+            onChange={(event) => setPropertyPostcode(event.target.value.toUpperCase() || undefined)}
+            placeholder="e.g. MK40 1AA"
+            helperText={borderArea ? undefined : region}
+            autoComplete="postal-code"
+            error={postcodeUnrecognised(propertyPostcode) ? "Postcode not recognised" : undefined}
+            variant="ghost"
+            size="md"
+          />}
           <div style={EPC_FIELD}>
             <StandardDropdown
               label={<span data-field-key="General_build_type">Built form</span>}
@@ -1828,30 +1822,20 @@ export function GlobalSettingsModal({
               size="md"
             />
             {isBuildTypeManual || fileBuildType ? (
-              <ResetFieldButton align="note" label={suggestedBuildType ? "Use the floors" : "Use the party walls"}
-                title={suggestedBuildType ? `Use the built form the floors give (${buildTypeLabel(suggestedBuildType)})` : "Use the built form the party walls give"}
-                ariaLabel={`Built form: ${suggestedBuildType ? "use the floors" : "use the party walls"}`} onClick={() => setBuildType("")} />
+              <ResetFieldButton align="note" label="Use the party walls" title="Use the built form the party walls give"
+                ariaLabel="Built form: use the party walls" onClick={() => setBuildType("")} />
             ) : (
-              // A dwelling with no floor on the ground is a flat, from the floors; else the party walls decide.
-              <SourceNote>{shownBuildType ? "from the floors" : "from the party walls"}</SourceNote>
+              // A dwelling with no floor on the ground suggests a flat; the conversion decides only from the party walls.
+              <SourceNote>{floorsBuildType ? `the floors suggest ${buildTypeLabel(floorsBuildType).toLowerCase()}` : "from the party walls"}</SourceNote>
             )}
           </div>
         </div>
-        {nationField}
+        {(constructionBands || postcodeNeeded) && nationField}
         {storeyRowFields}
-        {constructionBands && convertedStoreysInDwelling !== undefined ? (
-          <div>
-            <FieldLabelRow
-              label={<span className="standard-input-label" data-field-key="General_storeys_in_dwelling">Storeys in dwelling</span>}
-              labelExtra={<SourceNote>from the drawing</SourceNote>}
-            />
-            <Readout value={convertedStoreysInDwelling} label="Storeys in dwelling" />
-          </div>
-        ) : null}
       </section>
 
       <section data-field-section="dwelling" style={EPC_GROUP}>
-        <h3 style={EPC_GROUP_TITLE}>Rooms and services</h3>
+        <h3 style={EPC_GROUP_TITLE}>{EPC_GLOBAL_VALUES_TITLES.dwelling}</h3>
         <div style={EPC_FIELD}>
           <div style={EPC_ROOMS}>
             {roomCountRows.map((row) => (
@@ -1941,10 +1925,9 @@ export function GlobalSettingsModal({
       </section>
 
       <section data-field-section="airTightness" style={EPC_GROUP}>
-        <h3 style={EPC_GROUP_TITLE}>Air test</h3>
+        <h3 style={EPC_GROUP_TITLE}>{EPC_GLOBAL_VALUES_TITLES.airTightness}</h3>
         <div data-field-key="AirPermeability_test_pressure" style={EPC_FIELD}>
           <CompactSegmentedControl
-            fullWidth
             ariaLabel="Air test"
             value={airTest}
             options={[
@@ -2041,7 +2024,7 @@ export function GlobalSettingsModal({
       </section>
 
       <section data-field-section="ventilation" style={EPC_GROUP}>
-        <h3 style={EPC_GROUP_TITLE}>Site</h3>
+        <h3 style={EPC_GROUP_TITLE}>{EPC_GLOBAL_VALUES_TITLES.ventilation}</h3>
         <div style={EPC_COLUMNS}>
           <StandardDropdown
             label={<span data-field-key="Ventilation_terrain_class">Terrain</span>}
@@ -2084,7 +2067,7 @@ export function GlobalSettingsModal({
           <summary style={EPC_MORE_SUMMARY}>
             <span aria-hidden style={{ fontSize: 10 }}>{ventilationEnvExpanded || siteMoreNeeded ? "▼" : "▶"}</span>
             <span style={{ fontWeight: 600 }}>More</span>
-            <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 12 }}>shelter, noise, cross ventilation, zone height</span>
+            <span style={{ marginLeft: "auto", color: "var(--text-secondary)", fontSize: 12 }}>shelter, cross ventilation, zone height</span>
           </summary>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", paddingTop: "var(--spacing-md)" }}>
             <StandardDropdown
@@ -2102,12 +2085,7 @@ export function GlobalSettingsModal({
               size="md"
             />
             <div style={EPC_COLUMNS}>
-              <YesNoField label="Noise nuisance" fieldKey="Ventilation_noise_nuisance"
-                value={complianceSettings.Ventilation_noise_nuisance}
-                given={desnzDefaultRows.Ventilation_noise_nuisance === undefined ? undefined : desnzDefaultRows.Ventilation_noise_nuisance === "Yes"}
-                source="default"
-                useLabel="Use the default"
-                onChange={(value) => setComplianceSettings({ Ventilation_noise_nuisance: value })} />
+              {/* HEM:EPC is removing the noise nuisance input: the converter applies the default No. */}
               <YesNoField label="Cross ventilation" fieldKey="Ventilation_cross_vent_possible"
                 value={complianceSettings.Ventilation_cross_vent_possible}
                 onChange={(value) => setComplianceSettings({ Ventilation_cross_vent_possible: value })} />
@@ -2478,7 +2456,6 @@ export function GlobalSettingsModal({
                   />
                 </>
               )}
-              {defaultsSection}
             </FabricTabCloseContext>
           )}
 
@@ -2488,13 +2465,10 @@ export function GlobalSettingsModal({
             <>
               {calculationTargetSection}
 
-              {/* Evidence linking for global settings */}
-              {evidenceSection}
-
               {/* Dwelling Details Section */}
               <div data-field-section="dwelling" style={{ marginTop: "var(--spacing-md)" }}>
                 <GlobalSettingsAccordionHeader
-                  title="Dwelling details"
+                  title={GLOBAL_SETTINGS_SECTION_TITLES.dwelling}
                   expanded={complianceSettingsExpanded}
                   onToggle={() =>
                     setComplianceSettingsExpanded(!complianceSettingsExpanded)
@@ -3118,7 +3092,7 @@ export function GlobalSettingsModal({
                 }}
               >
                 <GlobalSettingsAccordionHeader
-                  title="Air tightness"
+                  title={GLOBAL_SETTINGS_SECTION_TITLES.airTightness}
                   expanded={airTightnessExpanded}
                   onToggle={() => setAirTightnessExpanded(!airTightnessExpanded)}
                   errorCount={0}
@@ -3238,7 +3212,7 @@ export function GlobalSettingsModal({
                 }}
               >
                 <GlobalSettingsAccordionHeader
-                  title="Ventilation environment"
+                  title={GLOBAL_SETTINGS_SECTION_TITLES.ventilation}
                   expanded={ventilationEnvExpanded}
                   onToggle={() =>
                     setVentilationEnvExpanded(!ventilationEnvExpanded)

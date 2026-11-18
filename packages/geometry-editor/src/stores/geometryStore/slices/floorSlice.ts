@@ -10,6 +10,7 @@ import {
   getCumulativeBaseHeightsByFloorId,
   getStoreyHeight,
   storeyWallHeightPatches,
+  heightlessStoreyWallPatches,
   withEffectiveStoreyHeights,
 } from '../../../lib/zoneDerivation';
 import {
@@ -102,7 +103,11 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
           oldElements,
         )
         : [];
-      for (const { elementId, patch } of wallPatches) applyPatch(elementId, patch);
+      // A height typed for the storey fills its walls that have none, once.
+      const fillPatches = 'height' in updates && nextFloor.heightUserOverride === true
+        ? heightlessStoreyWallPatches(prevFloor.zIndex, nextFloor.height, oldElements)
+        : [];
+      for (const { elementId, patch } of [...wallPatches, ...fillPatches]) applyPatch(elementId, patch);
       const elements = Object.values(nextElementsById);
       const oldEff = withEffectiveStoreyHeights(state.floors, oldElements);
       const newEff = withEffectiveStoreyHeights(nextFloors, elements);
@@ -114,7 +119,7 @@ export const createFloorSlice: GeometryStoreSlice = (set, get) => ({
         ? state.zones.map((zone) => ({ ...zone, ...deriveZoneProperties(zone, els, nextFloors) }))
         : state.zones);
       if (!effectiveChanged && !baseChanged) {
-        return wallPatches.length > 0
+        return wallPatches.length + fillPatches.length > 0
           ? { floors: nextFloors, elementsById: nextElementsById, zones: deriveZones(elements) }
           : { floors: nextFloors, zones: deriveZones(elements) };
       }

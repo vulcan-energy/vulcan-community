@@ -541,6 +541,53 @@ it('derives the build type only where the target takes the derived value', () =>
   expect(check(epc)).toEqual({ saved: null, unset: true });
 });
 
+// No ground-contact floor gives `flat`. HEM:EPC decides the built form itself (derivedMetadataRows)
+// and asks the user to choose flat or maisonette, so the save writes only a picked build type there.
+it('saves the floors\' flat only where the converter does not decide the build type', () => {
+  const fhs = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  const epc = structuredClone(fhs);
+  epc.properties.General.properties.build_type = { enum: ['detached', 'flat', 'maisonette'] };
+  const noGroundFloor = sample.replace(/^(Floor,[^,]*,)BuildingElementGround,/m, '$1BuildingElementAdjacentConditionedSpace,');
+  const saved = (root: unknown, derivedMetadataRows: string[], picked?: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+      ...canonicalGeometrySchemaPort, getRootSchema: () => root as never, targetRules: () => ({ derivedMetadataRows }),
+    } });
+    store.getState().loadFromCSV(noGroundFloor);
+    store.getState().setComplianceSettings({ build_type: picked });
+    // A reload keeps the pick, although it matches the floors.
+    store.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
+    return /\nGeneral_build_type,([^,]*),/.exec(store.getState().generateCSV({ allowUnresolvedMigration: true }))?.[1] ?? null;
+  };
+  expect(saved(fhs, [])).toBe('flat');
+  expect(saved(epc, ['General_build_type'])).toBeNull();
+  expect(saved(epc, ['General_build_type'], 'flat')).toBe('flat');
+  expect(saved(epc, ['General_build_type'], 'maisonette')).toBe('maisonette');
+});
+
+// A maisonette is held as the file's row, not a pick; a reload still saves it with its storey rows,
+// with or without a ground floor.
+it('keeps a picked maisonette\'s storey rows through a reload on HEM:EPC', () => {
+  const epc = JSON.parse(fixture('hem_fhs_upstream/schema/input_fhs.schema.json'));
+  // As HEM:EPC's schema: no storey condition, so storeyBuildTypes decide.
+  delete epc.properties.General.if;
+  delete epc.properties.General.then;
+  epc.properties.General.properties.build_type = { enum: ['detached', 'flat', 'maisonette'] };
+  const rows = (csv: string) => {
+    const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {
+      ...canonicalGeometrySchemaPort, getRootSchema: () => epc as never,
+      targetRules: () => ({ derivedMetadataRows: ['General_build_type'], storeyBuildTypes: ['flat', 'maisonette'] }),
+    } });
+    store.getState().loadFromCSV(csv);
+    store.getState().setComplianceSettings({ build_type: 'maisonette', storey_of_dwelling: 2, storeys_in_building: 4 });
+    store.getState().loadFromCSV(store.getState().generateCSV({ allowUnresolvedMigration: true }));
+    return store.getState().generateCSV({ allowUnresolvedMigration: true })
+      .match(/^General_(build_type|storey_of_dwelling|storeys_in_building),[^,]*/gm);
+  };
+  const expected = ['General_build_type,maisonette', 'General_storey_of_dwelling,2', 'General_storeys_in_building,4'];
+  expect(rows(sample)).toEqual(expected);
+  expect(rows(sample.replace(/^(Floor,[^,]*,)BuildingElementGround,/m, '$1BuildingElementAdjacentConditionedSpace,'))).toEqual(expected);
+});
+
 it('stops following the schema port once disposed', () => {
   const listeners = new Set<() => void>();
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort: {

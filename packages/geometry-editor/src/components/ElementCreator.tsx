@@ -22,6 +22,7 @@ import {
 } from './elementForms/types';
 import { electricBatteryFormModule } from './elementForms/electricBattery';
 import { elementTypeAvailability, simplifiedThermalBridgingOffered } from '../lib/schemaCache';
+import { sentenceCaseLabel } from '../lib/fieldPresentation';
 import { targetRules } from '../../../geometry-editor-host/src/schemaPort';
 import { thermalBridgeLinearFormModule } from './elementForms/thermalBridgeLinear';
 import { thermalBridgePointFormModule } from './elementForms/thermalBridgePoint';
@@ -130,6 +131,8 @@ import {
 import { useKeyedState } from '../hooks/useKeyedState';
 import { inferThermalMethod, thermalMethodElementType, thermalMethods, thermalMethodSwitchPatch, type ThermalMethod } from '../lib/thermalMethod';
 import { ThermalMethodControl } from './ThermalMethodControl';
+import { UndoToast } from './UndoToast';
+import { changeWithUndo } from '../lib/undoToast';
 import { useTargetRules, useTargetValidationFlags } from '../hooks/useTargetRules';
 import { isExistingBuilding } from '../lib/windowOpenings';
 import { FABRIC_PRESET_TYPES, hemieConstructionSetting, hemieConstructionType, hemieHeatCapacityBands, hemieMoreKeys, hemieMoreLabels, hemieOutsideSurface, parseHemieConstruction, sharedRoofPlanes, statedBuildType } from '../lib/hemieFabric';
@@ -150,7 +153,6 @@ import {
   getParentOrientation360,
   buildHostedLinearParentPatch,
   openingTooWide,
-  wallUnderOpening,
 } from '../lib/parentOrientation';
 import type { MvhrDuctRole, MvhrTerminalRole } from '../lib/mvhrRoles';
 import { useMvhrDuctTerminalManager } from './MvhrDuctTerminalManager';
@@ -496,7 +498,7 @@ import { parseVulcanAssemblyV1FromExtraJson } from '../lib/assemblyAppliedUi';
 import type { BundledAssemblyLibrary } from '../lib/assemblyLibrary';
 import { Tooltip } from './Tooltip';
 import { createElementCreatorFieldPresentationResolver } from './elementCreatorFieldPresentation';
-import { syncSpaceHeatSystemZoneNameInExtraJson } from '../lib/spaceHeatSystemSync';
+import { onlyHeatingCircuit, syncSpaceHeatSystemZoneNameInExtraJson } from '../lib/spaceHeatSystemSync';
 import { formatSchemaInfoForTooltip } from '../utils/schemaTooltipHelpers';
 import {
   buildSpaceHeatSystemPresetExtraJson,
@@ -537,6 +539,8 @@ const intentPrefetchHandlers = (prefetch: () => void) => ({
 /** A window's U- and g-value, shown with its other thermal values. */
 const WINDOW_THERMAL_FIELDS = ['u_value', 'g_value'] as const;
 const WINDOW_BAND_THERMAL_FIELDS = ['u_value'] as const;
+/** An existing building's PV states its inverter as one choice in its own form. */
+const PV_FORM_FIELDS = ['inverter_type', 'inverter_is_inside'] as const;
 /** An existing building's outside surface: the host's "Outside surface from" shows the coefficient. */
 const HOSTED_OUTSIDE_SURFACE_FIELDS = ['solar_absorption_coeff'] as const;
 
@@ -788,7 +792,9 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
 
   if (!selectedElement || !validationRows) return null;
   const { validation, schemaIssues, comparisonInfoPillItems } = validationRows;
-  const hasLivePills = validation.hasIssues || validation.hasWarnings || comparisonInfoPillItems.length > 0;
+  // A sizing verdict is the Sizing block's own line in the panel; the elements list still flags it.
+  const warnings = validation.warnings.filter((warning) => warning.source !== 'sizing');
+  const hasLivePills = validation.hasIssues || warnings.length > 0 || comparisonInfoPillItems.length > 0;
   const hasSavedFileIssues = schemaIssues.length > 0;
   if (!hasLivePills && !hasSavedFileIssues) return null;
 
@@ -805,7 +811,7 @@ const SelectedElementValidationRows = React.memo(function SelectedElementValidat
               onClick={issue.fieldKey ? () => onFocusField(issue.fieldKey!) : undefined}
             />
           ))}
-          {validation.hasWarnings && validation.warnings.map((warning, i) => (
+          {warnings.map((warning, i) => (
             <ValidationPill
               key={`warning-${i}`}
               message={compactSelectedValidationMessage(warning.message, selectedElement)}
@@ -941,7 +947,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const removeElement = useGeometryStore((s) => s.removeElement);
   const duplicateElement = useGeometryStore((s) => s.duplicateElement);
   const setSelectedElementIds = useGeometryStore((s) => s.setSelectedElementIds);
-  const detachedFrom = useGeometryStore((s) => (selection?.type === 'element' ? s.detachedOpenings[selection.id] : undefined));
   const setCurrentFloorZ = useGeometryStore((s) => s.setCurrentFloorZ);
   const validateElement = useGeometryStore((s) => s.validateElement);
   const hostValidationFindings = useGeometryStore((s) => s.hostValidationFindings);
@@ -978,6 +983,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       complianceValidationEnabled,
       primaryFhsZoneId,
       simplifiedThermalBridgingOffered: targetAcceptsThermalBridgingTotal,
+      constructionBands,
     });
   }, [
     selection,
@@ -986,6 +992,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     complianceValidationEnabled,
     primaryFhsZoneId,
     targetAcceptsThermalBridgingTotal,
+    constructionBands,
   ]);
 
   /** Space footprints in the selected zone with no `room_type` — shown next to Space labeller (critical chip). */
@@ -1468,6 +1475,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // "read the module's own useFormState return value directly" precedent
   // documented in buildingElementGround.tsx's header).
   const [assemblyCalculatorOpen, setAssemblyCalculatorOpen] = useState(false);
+  // "Change assembly" opens the calculator at its library list; "Edit layers" at the layers.
+  const [assemblyFromLibrary, setAssemblyFromLibrary] = useState(false);
   /** When set, assembly modal edits this dormer thermal part (see `assemblyInitialSnapshot` after dormer helpers). */
   const [dormerAssemblySection, setDormerAssemblySection] = useState<DormerThermalSectionKey | null>(null);
   // selectedParentElementValue/parentElement/setParentElement now live in
@@ -1850,22 +1859,21 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const resolveElementFieldPresentation = elementFieldPresentation.resolve;
   const fieldUnit = elementFieldPresentation.unit;
 
-  // Helper function to render a field label with tooltip and optional evidence pill
+  // A field label with its tooltip and the host's evidence line
   const renderFieldLabel = (fieldLabel: string, targetElementType?: string, evidenceFieldKey?: string, source?: React.ReactNode) => {
     const presentation = resolveElementFieldPresentation(
       fieldLabel,
       targetElementType,
       evidenceFieldKey,
     );
-    const evPill = evidenceFieldKey
+    const evidenceLine = evidenceFieldKey
       ? evidenceBridge.renderFieldIndicator(evidenceFieldKey)
       : null;
 
     const labelContent = (
-      <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: 4 }}>
-        {/* Labels read without a trailing colon, as the schema-driven rows do. */}
-        <span>{(presentation?.label ?? fieldLabel).replace(/:\s*$/, '')}</span>
-        {evPill}
+      <div className="element-label" style={{ fontWeight: 500, marginBottom: '0.25rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4 }}>
+        <span>{sentenceCaseLabel(presentation?.label ?? fieldLabel)}</span>
+        {evidenceLine}
       </div>
     );
 
@@ -2120,6 +2128,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       } as Omit<Element, 'id'>);
       setSpaceHeatSystem(systemName);
       updateElement(current.id, { space_heat_system: systemName } as Partial<Element>);
+      // The model's first circuit is the only link its other emitters can take: they take it too.
+      if (!allElements.some((element) => element.type === 'System' && element.subcategory === 'SpaceHeatSystem' && !element.isPlaceholder && element.name)) {
+        for (const emitter of allElements) {
+          if (emitter.type === 'WetEmitter' && emitter.id !== current.id && !emitter.space_heat_system?.trim()) {
+            updateElement(emitter.id, { space_heat_system: systemName } as Partial<Element>);
+          }
+        }
+      }
     } catch (error) {
       console.warn('[WetEmitter] Failed to create SpaceHeatSystem from preset', error);
       alert(`Failed to create SpaceHeatSystem from "${DEFAULT_WET_DISTRIBUTION_PRESET_ID}".`);
@@ -3139,7 +3155,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // "Thermal values from" (lib/thermalMethod.ts): the stored values say which method an element
   // uses; a switch is the user's choice until the next element is selected.
   const thermalElement = selection?.type === 'element' && !selectedIsDormerAnchor
-    && selectedElement && thermalMethodElementType(selectedElement.type) ? selectedElement : null;
+    && selectedElement && thermalMethodElementType(selectedElement.type, constructionBands) ? selectedElement : null;
   const thermalGroundU = useMemo(() => (thermalElement?.type === 'BuildingElementGround'
     ? computeGroundUValueFromElementModel(thermalElement as unknown as Record<string, unknown>, readExtraJsonRecord(thermalElement.extra_json), thermalElement.floor_type, { wholeBasement })
     : null), [thermalElement, wholeBasement]);
@@ -3405,6 +3421,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       const assemblyName = assemblyDisplayName(envelope, bundledAssemblyLibrary);
       const assemblyType = assemblyTypeLabelFromMode(envelope.assemblySnapshot?.elementMode);
       const compactLabel = `${assemblyName} · ${assemblyType}`;
+      // The U-value the layers give, as a fact; a ground floor's U is its floor calculation's, not the layers'.
+      const u = envelope.correctedU_W_m2K;
+      const showsU = envelope.assemblySnapshot?.elementMode !== 'BuildingElementGround';
+      const open = (fromLibrary: boolean) => {
+        prefetchAssemblyCalculatorModal();
+        setAssemblyFromLibrary(fromLibrary);
+        onEdit();
+      };
       return (
         <div
           className="assembly-action-control"
@@ -3417,22 +3441,35 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             <div className="assembly-action-control__name">
               {assemblyName}
             </div>
+            {showsU && (
+              <div className="assembly-action-control__fact">
+                <span>U-value</span>
+                <span>{Number.isFinite(u) && u > 0 ? `${formatToTwoDecimals(u)} W/m²K` : 'Calculation incomplete'}</span>
+              </div>
+            )}
           </div>
-          <button
-            type="button"
-            className="btn editor-action-btn editor-action-btn--secondary"
-            {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
-            onClick={() => {
-              prefetchAssemblyCalculatorModal();
-              onEdit();
-            }}
-          >
-            Edit
-          </button>
+          <div className="assembly-action-control__actions">
+            <button
+              type="button"
+              className="btn editor-action-btn editor-action-btn--secondary"
+              {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
+              onClick={() => open(false)}
+            >
+              Edit layers
+            </button>
+            <button
+              type="button"
+              className="btn editor-action-btn editor-action-btn--secondary"
+              {...intentPrefetchHandlers(prefetchAssemblyCalculatorModal)}
+              onClick={() => open(true)}
+            >
+              Change assembly
+            </button>
+          </div>
         </div>
       );
     },
-    [bundledAssemblyLibrary],
+    [bundledAssemblyLibrary, setAssemblyFromLibrary],
   );
 
   const assemblyModalElementMode: AssemblyElementMode = (() => {
@@ -3723,7 +3760,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               }}
               collapsible={false}
               fieldIndicators={comparisonFieldIndicators}
-              evidenceFieldKeys={evidenceBridge.linkedFieldKeys}
+              renderEvidence={evidenceBridge.renderFieldIndicator}
               focusFieldKey={comparisonFocusRequest?.fieldKey}
               focusFieldVersion={comparisonFocusRequest?.version}
               flat={advancedFlat}
@@ -3864,7 +3901,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   // files staying clean.
   const renderSpaceHeatSystemPicker = (): React.ReactNode => (
     <>
-      {renderFieldLabel('Space heat system:', elementType)}
+      {renderFieldLabel('Space heat system:', elementType, undefined,
+        spaceHeatSystem && spaceHeatSystem === onlyHeatingCircuit(allElements) ? <SourceNote>the only heating circuit</SourceNote> : undefined)}
       <div
         className="element-input"
         style={EDITOR_FIELD_ACTION_ROW_STYLE}
@@ -3974,7 +4012,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   );
   const sharedRoofNote = thermalElement && sharedRoof.length ? (
     <div className="field-source-note element-editor-section-spacer" data-shared-roof>
-      One roof with {sharedRoof.map((plane) => plane.name).join(', ')}: the values must match.{' '}
+      One roof with {sharedRoof.map((plane, i) => (
+        <React.Fragment key={plane.id}>
+          {i > 0 ? ', ' : null}
+          <button type="button" className="field-source-note__link" onClick={() => setSelection({ type: 'element', id: plane.id })}>{plane.name}</button>
+        </React.Fragment>
+      ))} for HEM:EPC: the values must match.{' '}
       <button type="button" className="field-source-note__link" onClick={() => setSelectedElementIds([thermalElement.id, ...sharedRoof.map((plane) => plane.id)])}>
         {sharedRoof.length === 1 ? 'Select both' : `Select all ${sharedRoof.length + 1}`}
       </button>
@@ -3993,7 +4036,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     labels: hostMoreLabels,
     stated: hemieMoreKeys(thermalConstructionType).some((key) => thermalExtra[key] !== undefined && thermalExtra[key] !== null && thermalExtra[key] !== ''),
   } : undefined;
-  const thermalMethodControl = thermalMethod && thermalMethodOptions.length > 1 ? (
+  // With the target's files not loaded, the methods have no inputs to show: the panel says so instead.
+  const thermalMethodControl = thermalMethod && thermalMethodOptions.length > 1 && !schemaPort.loadFailed?.(schemaMode) ? (
     <ThermalMethodControl methods={thermalMethodOptions} value={thermalMethod} onChange={switchThermalMethod} />
   ) : null;
   // A window's thermal values sit after its size and position: the method, then its U- and
@@ -4015,6 +4059,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             workspaceResourcePort={workspaceResourcePort}
             thermalMethod={thermalMethod}
             onlyFields={WINDOW_THERMAL_FIELDS}
+            renderEvidence={evidenceBridge.renderFieldIndicator}
           />
         </React.Suspense>
       )}
@@ -4025,18 +4070,12 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
   const windowParent = selectedElement?.type === 'BuildingElementTransparent' && wallShared.parentElement
     ? getParentByName(elementsById, elementIds, wallShared.parentElement, elementZoneId)
     : undefined;
-  // "Was on Wall (S)" while that wall is gone: an undone delete brings it back, and the line goes.
-  const wasOn = !wallShared.parentElement && detachedFrom && !getParentByName(elementsById, elementIds, detachedFrom, elementZoneId)
-    ? detachedFrom
-    : undefined;
   const windowWallLink = (
     selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent' ? (
       <WindowWallLink
         parentName={wallShared.parentElement}
         orientation={Number.isFinite(wallShared.orientation360) ? wallShared.orientation360 : 0}
         pitch={typeof selectedElement.pitch === 'number' ? selectedElement.pitch : undefined}
-        wasOn={wasOn}
-        reattachTo={wasOn ? wallUnderOpening(selectedElement, allElements)?.name : undefined}
         tooWide={openingTooWide(selectedElement, windowParent)}
         zoneId={elementZoneId}
         selfId={selection.id}
@@ -4099,8 +4138,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     </div>
   ) : null;
 
-  const renderAttributePanel = () => {
-    const formRenderCtx: ElementFormRenderCtx = {
+  const buildFormRenderCtx = (): ElementFormRenderCtx => ({
       elementType,
       fieldUnit,
       renderFieldLabel,
@@ -4138,7 +4176,8 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
           }}
         />
       ) : null,
-      thermalValues: windowThermalValues,
+      thermalValues: windowThermalValues ?? (elementType === 'BuildingElementPartyWall' ? thermalMethodControl : null),
+      thermalMethod,
       windowHost: windowWallLink,
       windowEditAll,
       renderOpeningPartFields: OpeningPartFieldsRenderer && selection?.type === 'element' && selectedElement?.type === 'BuildingElementTransparent'
@@ -4184,7 +4223,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       renderDormerBundleEditor,
       flipElementOrientation,
       unheatedPitchedRoofCeilingElevationSuggestion,
-    };
+  });
+  // Fields the selected element's form puts under the advanced editor's "More".
+  const renderFormMore = () => elementFormInstances[elementType]?.renderMore(buildFormRenderCtx()) ?? undefined;
+  const renderAttributePanel = () => {
+    const formRenderCtx = buildFormRenderCtx();
     // A type the target excludes (Lighting on an existing building) keeps only its note: its inputs do nothing.
     if (targetRules(schemaPort, modelSettings).excludedElementTypes[elementType]) return null;
     const form = elementFormInstances[elementType];
@@ -4264,6 +4307,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     setCurrentFloorZ(zInt);
   };
 
+  const [elevationEditedFor, setElevationEditedFor] = useState<string | null>(null);
   const elementElevationPlaceholder = (() => {
     if (selection.type !== 'element' && selection.type !== 'global') return undefined;
     const el = getElementById(selection.id);
@@ -4277,6 +4321,11 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
       ? String(roundToTwoDecimals(effectiveElevation))
       : undefined;
   })();
+  // The elevation is a viewer position no target reads: at ground level (no stated elevation, on
+  // the ground storey) there is nothing to say, so the field shows only above ground.
+  // Once the field has focus it stays for this selection, so clearing it to type a new value keeps it.
+  const elementAboveGround = (el: Element) => (el as { _base_height?: unknown })._base_height !== undefined
+    || Math.abs(Number(elementElevationPlaceholder)) > 0 || elevationEditedFor === el.id;
 
   const renderElementElevationField = () => {
     if (selection.type !== 'element' && selection.type !== 'global') return null;
@@ -4285,12 +4334,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
     // A type the target excludes (Lighting on an existing building) has no position to state.
     if (targetRules(schemaPort, modelSettings).excludedElementTypes[elementType]) return null;
     if (!elementSupportsGenericElevationControl(elementType, el, buildingElementGroundFormState.floorType)) return null;
+    if (!elementAboveGround(el)) return null;
     return (
       <>
         {renderFieldLabel('Elevation above model ground (m):', elementType, '_base_height')}
         <div className="element-input" ref={registerBaseFieldRefs(['_base_height', 'base_height', 'elevation'])}>
           <StandardInput
             {...decimalInputProps(elementElevationInput)}
+            onFocus={() => setElevationEditedFor(el.id)}
             unit={fieldUnit('_base_height')}
             step="0.01"
             variant="ghost"
@@ -4365,12 +4416,6 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
             </div>
           </div>
         )}
-        {evidenceBridge.renderSection({
-          elementType,
-          elementSubtype: getElementSubtype(),
-          useFHSSchema,
-        })}
-
         {/* Type/Shape/Floor metadata */}
         {(selection.type === 'element' || selection.type === 'global') && (
           <div className="element-editor-standard-fields">
@@ -4437,11 +4482,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                         return;
                       }
 
-                      if (shape === 'line' && getElementShape(el as any) === 'polygon') {
-                        const ok = window.confirm('Converting polygon to line will keep the longest edge. Continue?');
-                        if (!ok) return;
-                      }
-
+                      const convert = () => {
                       const next = convertShapeCoordinates(el as any, shape as any);
                       const updates: any = { coordinates: next };
                       if (el.type === 'BuildingElementAdjacentConditionedSpace' && shape !== 'polygon') {
@@ -4470,6 +4511,13 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                         }
                       }
                       updateElement(el.id, updates);
+                      };
+                      // A polygon made a line keeps only its longest edge: done, with Undo, not asked first.
+                      if (shape === 'line' && getElementShape(el as any) === 'polygon') {
+                        changeWithUndo(geometryStore, 'Changed to a line: it keeps the longest edge.', convert);
+                      } else {
+                        convert();
+                      }
                     }}
                     options={(() => {
                       if (isServiceLineElementType(elementType)) {
@@ -4700,7 +4748,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     const hasSplit = zone?.livingroom_area != null && zone?.restofdwelling_area != null;
                     return (
                   <>
-                <div className="element-label">Treated Floor split</div>
+                <div className="element-label">Treated floor split</div>
                 <div className="element-input element-editor-full-row">
                   <div className="element-editor-stack">
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, alignItems: 'center' }}>
@@ -4959,6 +5007,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                     </div>
                   </>
                 ) : null}
+                {/* An existing building's converter builds its own storeys and reads only the zone's
+                    areas (`hemie.rs`), so a saved zone shows no height or volume there. */}
+                {!(constructionBands && isExistingZoneSelection()) && <>
                 {(() => {
                     const allElementsH = Object.values(elementsById) as import('../geometry/types').Element[];
                     const derivedH = selection?.type === 'zone'
@@ -5045,6 +5096,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                   {/* Set by floor area and height: to reach a volume, change the height. */}
                   <Readout value={zoneVolume && zoneVolume > 0 ? formatToTwoDecimals(zoneVolume) : ''} unit={fieldUnit('volume', 'Zone')} label="Volume" />
                 </div>
+                </>}
                 {!constructionBands && (targetAcceptsThermalBridgingTotal || simplifiedThermalBridging) && <>
                 <div className="element-label">
                   Simplified thermal bridging
@@ -5109,8 +5161,16 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                 <h3 className="form-section-title">Element Details</h3>
 
                 <div className="element-form-grid">
-                  {/* Only a space heat system picks its zone. */}
+                  {/* Only a space heat system picks its zone; with one zone there is nothing to pick. */}
                   {elementType === 'System' && systemFormState.systemSubcategory === 'SpaceHeatSystem' && (
+                    zones.length === 1 && elementZoneId === zones[0]!.id ? (
+                    <>
+                      <div className="element-label"><FieldLabelRow label="Zone" labelExtra={<SourceNote>the only zone</SourceNote>} /></div>
+                      <div className="element-input" ref={registerBaseFieldRefs(['zoneId', 'zone_id'])}>
+                        <Readout value={zones[0]!.name} label="Zone" />
+                      </div>
+                    </>
+                    ) : (
                     <>
                       <div className="element-label">Zone</div>
                       <div className="element-input" ref={registerBaseFieldRefs(['zoneId', 'zone_id'])}>
@@ -5128,6 +5188,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                         />
                       </div>
                     </>
+                    )
                   )}
                   {/* Render dynamic attribute fields based on element type */}
                   {renderAttributePanel()}
@@ -5185,10 +5246,10 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                       </div>
                     )}
                     {sharedRoofNote}
-                    {elementType !== 'BuildingElementTransparent' && thermalMethodControl}
+                    {elementType !== 'BuildingElementTransparent' && elementType !== 'BuildingElementPartyWall' && thermalMethodControl}
                     {selection.type === 'element' &&
                       !selectedIsDormerAnchor &&
-                      (thermalMethod ? thermalMethod === 'calculation' : elementType === 'BuildingElementPartyWall') && (
+                      thermalMethod === 'calculation' && (
                       <div className="element-editor-section-spacer">
                         {renderAssemblyActionControl(appliedAssemblyEnvelope, () => {
                           setDormerAssemblySection(null);
@@ -5223,7 +5284,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           dormerThermalRepresentatives.window,
                         )}
                       </div>
-                    ) : hasAppliedPcdbSystemData || (elementType === 'System' && systemFormState.systemSubcategory === 'ZoneUnconditioned') ? (
+                    ) : hasAppliedPcdbSystemData || (elementType === 'System' && systemFormState.systemSubcategory === 'ZoneUnconditioned')
+                      // A type the target excludes keeps only its one-line note: its inputs do nothing.
+                      || targetRules(schemaPort, modelSettings).excludedElementTypes[elementType] ? (
                       // An unconditioned zone's fields are its panel's own (UnconditionedZoneFields).
                       null
                     ) : (
@@ -5236,7 +5299,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           arealHeatCapacityBands={arealHeatCapacityBands}
                           collapsible={false}
                           fieldIndicators={comparisonFieldIndicators}
-                          evidenceFieldKeys={evidenceBridge.linkedFieldKeys}
+                          renderEvidence={evidenceBridge.renderFieldIndicator}
                           focusFieldKey={comparisonFocusRequest?.fieldKey}
                           focusFieldVersion={comparisonFocusRequest?.version}
                           flat={advancedFlat}
@@ -5246,8 +5309,9 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
                           className="advanced-fields-section"
                           thermalMethod={thermalMethod}
                           hostFields={elementType !== 'BuildingElementTransparent' ? hostElementFieldsForMethod : undefined}
-                          hostMoreFields={elementType !== 'BuildingElementTransparent' ? hostMoreFields : undefined}
-                          omitFields={thermalMethod && elementType === 'BuildingElementTransparent' ? (thermalMethod === 'band' ? WINDOW_BAND_THERMAL_FIELDS : WINDOW_THERMAL_FIELDS)
+                          hostMoreFields={elementType !== 'BuildingElementTransparent' ? hostMoreFields ?? renderFormMore() : undefined}
+                          omitFields={elementType === 'OnSiteGeneration' && existingBuilding && hemDatabaseProducts ? PV_FORM_FIELDS
+                            : thermalMethod && elementType === 'BuildingElementTransparent' ? (thermalMethod === 'band' ? WINDOW_BAND_THERMAL_FIELDS : WINDOW_THERMAL_FIELDS)
                             : outsideSurfaceHosted ? HOSTED_OUTSIDE_SURFACE_FIELDS : undefined}
                         />
                       </React.Suspense>
@@ -5263,6 +5327,7 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
         {(selection.type === 'zone' || selection.type === 'element' || selection.type === 'global') && (
           <div className="element-creator-sticky-footer">
             {selection.type === 'element' ? applyLine : null}
+            <UndoToast />
             <div
               className={`form-actions ${
                 selection.type !== 'zone'
@@ -5346,12 +5411,14 @@ const ElementCreatorContent: React.FC<ElementCreatorProps & { selection: NonNull
               isOpen={assemblyCalculatorOpen}
               onClose={() => {
                 setAssemblyCalculatorOpen(false);
+                setAssemblyFromLibrary(false);
                 setDormerAssemblySection(null);
               }}
               elementMode={assemblyModalElementMode}
               elementPitchDeg={assemblyModalPitchDeg}
               initialAssemblySnapshot={assemblyInitialSnapshot}
               appliedEnvelope={appliedAssemblyEnvelope}
+              openLibrary={assemblyFromLibrary}
               initialOpaqueSubtype={
                 selectedIsDormerAnchor && dormerAssemblySection
                   ? dormerAssemblySection === 'roofs'
