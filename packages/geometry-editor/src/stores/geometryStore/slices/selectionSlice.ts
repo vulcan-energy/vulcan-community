@@ -18,6 +18,12 @@ export interface SelectionSlice {
   /** The element the pointer is over on the canvas or in a list naming it: highlighted on the canvas. */
   hoveredElementId: string | null;
   setHoveredElementId: (id: string | null) => void;
+  /** Elements a control is about to select (the inspector's "Select this part"): highlighted on the canvas as a selection is. */
+  hoveredElementIds: readonly string[];
+  setHoveredElementIds: (ids: readonly string[]) => void;
+  /** The Context Shading part the pointer is over, in the Directions table or on the plan pill. */
+  hoveredContextShadingPart: { elementId: string; index: number } | null;
+  setHoveredContextShadingPart: (part: { elementId: string; index: number } | null) => void;
   setSelection: (selection: Selection) => void;
   clearSelection: () => void;
 }
@@ -27,6 +33,17 @@ export const createSelectionSlice: GeometryStoreSlice = (set) => ({
   hoveredElementId: null,
   setHoveredElementId: (hoveredElementId) => {
     set((state) => (state.hoveredElementId === hoveredElementId ? state : { hoveredElementId }));
+  },
+  hoveredElementIds: [],
+  setHoveredElementIds: (hoveredElementIds) => {
+    set((state) => (state.hoveredElementIds.length === 0 && hoveredElementIds.length === 0 ? state : { hoveredElementIds }));
+  },
+  hoveredContextShadingPart: null,
+  setHoveredContextShadingPart: (part) => {
+    set((state) => {
+      const current = state.hoveredContextShadingPart;
+      return current?.elementId === part?.elementId && current?.index === part?.index ? state : { hoveredContextShadingPart: part };
+    });
   },
   setSelection: (selection) => {
     set({ selection });

@@ -1,0 +1,38 @@
+Metadata,,
+IsExistingBuilding,TRUE
+HEMIE_age_band,I
+Postcode,MK40 1AA
+HEMIE_construction_external_wall,"{""wall_construction_type"":""cavity""}"
+HEMIE_construction_external_door,"{""areal_heat_capacity"":20000}"
+HEMIE_construction_window,"{""frame_material"":""wood"",""glazing_gap"":""16"",""glazing_type"":""double""}"
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging,livingroom_area,restofdwelling_area
+Z,Zone,168,60,2.8,FALSE,20,40
+
+Exposed Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,is_unheated_pitched_roof,is_external_door,parent_element,coords,extra_json
+Main S,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"0,0,0|8,0,0","{""age_band"":""B""}"
+Main E,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"8,0,0|8,6,0","{""age_band"":""B""}"
+Main N,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"8,6,0|4,6,0","{""age_band"":""B""}"
+Ext E,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"4,6,0|4,9,0","{""age_band"":""K""}"
+Ext N,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"4,9,0|0,9,0","{""age_band"":""K""}"
+Ext W,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"0,9,0|0,6,0","{""age_band"":""K""}"
+Main W,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"0,6,0|0,0,0","{""age_band"":""B""}"
+Up S,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"0,0,1|8,0,1","{""age_band"":""B""}"
+Up E,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"8,0,1|8,6,1","{""age_band"":""B""}"
+Up N,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"8,6,1|0,6,1","{""age_band"":""B""}"
+Up W,Z,BuildingElementOpaque,1,90,1,2.8,0,0,FALSE,FALSE,,"0,6,1|0,0,1","{""age_band"":""B""}"
+Roof S,Z,BuildingElementOpaque,10,40,1,1,180,5.6,TRUE,FALSE,,"0,0,2|8,0,2|8,3,2|0,3,2","{""age_band"":""B""}"
+Roof N,Z,BuildingElementOpaque,10,40,1,1,0,5.6,TRUE,FALSE,,"0,3,2|8,3,2|8,6,2|0,6,2","{""age_band"":""B""}"
+Ext roof,Z,BuildingElementOpaque,10,0,1,1,0,5.6,FALSE,FALSE,,"0,6,1|4,6,1|4,9,1|0,9,1","{""age_band"":""K""}"
+Front,Z,BuildingElementOpaque,2,90,1,2,0,0,FALSE,TRUE,Main S,"3.5,0,0|4.5,0,0","{""is_front_door"":true}"
+
+Window Elements
+Name,Zone,Type,area,pitch,width,height,orientation360,base_height,linked_wall,frame_area_fraction,free_area_height,mid_height,max_window_open_area,coords,extra_json
+Ext window,Z,BuildingElementTransparent,1,90,1,1,0,1,Ext N,0.25,1,1.5,0.5,"2,9,0|1,9,0","{""window_sections"":[{""window_type"":""full opening""}]}"
+
+Ground Elements
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,parent_element,coords,extra_json
+Main floor,Z,BuildingElementGround,48,0,0,28,Slab_no_edge_insulation,,,,"0,0,0|8,0,0|8,6,0|0,6,0","{""age_band"":""B""}"
+Ext floor,Z,BuildingElementGround,12,0,0,10,Slab_no_edge_insulation,,,,"0,6,0|4,6,0|4,9,0|0,9,0","{""age_band"":""K""}"

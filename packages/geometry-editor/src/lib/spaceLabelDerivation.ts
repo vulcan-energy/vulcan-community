@@ -389,6 +389,29 @@ export function fullDwellingCountsCompliancePatch(counts: SpaceLabelAggregate['d
   return patch;
 }
 
+/**
+ * The room counts a label edit may write: a typed count wins over the labels. A count follows the
+ * labels while it is blank, still a new model's initial value, or equal to what the labels gave
+ * before the edit (`before`, null when no label had a room type); any other value was typed.
+ */
+export function followingDwellingCountsPatch(
+  settings: ComplianceSettingsShape & { initialValueRows?: readonly string[] },
+  derived: SpaceLabelAggregate['dwellingCounts'],
+  before: SpaceLabelAggregate['dwellingCounts'] | null,
+): ComplianceSettingsShape {
+  const full = fullDwellingCountsCompliancePatch(derived);
+  const initial = new Set(settings.initialValueRows);
+  const patch: ComplianceSettingsShape = {};
+  for (const field of DWELLING_COUNT_FIELDS) {
+    const stored = settings[field];
+    const follows = stored === undefined || stored === null
+      || initial.has(field)
+      || (before !== null && stored === Math.max(0, Math.round(before[field])));
+    if (follows) patch[field] = full[field];
+  }
+  return patch;
+}
+
 /** Shared with ioSlice.ts's CSV-vs-geometry override reconstruction so the two stay aligned. */
 export const FLOOR_AREA_MATCH_EPSILON_M2 = 0.005;
 

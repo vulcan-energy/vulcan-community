@@ -33,7 +33,7 @@ import {
 } from '../lib/windowOpenings';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { useGeometrySchemaPort } from '../../../geometry-editor-host/src/editorServicePorts';
-import { targetSchemaMode, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
+import { targetSchemaMode, type ArealHeatCapacityScale, type GeometrySchemaPort } from '../../../geometry-editor-host/src/schemaPort';
 import {
   WindowDetailChip,
   WindowDetailCollectionShell,
@@ -55,6 +55,10 @@ type RendererConfig = {
   $defs?: unknown;
   advancedEditor?: boolean;
   assemblySourceValues?: Record<string, unknown>;
+  /** The scale the target reads a heat capacity class on: a number from the layers is named by its class. */
+  arealHeatCapacityClasses?: ArealHeatCapacityScale;
+  /** The row's source shows on another control (a bands-or-number selector's number field). */
+  hideSource?: boolean;
   /** The fabric preset values this element takes (they read as its default), and its Fabric row's field key. */
   fabricPresetSource?: FabricPresetSource;
   fabricRowField?: string;
@@ -326,7 +330,7 @@ function renderFieldLabelWithIndicator(
         overflowWrap: 'anywhere',
       }}
     >
-      <ResolvedFieldLabel presentation={presentation} useFHSSchema={useFHSSchema ?? false} />
+      <ResolvedFieldLabel presentation={{ ...presentation, label: sentenceCaseLabel(presentation.label) }} useFHSSchema={useFHSSchema ?? false} />
       {evidenceLine}
       {indicatorMessages && indicatorMessages.length > 0 && (
         <ValidationIndicator
@@ -579,13 +583,13 @@ function resolveAdvancedFieldSource(args: {
   const matches = hasExplicit ? valuesEquivalent(data, sourceValue, isJsonLike) : blankFollowsSource;
   if (matches) {
     return {
-      source: isAssembly ? <SourceNote>from the assembly</SourceNote> : args.derivedNote ? <SourceNote>{args.derivedNote}</SourceNote> : <DefaultNote field={args.fabricRowField} preset={fieldSource.preset} />,
+      source: isAssembly ? <SourceNote>from the layers</SourceNote> : args.derivedNote ? <SourceNote>{args.derivedNote}</SourceNote> : <DefaultNote field={args.fabricRowField} preset={fieldSource.preset} />,
       followsSource: hasExplicit,
     };
   }
   const shown = typeof sourceValue === 'number' ? withUnit(sourceValue) : undefined;
   return isAssembly || isSamplePreset
-    ? { source: sourceButton(isAssembly ? 'Use assembly' : 'Use default', sourceValue, shown), followsSource: false }
+    ? { source: sourceButton(isAssembly ? 'Use the layers' : 'Use default', sourceValue, shown), followsSource: false }
     : { source: sourceButton('Use default', undefined, shown), followsSource: false };
 }
 
@@ -746,7 +750,7 @@ function useAdvancedControlPreamble(
   });
   const fieldSource = state.fieldSource;
   const fieldUnit = fieldUnitForAdornment(fieldPresentation);
-  const { source, followsSource } = resolveAdvancedFieldSource({
+  const { source, followsSource } = cfg.hideSource ? { source: null, followsSource: false } : resolveAdvancedFieldSource({
     data,
     isJsonLike,
     fieldSource,
@@ -1323,7 +1327,8 @@ const ADVANCED_CTRL_LABEL_ROW: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'row',
   justifyContent: 'space-between',
-  alignItems: 'center',
+  // The source tag sits on the label's baseline, at the right.
+  alignItems: 'baseline',
   width: '100%',
   minWidth: 0,
   columnGap: 10,

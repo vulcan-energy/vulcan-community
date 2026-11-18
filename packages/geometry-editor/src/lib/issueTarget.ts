@@ -35,7 +35,8 @@ const holdsPlant = (extra: unknown, section: string, key: string) => {
  * (window_part_list/0 → window_part_list). A row whose path names no element goes to the
  * first element its `message` names in single quotes ("The walls 'Wall (N) 2' do not join"),
  * when exactly one element (in the row's zone, if it has one) has that name. Failing both, a
- * top-level plant path goes to the unique Systems row holding that plant key.
+ * top-level plant path goes to the unique Systems row holding that plant key, and the hot water
+ * demand as a whole to the unique hot water system.
  */
 export function resolveIssueTarget(path: string | undefined, model: IssueModel, message?: string): IssueTarget {
   const target = resolvePath(path, model);
@@ -47,6 +48,14 @@ export function resolveIssueTarget(path: string | undefined, model: IssueModel, 
     if (matches.length === 1) return { ...target, elementId: matches[0]!.id, fieldKey: undefined };
   }
   const s = issuePathSegments(path);
+  // The hot water demand as a whole belongs to the hot water system it is drawn from.
+  if (s[0] === 'HotWaterDemand' && !s[1]) {
+    const systems = elements.filter((element) => {
+      const sources = (element!.extra_json as Record<string, unknown> | undefined)?.HotWaterSource;
+      return typeof sources === 'object' && sources !== null;
+    });
+    return systems.length === 1 ? { ...target, elementId: systems[0]!.id } : target;
+  }
   if (s[0] === 'Zone' || !s[1]) return target;
   const holders = elements.filter((element) => holdsPlant(element!.extra_json, s[0]!, s[1]!));
   // A deeper path (a heat source inside the plant) has no control of its own on the row.

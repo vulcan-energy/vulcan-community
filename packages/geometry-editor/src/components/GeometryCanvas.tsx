@@ -97,6 +97,9 @@ import {
   findNearestWallProjectionFromCache as utilFindNearestWallProjectionFromCache,
   projectSegmentOntoParent as utilProjectSegmentOntoParent,
   resolveOpeningSegmentParentFromCache as utilResolveOpeningSegmentParentFromCache,
+  doorHostTypes,
+  doorOffWallMessage,
+  lineDrawPresetProps,
   resolveDrawSnapPoint as utilResolveDrawSnapPoint,
   ORTHOGONAL_BEND_SHAPES,
   type OrthogonalBendShape,
@@ -199,6 +202,9 @@ import {
   type DrawingPreviewSegment,
 } from './canvas/drawingPreviewSignal';
 import { createSnapFeedbackSignal } from './canvas/snapFeedbackSignal';
+import { useDraggedContextShadingId } from './canvas/contextShadingLiveCoordinates';
+import { LiveContextShadingPills } from './canvas/LiveContextShadingPills';
+import { contextShadingPartPill } from '../lib/contextShadingDrawing';
 import {
   hasGeometryCanvasSelectionRenderStateChanged,
   shouldMarkGeometryCanvasModelRenderState,
@@ -311,6 +317,7 @@ import {
   resolveDevelopmentModelVerticalContext,
   type DevelopmentContextVerticalRelation,
 } from '../lib/developmentContextShading';
+import { deriveContextShadingCached, labelSource } from '../lib/contextShadingDerivedCache';
 import type { Vec3 } from '../geometry/thermalBridge/linearTbSegmentOverlap';
 import { getOverlapBadgeMenuLayerStyle, type OverlapBadgeMenuAnchor } from '../lib/overlapBadgeMenu';
 
@@ -1410,6 +1417,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
 
   // In the store so the elements panel and the host's lists can highlight an element too.
   const hoveredElementId = useGeometryStore((s) => s.hoveredElementId);
+  const hoveredContextShadingPart = useGeometryStore((s) => s.hoveredContextShadingPart);
   const setElementHover = useGeometryStore((s) => s.setHoveredElementId);
   const setCanvasElementHover = useCallback((next: string | null) => {
     if (!canCanvasInteractionUpdateElementHover(getActiveCanvasInteraction()?.kind)) return;
@@ -1479,6 +1487,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
   }>({ visible: false, text: '', position: {x: 0, y: 0} });
   const [drawingPreviewSignal] = useState(createDrawingPreviewSignal);
   const [snapFeedbackSignal] = useState(createSnapFeedbackSignal);
+  // The Context Shading object whose vertex is dragged: LiveContextShadingPills draws its pills meanwhile.
+  const draggedContextShadingId = useDraggedContextShadingId();
   const drawingPreviewSessionRef = useRef<CanvasInteractionSession | null>(null);
   const beginDrawingPreviewInteraction = useCallback(() => {
     if (drawingPreviewSessionRef.current?.isActive()) return;
@@ -1846,7 +1856,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       window.removeEventListener('blur', handleMouseUp);
     };
   }, [endCanvasPanGesture]);
-  const { constructionBands } = useTargetRules();
+  // hemieBundles: the existing-building converter, which also takes a door on a party or sheltered wall.
+  const { constructionBands, hemieBundles: partyOrShelteredDoors } = useTargetRules();
   const presetsOffered = PRESET_DRAW_TYPES.has(drawElementType) && !(constructionBands && FABRIC_PRESET_TYPES.has(drawElementType));
   const presetOptionsResetKey = presetsOffered ? drawElementType : 'unsupported';
   const emptyElementPresetOptions = useMemo<
@@ -6003,7 +6014,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
           if (!multiDrawModifierHeldRef.current) {
             setDrawMode('none');
           }
-        } else if (drawMode === 'line' || isServiceLineDrawMode(drawMode)) {
+        } else if (drawMode === 'line' || drawMode === 'door' || isServiceLineDrawMode(drawMode)) {
           const multiDrawActive = isMultiDrawActiveForEvent(e?.evt);
           const serviceLineMode = serviceLineModeFromDrawMode(drawMode);
           const draftStartZ = parseEditorDecimal(serviceLineDraftStartZ) ?? serviceLineDrawBaseZ;
@@ -6140,6 +6151,20 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               if (split.endIndex === 0) drawnLegs[0]![0] = { ...split.point };
               else placedCoordinates[1] = { ...split.point };
             }
+            // A door, like a window, takes the wall it is drawn on as its host: an external wall, or
+            // on HEM:EPC a party or sheltered wall too. Off such a wall (an internal wall) it is not placed.
+            const doorParent = drawMode === 'door'
+              ? utilResolveOpeningSegmentParentFromCache(lineCoordinates, activeGeometrySnapCache,
+                  elementsById as Record<string, Element>, '', getProjectDefaults(geometryStore).snapTol, doorHostTypes(partyOrShelteredDoors))
+              : null;
+            if (drawMode === 'door' && !doorParent) {
+              const pointerPosition = getStageViewportPointer(stage);
+              if (pointerPosition) {
+                setDrawingTooltip({ visible: true, text: doorOffWallMessage(partyOrShelteredDoors), position: { x: pointerPosition.x + 10, y: pointerPosition.y - 10 } });
+              }
+              setDrawPoints([]);
+              return;
+            }
             // Earlier legs take the same create path, first so they name in order; a pending host
             // prefill applies to every leg.
             const earlierLegs = drawnLegs.slice(0, -1).map(() => beginDrawnElement(targetZoneId, drawElementType));
@@ -6149,8 +6174,8 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             const serviceLineLengthPatch = isServiceLineElementType(drawElementType)
               ? { length: getServiceLineLengthFromCoordinates(placedCoordinates), isPlaceholder: false }
               : {};
-            const openingParentPatch =
-              drawElementType === 'BuildingElementTransparent' && !isServiceLineElementType(drawElementType)
+            const openingParentPatch = doorParent ??
+              (drawElementType === 'BuildingElementTransparent' && !isServiceLineElementType(drawElementType)
                 ? utilResolveOpeningSegmentParentFromCache(
                     lineCoordinates,
                     activeGeometrySnapCache,
@@ -6158,16 +6183,18 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                     elementId,
                     getProjectDefaults(geometryStore).snapTol,
                   )
-                : null;
+                : null);
 
+            const linePresetProps = lineDrawPresetProps(drawMode, drawPresetProps);
             const linePatch: Partial<Element> = {
-              ...drawPresetProps,
+              ...linePresetProps,
               ...drawMvhrRolePropsRef.current,
-              ...(getDefaultLinePitchPatch(drawElementType, drawPresetProps) ?? {}),
+              ...(getDefaultLinePitchPatch(drawElementType, linePresetProps) ?? {}),
               ...(drawFloorId ? { floorId: drawFloorId } : {}),
               coordinates: openingParentPatch?.coordinates ?? placedCoordinates,
               ...serviceLineLengthPatch,
               ...(openingParentPatch ? { parent_element: openingParentPatch.parentName } : {}),
+              ...(doorParent ? { is_external_door: true } : {}),
               ...(hostPrefill || {}),
               ...(extraWithServiceFloor ? { extra_json: extraWithServiceFloor } : {}),
 
@@ -6631,9 +6658,13 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     });
   }, [applyPanPreviewDelta, applyZoomPreview, scale, scheduleViewportPreviewCommit]);
 
+  // Elements a control is about to select ("Select this part"): drawn as selected while hovered.
+  const hoveredElementIds = useGeometryStore((s) => s.hoveredElementIds);
+  const highlightedElementIds = useMemo(() => (hoveredElementIds.length ? [...new Set([...selectedElementIds, ...hoveredElementIds])] : selectedElementIds),
+    [selectedElementIds, hoveredElementIds]);
   // Elements the renderer draws as selected: single, multi and dormer-bundle selection.
   const rendererHighlightedIds = useMemo(() => {
-    const ids = new Set(selectedElementIds);
+    const ids = new Set(highlightedElementIds);
     if (selection?.type === 'element' || selection?.type === 'global') ids.add(selection.id);
     if (selection?.type === 'dormer') {
       for (const element of Object.values(elementsById)) {
@@ -6641,7 +6672,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       }
     }
     return ids;
-  }, [selectedElementIds, selection, elementsById]);
+  }, [highlightedElementIds, selection, elementsById]);
 
   // Snapped vertices (handle colour, unsnapped chips) and a loose duct/pipe run end, for selected
   // elements only: O(coords × n) each, so computed once here and handed to the renderer and chips.
@@ -6791,7 +6822,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     globalOrientationOffset,
     currentFloorZ,
     selection,
-    selectedElementIds,
+    selectedElementIds: highlightedElementIds,
     setSelection: handle3DSelectionChange,
     frameRequest: frame3dRequest,
     onFrameRequestConsumed: clearFrame3dRequest,
@@ -6806,7 +6837,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     globalOrientationOffset,
     currentFloorZ,
     selection,
-    selectedElementIds,
+    highlightedElementIds,
     handle3DSelectionChange,
     frame3dRequest,
     clearFrame3dRequest,
@@ -6890,6 +6921,46 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
             priority: ANNOTATION_PRIORITY.selected,
             movable: false,
             render: (rect) => renderUnsnappedVertexChip(rect, chip.text, canvasInteractionPalette),
+          });
+        }
+      }
+      // A selected Context Shading object: each part's distance, keyed by object, part and face (a face can be
+      // seen in two parts) so a vertex drag keeps its pills.
+      // While a vertex is dragged, LiveContextShadingPills draws them from the live coordinates.
+      if (element.type === 'ContextShading' && drawMode === 'none' && id !== draggedContextShadingId) {
+        const derived = deriveContextShadingCached(element, elementsById, floors, globalOrientationOffset)?.derived;
+        if (derived && !('issue' in derived)) {
+          derived.parts.forEach((part, index) => {
+            const pill = contextShadingPartPill(part, project);
+            const color = pill.positive ? snapColor : canvasInteractionPalette.warningGuide;
+            items.push({
+              key: `context-shading-part-${id}-${index}-${part.face}`,
+              rect: pill.rect,
+              // A flagged distance (0 m or less) is always drawn; the rest give way to each other, and to
+              // the handles, and a hovered table row reveals its own (see the reveal key below).
+              priority: pill.positive ? ANNOTATION_PRIORITY.warning : ANNOTATION_PRIORITY.selected,
+              movable: true,
+              render: (rect) => (
+                <Group>
+                  {renderCanvasMeasurementPill(pill.text, rect, color)}
+                  <Rect
+                    x={rect.x}
+                    y={rect.y}
+                    width={rect.width}
+                    height={rect.height}
+                    fill={color}
+                    opacity={0}
+                    onMouseEnter={() => geometryStore.getState().setHoveredContextShadingPart({ elementId: id, index })}
+                    onMouseLeave={() => geometryStore.getState().setHoveredContextShadingPart(null)}
+                    onClick={(event) => {
+                      event.cancelBubble = true;
+                      // A long Directions table scrolls to the clicked part's row (its first cell: the row itself has no box).
+                      document.querySelector(`[data-testid="context-shading-direction-${index}"]`)?.firstElementChild?.scrollIntoView({ block: 'nearest' });
+                    }}
+                  />
+                </Group>
+              ),
+            });
           });
         }
       }
@@ -7136,11 +7207,14 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
       if (canvasCoords.length === 0 || !isElementOnActiveCanvasFloor(element, currentFloorZ, floors)) continue;
       // The selected roof part's chips stand in for its slopes' labels, which would sit under them.
       if (selectedRoofPart?.memberIds.has(element.id)) continue;
+      // Its label would read the stored values while a vertex is dragged; it returns on the drop.
+      if (element.id === draggedContextShadingId) continue;
       const isHighlighted = selectedElementIdSet.has(element.id) ||
         ((selection?.type === 'element' || selection?.type === 'global') && selection.id === element.id);
       const isHovered = elementHover === element.id && !isElementHiddenOnView(element);
       if (labelVisibility === 'selected' && !isHighlighted && !isHovered) continue;
-      const candidates = getSmartLabelCandidates(element, canvasCoords, isHighlighted, showLineDimensions);
+      const labelElement = labelSource(element, elementsById, floors, globalOrientationOffset);
+      const candidates = getSmartLabelCandidates(labelElement, canvasCoords, isHighlighted, showLineDimensions);
       const bounds = calculateElementBounds(canvasCoords);
       items.push({
         key: `label-${element.id}`,
@@ -7150,7 +7224,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
         priority: isHighlighted ? ANNOTATION_PRIORITY.selected : ANNOTATION_PRIORITY.label,
         movable: true,
         render: (rect) => renderSmartLabel(
-          element,
+          labelElement,
           rect,
           isHighlighted,
           showLineDimensions,
@@ -7197,6 +7271,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
     stageSize,
     LIVE_GEOMETRY_INTERACTION_KINDS.some((kind) => isCanvasInteractionActive(kind)),
   ));
+
+  // The pill of the Context Shading part hovered in the Directions table: drawn even when layout hid it.
+  const hoveredContextShadingPartKey = (() => {
+    const hovered = hoveredContextShadingPart;
+    const element = hovered ? elementsById[hovered.elementId] : undefined;
+    if (!hovered || element?.type !== 'ContextShading') return null;
+    const derived = deriveContextShadingCached(element, elementsById, floors, globalOrientationOffset)?.derived;
+    const part = derived && !('issue' in derived) ? derived.parts[hovered.index] : undefined;
+    return part ? `context-shading-part-${hovered.elementId}-${hovered.index}-${part.face}` : null;
+  })();
 
   // A distance editor opens centred where the clicked pill is drawn, nudged or not.
   const editorAtPill = (geometry: { pillKey: string; width: number }) => {
@@ -7658,7 +7742,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
               {resolveAnnotationPaint(
                 canvasAnnotations,
                 annotationPlacements,
-                elementHover ? `label-${elementHover}` : null,
+                hoveredContextShadingPartKey ?? (elementHover ? `label-${elementHover}` : null),
               ).map(({ item, rect }) => <React.Fragment key={item.key}>{item.render?.(rect)}</React.Fragment>)}
             </Group>
             {/* Render hover point for ground element splitting */}
@@ -8195,36 +8279,7 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                   }
                 }
 
-                const shouldUpdateContextAngles =
-                  selectedShapeDragTarget.element.type === 'ContextShading' &&
-                  Boolean((selectedShapeDragTarget.element as any).parent_element);
-                if (shouldUpdateContextAngles) {
-                  const parentName = (selectedShapeDragTarget.element as any).parent_element as string;
-                  const parentElement = findElementByName(parentName);
-                  if (parentElement) {
-                    const { calculateShadingAngularRange } = geometryStore.getState();
-                    const { start_angle, end_angle } = calculateShadingAngularRange(
-                      { ...selectedShapeDragTarget.element, coordinates: snappedCoords } as any,
-                      parentElement as any,
-                      geometryStore.getState().globalOrientationOffset,
-                    );
-                    commitSelectedShapeUpdate(
-                      selectedShapeDragTarget.element.id,
-                      {
-                        coordinates: snappedCoords as any,
-                        start_angle,
-                        end_angle,
-                        extra_json: translateDormerExtraJson(
-                          selectedShapeDragTarget.element.extra_json as Record<string, any> | undefined,
-                          dx,
-                          dy,
-                        ),
-                      },
-                      skipAutoSave,
-                    );
-                    return snappedCoords;
-                  }
-                }
+                // A Context Shading update re-derives its directions and distance in the store.
                 commitSelectedShapeUpdate(
                   selectedShapeDragTarget.element.id,
                   {
@@ -8454,6 +8509,16 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                 canvasPalette={drawingCanvasPalette}
               />,
             )}
+            <LiveContextShadingPills
+              elementsById={elementsById as Record<string, Element>}
+              floors={floors}
+              globalOrientationOffset={globalOrientationOffset}
+              scale={scale}
+              panOffset={panOffset}
+              canvasCenter={canvasCenter}
+              positiveColor={readRootCssVar('--semantic-snap', '#1E90FF')}
+              warningColor={canvasInteractionPalette.warningGuide}
+            />
             <HoverHintOverlay
               stageRef={stageRef}
               enabled={drawMode === 'none' && !isCanvasPanning}
@@ -9977,7 +10042,6 @@ const GeometryCanvasInner: React.FC<GeometryCanvasProps> = ({
                       selectedElementIds={selectedElementIds}
                       inspectorContributions={inspectorContributions}
                       workspaceResourcePort={workspaceResourcePort}
-                      externalDetailCatalogue={externalDetailCatalogue}
                       onDelete={() => {
                         setElementDeleteModal({
                           isOpen: true,

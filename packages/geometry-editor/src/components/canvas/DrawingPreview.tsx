@@ -42,7 +42,7 @@ function getPlacementStartPoint(
     return snapOrCursor;
   }
 
-  if (drawMode === 'line' || drawMode === 'tb-plan-line' || drawMode === 'tb-vertical-line' || drawMode === 'tb-slope-line') {
+  if (drawMode === 'line' || drawMode === 'door' || drawMode === 'tb-plan-line' || drawMode === 'tb-vertical-line' || drawMode === 'tb-slope-line') {
     if (snapOrCursor) return snapOrCursor;
     if (drawPoints.length === 1) return drawPoints[0];
     return null;
@@ -201,7 +201,7 @@ export const DrawingPreview = memo<DrawingPreviewProps>(function DrawingPreview(
   return (
     <Group>
       {/* Line draw mode: preview from first point to cursor */}
-      {(drawMode === 'line' || drawMode === 'tb-plan-line' || drawMode === 'tb-slope-line') && drawPoints.length === 1 && drawCursor && (
+      {(drawMode === 'line' || drawMode === 'door' || drawMode === 'tb-plan-line' || drawMode === 'tb-slope-line') && drawPoints.length === 1 && drawCursor && (
         <>
           <Line
             points={[drawPoints[0], ...drawBends, drawCursor].flatMap((p) => [w2c(p).x, w2c(p).y])}

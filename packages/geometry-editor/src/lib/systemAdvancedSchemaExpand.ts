@@ -10,9 +10,7 @@
  * match other geometry types.
  *
  * **Editability vs schema:** we do not auto-materialise every optional schema leaf into `extra_json`;
- * the preset (or PCDB apply) still supplies the initial object. JsonForms may emit **partial** objects
- * when editing; {@link mergeSystemExtraJsonAfterJsonForms} keeps preset siblings so values stay editable
- * and are not silently discarded. Conditional `allOf` / `if` branches in the published schema can still
+ * the preset (or PCDB apply) still supplies the initial object. Conditional `allOf` / `if` branches in the published schema can still
  * hide controls until discriminators match — that is schema/JsonForms behaviour, not the merge maps.
  */
 
@@ -125,36 +123,9 @@ export function expandSystemMergeMapSchemaForJsonForms(
 }
 
 /**
- * Deep-merge helper: `fromForm` wins on keys it defines; any object path missing in `fromForm`
- * is filled from `base` (typically the last persisted preset / model). Prevents JsonForms from
- * dropping sibling preset fields when it emits a partial object after a single-field edit.
+ * The edited `extra_json[subtype]` plant maps. The form edits the whole stored object, so a key
+ * the edit left out was cleared and stays cleared; a plant the edit left out keeps its stored value.
  */
-export function mergePresetWithJsonFormsOutput(base: unknown, fromForm: unknown): unknown {
-  if (fromForm === undefined) return base;
-  if (fromForm === null) return null;
-  if (typeof fromForm !== 'object' || Array.isArray(fromForm)) return fromForm;
-  if (typeof base !== 'object' || base === null || Array.isArray(base)) return fromForm;
-  const b = base as Record<string, unknown>;
-  const f = fromForm as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...f };
-  for (const [k, bv] of Object.entries(b)) {
-    if (!(k in out)) {
-      out[k] = bv;
-    } else if (
-      bv !== null
-      && typeof bv === 'object'
-      && !Array.isArray(bv)
-      && out[k] !== null
-      && typeof out[k] === 'object'
-      && !Array.isArray(out[k])
-    ) {
-      out[k] = mergePresetWithJsonFormsOutput(bv, out[k]);
-    }
-  }
-  return out;
-}
-
-/** Merge `extra_json[subtype]` plant maps so each plant object keeps preset keys under JsonForms edits. */
 export function mergeSystemExtraJsonAfterJsonForms(
   existing: Record<string, unknown>,
   incoming: Record<string, unknown>,
@@ -183,16 +154,13 @@ export function mergeSystemExtraJsonAfterJsonForms(
         mergedPlants[name] = b;
       } else if (b === undefined) {
         mergedPlants[name] = f;
+      } else if (forbiddenKeys && f && typeof f === 'object' && !Array.isArray(f)) {
+        const was = new Set(forbiddenKeys(name, b));
+        const plant = { ...(f as Record<string, unknown>) };
+        for (const key of forbiddenKeys(name, f)) if (!was.has(key)) delete plant[key];
+        mergedPlants[name] = plant;
       } else {
-        const merged = mergePresetWithJsonFormsOutput(b, f);
-        if (forbiddenKeys && merged && typeof merged === 'object' && !Array.isArray(merged)) {
-          const was = new Set(forbiddenKeys(name, b));
-          const plant = { ...(merged as Record<string, unknown>) };
-          for (const key of forbiddenKeys(name, merged)) if (!was.has(key)) delete plant[key];
-          mergedPlants[name] = plant;
-        } else {
-          mergedPlants[name] = merged;
-        }
+        mergedPlants[name] = f;
       }
     }
     out[subtype] = mergedPlants;

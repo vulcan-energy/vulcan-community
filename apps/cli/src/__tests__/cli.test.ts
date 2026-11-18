@@ -47,6 +47,37 @@ describe('vulcan-community commands', () => {
     expect(checkGeometryCsv(csv).complianceValidationEnabled).toBe(true);
   });
 
+  it('check names Context Shading parts by their directions less the north offset', () => {
+    // An 8 x 6 house with 0.3 m walls; an L block whose east arm stands against the east wall.
+    const csv = join(mkdtempSync(join(tmpdir(), 'vulcan-cli-')), 'shading.csv');
+    const write = (offset: number) => writeFileSync(csv, `Metadata,,
+GlobalOrientationOffset,${offset},
+VulcanCsvVersion,3
+
+Zone,,
+Name,Type,volume,floor_area,height,simplified thermal bridging
+Zone 1,Zone,120,48,2.5,FALSE
+
+Ground Elements,,
+Name,Zone,Type,area,width,height,perimeter,floor_type,depth_basement_floor,thickness_walls,parent_element,coords,extra_json
+Floor,Zone 1,BuildingElementGround,48,0,0,28,Slab_no_edge_insulation,,0.3,,"0,0,0|8,0,0|8,6,0|0,6,0",
+
+Context Shading,,
+Name,Type,shading_type,start_angle,end_angle,distance,height,parent_element,coords,extra_json
+L,ContextShading,obstacle,0,0,0,6,DefaultCentre,"8,0,0|10,0,0|10,8,0|-2,8,0|-2,7,0|8,7,0",
+`);
+    const touching = () => {
+      const messages = checkGeometryCsv(csv).criticalIssues.map((row: { message: string }) => row.message)
+        .filter((message: string) => message.includes('touches or overlaps'));
+      expect(messages).toHaveLength(1);
+      return messages[0]!.match(/Direction (\d+)°–(\d+)°/)!.slice(1).map(Number);
+    };
+    write(0);
+    const [start, end] = touching();
+    write(10);
+    expect(touching()).toEqual([start - 10, end - 10]);
+  });
+
   it('convert refuses a CSV pinned to a HEM version instead of converting it with the bundled schema', async () => {
     const csv = join(mkdtempSync(join(tmpdir(), 'vulcan-cli-')), 'pinned.csv');
     writeFileSync(csv, 'Metadata,,\nVulcanCsvVersion,3,\n#TargetBundleId,python-fhs-a9-918addad-b9b90138-v1,\n');

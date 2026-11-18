@@ -51,6 +51,31 @@ describe('flattenIfThenAllOfProperties', () => {
     expect(Object.keys(flat.properties).sort()).toEqual(['a']);
     expect(flat.required).toEqual([]);
   });
+
+  // A target whose heaters' thermostats sit in tank controls (HEM:EPC): each heater but a solar
+  // one shows a thermostat position, which the converter moves into its tank control.
+  it('gives each heater of a cylinder with tank controls a thermostat position', () => {
+    const root = { $defs: {
+      TankControl: { properties: { heat_source: { type: 'string' }, thermostat_position: { type: 'number', minimum: 0, exclusiveMaximum: 1, title: 'Thermostat Position' } } },
+    } };
+    const coil = { type: 'object', properties: { type: { const: 'HeatSourceWet' }, name: { type: 'string' } }, additionalProperties: false };
+    const solar = { type: 'object', properties: { type: { const: 'SolarThermalSystem' } } };
+    const tank = {
+      properties: {
+        HeatSource: { type: 'object', additionalProperties: { anyOf: [coil, solar] } },
+        tank_controls: { type: 'array', items: { $ref: '#/$defs/TankControl' } },
+      },
+    };
+    const flat = flattenIfThenAllOfProperties(tank, { HeatSource: { linked_heat_source: { type: 'HeatSourceWet' }, solar: { type: 'SolarThermalSystem' } } }, root) as {
+      properties: { HeatSource: { properties: Record<string, { properties: Record<string, unknown> }> } };
+    };
+    const heaters = flat.properties.HeatSource.properties;
+    expect(heaters.linked_heat_source!.properties.thermostat_position).toEqual({ type: 'number', minimum: 0, exclusiveMaximum: 1, title: 'Thermostat Position' });
+    expect(heaters.solar!.properties.thermostat_position).toBeUndefined();
+    // Without tank controls, a heater's schema is its own.
+    const own = flattenIfThenAllOfProperties({ properties: { HeatSource: tank.properties.HeatSource } }, { HeatSource: { linked_heat_source: { type: 'HeatSourceWet' } } }, root) as typeof flat;
+    expect(own.properties.HeatSource.properties.linked_heat_source!.properties.thermostat_position).toBeUndefined();
+  });
 });
 
 describe('jsonSchemaIfMatches and booleans', () => {
@@ -80,6 +105,16 @@ describe('forbidden values', () => {
       { HotWaterSource: { tank: { area: 2, heat: {} } } }, { HotWaterSource: { tank: { area: 2, heat: { a: 1 } } } }, 'HotWaterSource', forbidden,
     ) as { HotWaterSource: { tank: Record<string, unknown> } };
     expect(edited.HotWaterSource.tank.area).toBe(2);
+  });
+
+  it('keeps a field the edit cleared cleared: Clear on a product id removes it', () => {
+    const edited = mergeSystemExtraJsonAfterJsonForms(
+      { HeatSourceWet: { boiler: { type: 'Boiler', product_id: 690205, ColdWaterSource: 'mains water' } } },
+      { HeatSourceWet: { boiler: { type: 'Boiler', ColdWaterSource: 'mains water' } } },
+      'HeatSourceWet',
+      forbidden,
+    ) as { HeatSourceWet: { boiler: Record<string, unknown> } };
+    expect(edited.HeatSourceWet.boiler).toEqual({ type: 'Boiler', ColdWaterSource: 'mains water' });
   });
 
   it('compares a duct before and after an edit', () => {

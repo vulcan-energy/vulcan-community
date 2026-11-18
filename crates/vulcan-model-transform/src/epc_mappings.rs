@@ -487,10 +487,29 @@ pub(crate) fn drop_mvhr_vent_type(model: &mut Value) {
     }
 }
 
-const COIL_FIELDS: [&str; 2] = ["primary_flow_rate", "heat_transfer_rate_W_per_K"];
+const COIL_FIELDS: [(&str, &str); 2] = [
+    (
+        "primary_flow_rate",
+        "primary flow rate (L/min, the flow between the heat source and the cylinder)",
+    ),
+    ("heat_transfer_rate_W_per_K", "heat transfer rate (W/K)"),
+];
 
-/// Thermostat positions move into `tank_controls`. A wet coil must state its flow and heat
-/// transfer rates; a missing one is an error naming the cylinder, never a template value.
+/// A cylinder heater as its errors name it.
+fn heater_words(heater: &Map<String, Value>) -> &'static str {
+    match heater.get("type").and_then(Value::as_str) {
+        Some("HeatSourceWet") => "coil",
+        Some("ImmersionHeater") => "immersion heater",
+        Some("HeatPump_HWOnly") => "hot water heat pump",
+        _ => "heater",
+    }
+}
+
+/// Thermostat positions move into `tank_controls`, and each heater but a solar one (it has its
+/// own control) needs one, or the run fails: a missing position is an error, never a template
+/// value. A tank control's heat source is typed text: in a cylinder with one such heater it is
+/// that heater; otherwise it names a heater by its key, or a coil by its heat source. A wet coil
+/// must state its flow and heat transfer rates; a missing one is an error naming the cylinder.
 pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationError>) {
     let Some(sources) = model
         .get_mut("HotWaterSource")
@@ -505,32 +524,110 @@ pub(crate) fn map_cylinder_coils(model: &mut Value, errors: &mut Vec<ValidationE
         if source.get("type").and_then(Value::as_str) != Some("StorageTank") {
             continue;
         }
-        let mut controls = Vec::new();
+        let mut controls = match source.remove("tank_controls") {
+            Some(Value::Array(controls)) => controls,
+            Some(other) => vec![other],
+            None => Vec::new(),
+        };
+        let stated = controls.len();
+        let mut controlled = Vec::new();
+        // (key, the coil's heat source name, how its errors name it)
+        let mut heaters: Vec<(String, Option<String>, String)> = Vec::new();
         if let Some(heat_sources) = source.get_mut("HeatSource").and_then(Value::as_object_mut) {
+            let kinds: Vec<&str> = heat_sources
+                .values()
+                .filter_map(Value::as_object)
+                .map(heater_words)
+                .collect();
             for (name, heat_source) in heat_sources.iter_mut() {
                 let Some(heat_source) = heat_source.as_object_mut() else {
                     continue;
                 };
+                let kind = heater_words(heat_source);
+                let who = if kinds.iter().filter(|k| **k == kind).count() > 1 {
+                    format!("{kind} '{name}'")
+                } else {
+                    kind.to_string()
+                };
+                let path = json_pointer(&["HotWaterSource", source_name, "HeatSource", name]);
                 if let Some(position) = heat_source.remove("thermostat_position") {
                     controls.push(json!({"heat_source": name, "thermostat_position": position}));
+                    controlled.push(name.clone());
+                }
+                if heat_source.get("type").and_then(Value::as_str) != Some("SolarThermalSystem") {
+                    heaters.push((
+                        name.clone(),
+                        heat_source
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        who.clone(),
+                    ));
                 }
                 if heat_source.get("type").and_then(Value::as_str) != Some("HeatSourceWet") {
                     continue;
                 }
-                let path = json_pointer(&["HotWaterSource", source_name, "HeatSource", name]);
-                for field in COIL_FIELDS
+                for (field, words) in COIL_FIELDS
                     .into_iter()
-                    .filter(|f| !heat_source.contains_key(*f))
+                    .filter(|(f, _)| !heat_source.contains_key(*f))
                 {
                     errors.push(error(
                         "E_EPC_CYLINDER_COIL",
                         format!("{path}/{field}"),
-                        format!("Cylinder '{source_name}': state its coil's {} (heat source '{name}') on the cylinder. There is no default.", field.replace('_', " ")),
+                        format!("Cylinder '{source_name}': enter its {who}'s {words}. There is no default."),
                     ));
                 }
             }
         }
-        if !controls.is_empty() && !source.contains_key("tank_controls") {
+        for (index, control) in controls.iter_mut().take(stated).enumerate() {
+            let Some(control) = control.as_object_mut() else {
+                continue;
+            };
+            let named = control
+                .get("heat_source")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let found = match heaters.as_slice() {
+                [(key, _, _)] => Some(key.clone()),
+                _ => heaters
+                    .iter()
+                    .find(|(key, coil, _)| *key == named || coil.as_deref() == Some(&named))
+                    .map(|(key, _, _)| key.clone()),
+            };
+            match found {
+                Some(key) => {
+                    control.insert("heat_source".into(), json!(key));
+                    controlled.push(key);
+                }
+                None => errors.push(error(
+                    "E_EPC_TANK_CONTROL",
+                    json_pointer(&[
+                        "HotWaterSource",
+                        source_name,
+                        "tank_controls",
+                        &index.to_string(),
+                        "heat_source",
+                    ]),
+                    format!(
+                        "Cylinder '{source_name}': tank control {} names '{named}', which is not one of its heaters ({}). Choose one of them.",
+                        index + 1,
+                        heaters.iter().map(|(key, _, _)| key.as_str()).collect::<Vec<_>>().join(", ")
+                    ),
+                )),
+            }
+        }
+        for (key, _, who) in heaters
+            .iter()
+            .filter(|(key, _, _)| !controlled.contains(key))
+        {
+            errors.push(error(
+                "E_EPC_TANK_CONTROL",
+                json_pointer(&["HotWaterSource", source_name, "HeatSource", key, "thermostat_position"]),
+                format!("Cylinder '{source_name}': enter its {who}'s thermostat position (how far up the cylinder the thermostat sits, as a fraction of its height). There is no default."),
+            ));
+        }
+        if !controls.is_empty() {
             source.insert("tank_controls".into(), Value::Array(controls));
         }
     }
@@ -1609,6 +1706,17 @@ pub(crate) fn check_system_catalogue(
     }
 }
 
+/// The plan length of a row drawn as a line: the sum of its segments, or `None` for a point.
+pub(crate) fn plan_length(row: &BTreeMap<String, Value>) -> Option<f64> {
+    let points = plan_points(row);
+    (points.len() >= 2).then(|| {
+        points
+            .windows(2)
+            .map(|p| (p[1][0] - p[0][0]).hypot(p[1][1] - p[0][1]))
+            .sum()
+    })
+}
+
 fn plan_points(row: &BTreeMap<String, Value>) -> Vec<[f64; 2]> {
     row.get("coords")
         .and_then(Value::as_str)
@@ -1636,13 +1744,48 @@ pub(crate) fn storeys(csv: &Rows) -> Option<usize> {
     if let Some(n) = stated {
         return Some(n as usize);
     }
+    // A space labelled in the room in the roof is not on a storey of its own.
+    let (drawn, roof_room) = drawn_storeys(csv);
     let labels: std::collections::BTreeSet<String> = csv
         .get("Space Labels")
         .into_iter()
         .flatten()
-        .filter_map(|row| row.get("storey").map(Value::to_string))
+        .filter_map(|row| row.get("storey"))
+        .filter(|storey| {
+            let level = storey
+                .as_f64()
+                .or_else(|| storey.as_str()?.trim().parse().ok());
+            roof_room.is_none_or(|r| level != Some(r as f64))
+        })
+        .map(Value::to_string)
         .collect();
-    (!labels.is_empty()).then_some(labels.len())
+    let counted = labels.len().max(drawn);
+    (counted > 0).then_some(counted)
+}
+
+/// The dwelling's storeys with a drawn wall line (an external, party or sheltered wall),
+/// counting a basement. A gable, whose top follows the roof, belongs to the roof; a dormer's
+/// or an editor part's (roof, bay, conservatory) walls belong to that part; and a top floor that
+/// is a room in the roof is not a storey, by the converter's rule (`hemie::roof_room_level`),
+/// so a bungalow with rooms in the roof counts one storey. Returns the count and the room in
+/// the roof's floor, if any.
+fn drawn_storeys(csv: &Rows) -> (usize, Option<i64>) {
+    use crate::hemie;
+    let els = hemie::elements(csv);
+    let walls: Vec<(&hemie::El, hemie::Kind)> = els
+        .iter()
+        .filter(|e| e.num("pitch").is_none_or(hemie::wall_pitch))
+        .filter_map(|e| Some((e, hemie::wall_kind(e)?)))
+        .collect();
+    let planes: Vec<&hemie::El> = els.iter().filter(|e| hemie::is_plane(e)).collect();
+    let roof_room = hemie::roof_room_level(&walls, &planes);
+    let levels: std::collections::BTreeSet<i64> = walls
+        .iter()
+        .filter(|(w, _)| !w.has_profile() && w.get("hemie_bundle").is_none())
+        .map(|(w, _)| w.level)
+        .filter(|l| Some(*l) != roof_room)
+        .collect();
+    (levels.len(), roof_room)
 }
 
 /// Built form from party walls, by the sides of the dwelling they are on: none is detached,
@@ -1676,7 +1819,9 @@ pub(crate) fn build_type_from_party_walls(
         let horizontal = pitch.is_some_and(|p| !(60.0..=120.0).contains(&p));
         let name = row.get("Name").and_then(Value::as_str).unwrap_or_default();
         if party_floor || (ty == "BuildingElementPartyWall" && horizontal) {
-            return Err(state(format!("'{name}' is a party floor or ceiling, so the dwelling is a flat or maisonette, which the converter does not choose between.")));
+            return Err(state(format!(
+                "'{name}' is a party floor or ceiling, so the dwelling is a flat or maisonette."
+            )));
         }
         if ty != "BuildingElementPartyWall" {
             continue;
@@ -1734,7 +1879,10 @@ pub(crate) fn build_type_from_party_walls(
         }
     };
     if allowed.iter().any(|v| v == "bungalow") && storeys(csv).is_none_or(|n| n <= 1) {
-        return Err(state("The dwelling has one storey (or its storeys are not stated), so it may be a bungalow, which the converter does not choose.".into()));
+        return Err(state(
+            "The dwelling has one storey (or none is drawn or stated), so it may be a bungalow."
+                .into(),
+        ));
     }
     Ok((built_form, sides.len()))
 }
@@ -1879,6 +2027,137 @@ pub(crate) fn collect<'a>(
 
 #[cfg(test)]
 mod tests {
+    /// A cylinder as the editor writes it: one coil under the picker's key, its rates stated.
+    fn cylinder(heaters: Value, extra: Value) -> Value {
+        let mut tank = json!({"type": "StorageTank", "HeatSource": heaters});
+        for (k, v) in extra.as_object().unwrap() {
+            tank[k] = v.clone();
+        }
+        json!({"HotWaterSource": {"Hot water": tank}})
+    }
+
+    fn coil(extra: Value) -> Value {
+        let mut coil = json!({"type": "HeatSourceWet", "name": "Heat source wet", "primary_flow_rate": 10, "heat_transfer_rate_W_per_K": 200});
+        for (k, v) in extra.as_object().unwrap() {
+            coil[k] = v.clone();
+        }
+        coil
+    }
+
+    fn mapped(mut model: Value) -> (Value, Vec<(String, String)>) {
+        let mut errors = Vec::new();
+        map_cylinder_coils(&mut model, &mut errors);
+        let errors = errors.into_iter().map(|e| (e.path, e.message)).collect();
+        (model, errors)
+    }
+
+    #[test]
+    fn a_heaters_thermostat_position_becomes_its_tank_control() {
+        let (model, errors) = mapped(cylinder(
+            json!({"linked_heat_source": coil(json!({"thermostat_position": 0.33}))}),
+            json!({}),
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        let tank = &model["HotWaterSource"]["Hot water"];
+        assert_eq!(
+            tank["tank_controls"],
+            json!([{"heat_source": "linked_heat_source", "thermostat_position": 0.33}])
+        );
+        assert!(tank["HeatSource"]["linked_heat_source"]
+            .get("thermostat_position")
+            .is_none());
+    }
+
+    /// The run fails on a heater no tank control names, so a missing thermostat position is a
+    /// Build Error on the cylinder, before the run.
+    #[test]
+    fn a_heater_with_no_thermostat_position_is_asked_for_it() {
+        let (model, errors) = mapped(cylinder(
+            json!({"linked_heat_source": coil(json!({}))}),
+            json!({}),
+        ));
+        assert_eq!(
+            errors,
+            [(
+                "/HotWaterSource/Hot water/HeatSource/linked_heat_source/thermostat_position".to_string(),
+                "Cylinder 'Hot water': enter its coil's thermostat position (how far up the cylinder the thermostat sits, as a fraction of its height). There is no default.".to_string()
+            )]
+        );
+        assert!(model["HotWaterSource"]["Hot water"]
+            .get("tank_controls")
+            .is_none());
+    }
+
+    /// The tank control's heat source is typed text: with one heater in the cylinder, it can
+    /// only mean that heater, whatever was typed.
+    #[test]
+    fn a_tank_control_in_a_cylinder_with_one_heater_controls_that_heater() {
+        let (model, errors) = mapped(cylinder(
+            json!({"linked_heat_source": coil(json!({}))}),
+            json!({"tank_controls": [{"heat_source": "Boiler", "thermostat_position": 0.4}]}),
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            model["HotWaterSource"]["Hot water"]["tank_controls"],
+            json!([{"heat_source": "linked_heat_source", "thermostat_position": 0.4}])
+        );
+    }
+
+    #[test]
+    fn a_tank_control_naming_no_heater_of_several_is_an_error() {
+        let heaters = json!({
+            "linked_heat_source": coil(json!({"thermostat_position": 0.33})),
+            "immersion": {"type": "ImmersionHeater", "thermostat_position": 0.5},
+        });
+        let (_, errors) = mapped(cylinder(
+            heaters.clone(),
+            json!({"tank_controls": [{"heat_source": "Boiler", "thermostat_position": 0.4}]}),
+        ));
+        assert_eq!(
+            errors,
+            [(
+                "/HotWaterSource/Hot water/tank_controls/0/heat_source".to_string(),
+                "Cylinder 'Hot water': tank control 1 names 'Boiler', which is not one of its heaters (linked_heat_source, immersion). Choose one of them.".to_string()
+            )]
+        );
+        // A coil named by its heat source is that coil.
+        let (model, errors) = mapped(cylinder(
+            heaters,
+            json!({"tank_controls": [{"heat_source": "Heat source wet", "thermostat_position": 0.4}]}),
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            model["HotWaterSource"]["Hot water"]["tank_controls"][0]["heat_source"],
+            "linked_heat_source"
+        );
+    }
+
+    /// A solar thermal system has its own control: no tank control names it.
+    #[test]
+    fn a_solar_heater_needs_no_tank_control() {
+        let (_, errors) = mapped(cylinder(
+            json!({"solar": {"type": "SolarThermalSystem"}, "immersion": {"type": "ImmersionHeater", "thermostat_position": 0.5}}),
+            json!({}),
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn coil_rates_are_asked_for_in_words() {
+        let (_, errors) = mapped(cylinder(
+            json!({"linked_heat_source": {"type": "HeatSourceWet", "name": "Heat source wet", "thermostat_position": 0.33}}),
+            json!({}),
+        ));
+        let messages: Vec<_> = errors.iter().map(|(_, m)| m.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                "Cylinder 'Hot water': enter its coil's primary flow rate (L/min, the flow between the heat source and the cylinder). There is no default.",
+                "Cylinder 'Hot water': enter its coil's heat transfer rate (W/K). There is no default.",
+            ]
+        );
+    }
+
     #[test]
     fn smart_meter_guid_required_and_formatted() {
         let check = |model: Value| {
@@ -2022,6 +2301,141 @@ mod tests {
         assert!(build_type_from_party_walls(&walls_only, &allowed)
             .unwrap_err()
             .contains("plan line"));
+    }
+
+    #[test]
+    fn drawn_storeys_count_when_none_are_stated() {
+        let allowed = ["detached", "bungalow", "flat"].map(String::from);
+        let wall = |coords: &str, extra: Value| {
+            BTreeMap::from([
+                ("Name".into(), json!(coords)),
+                ("Type".into(), json!("BuildingElementOpaque")),
+                ("coords".into(), json!(coords)),
+                ("extra_json".into(), extra),
+            ])
+        };
+        let drawn = |levels: &[u8]| {
+            let mut walls = Vec::new();
+            for level in levels {
+                walls.push(wall(&format!("0,0,{level}|4,0,{level}"), json!({})));
+                walls.push(wall(&format!("4,0,{level}|4,4,{level}"), json!({})));
+            }
+            Rows::from([("Exposed Elements".into(), walls)])
+        };
+        // Two drawn storeys and no stated count: a house, not a possible bungalow.
+        assert_eq!(storeys(&drawn(&[0, 1])), Some(2));
+        assert_eq!(
+            build_type_from_party_walls(&drawn(&[0, 1]), &allowed).unwrap(),
+            ("detached", 0)
+        );
+        // One drawn storey may still be a bungalow, and the message speaks to the user.
+        let one = build_type_from_party_walls(&drawn(&[0]), &allowed).unwrap_err();
+        assert!(
+            one.contains("bungalow") && !one.contains("converter"),
+            "{one}"
+        );
+        // A gable over the top storey is the roof, not a storey of its own.
+        let mut gabled = drawn(&[0]);
+        gabled.get_mut("Exposed Elements").unwrap().push(wall(
+            "0,0,1|4,0,1",
+            json!({"geometry_face": {"top_profile": [{"d": 0, "h": 0}, {"d": 2, "h": 2}, {"d": 4, "h": 0}]}}),
+        ));
+        assert_eq!(storeys(&gabled), Some(1));
+    }
+
+    /// A dormer's walls and a room in the roof's knee walls are not storeys: a bungalow with
+    /// either may still be a bungalow, while a drawn two-storey house stays a house.
+    #[test]
+    fn dormer_and_roof_room_walls_are_not_storeys() {
+        let allowed = ["detached", "bungalow", "flat"].map(String::from);
+        let row = |ty: &str, coords: &str, height: f64, pitch: Option<f64>, extra: Value| {
+            let mut row = BTreeMap::from([
+                ("Name".into(), json!(coords)),
+                ("Type".into(), json!(ty)),
+                ("coords".into(), json!(coords)),
+                ("height".into(), json!(height)),
+                ("extra_json".into(), extra),
+            ]);
+            if let Some(p) = pitch {
+                row.insert("pitch".into(), json!(p));
+            }
+            row
+        };
+        let wall = |coords: &str, height: f64, extra: Value| {
+            row("BuildingElementOpaque", coords, height, None, extra)
+        };
+        let gable = json!({"geometry_face": {"top_profile": [{"t": 0, "h": 0}, {"t": 0.5, "h": 2.2}, {"t": 1, "h": 0}]}});
+        let dormer = json!({"dormer_bundle": {"kind": "dormer", "role": "front-wall-anchor"}});
+        let slope = |level: u8| {
+            row(
+                "BuildingElementOpaque",
+                &format!("0,0,{level}|8,0,{level}|8,3,{level}|0,3,{level}"),
+                4.0,
+                Some(40.0),
+                json!({}),
+            )
+        };
+        let bungalow = |extra: Vec<BTreeMap<String, Value>>| {
+            let mut walls = vec![
+                wall("0,0,0|8,0,0", 2.4, json!({})),
+                wall("8,0,0|8,6,0", 2.4, json!({})),
+                wall("8,6,0|0,6,0", 2.4, json!({})),
+                wall("0,6,0|0,0,0", 2.4, json!({})),
+            ];
+            walls.extend(extra);
+            Rows::from([("Exposed Elements".into(), walls)])
+        };
+        // A dormer on the roof over a bungalow: its front wall and cheeks are the dormer's.
+        let dormered = bungalow(vec![
+            slope(1),
+            wall("2,1,1|4,1,1", 1.2, dormer.clone()),
+            wall("2,1,1|2,2,1", 1.2, dormer.clone()),
+            wall("0,0,1|0,6,1", 4.0, gable.clone()),
+        ]);
+        assert_eq!(storeys(&dormered), Some(1));
+        assert!(build_type_from_party_walls(&dormered, &allowed)
+            .unwrap_err()
+            .contains("bungalow"));
+        // A room in the roof over a bungalow: knee walls under 1.8 m, gables and heated slopes.
+        let roof_room = bungalow(vec![
+            slope(1),
+            wall("0,1,1|8,1,1", 1.0, json!({})),
+            wall("8,5,1|0,5,1", 1.0, json!({})),
+            wall("0,1,1|0,5,1", 3.0, gable.clone()),
+            wall("8,1,1|8,5,1", 3.0, gable.clone()),
+        ]);
+        assert_eq!(storeys(&roof_room), Some(1));
+        let mut labelled = roof_room.clone();
+        labelled.insert(
+            "Space Labels".into(),
+            vec![
+                BTreeMap::from([("storey".into(), json!(0))]),
+                BTreeMap::from([("storey".into(), json!(1))]),
+            ],
+        );
+        assert_eq!(storeys(&labelled), Some(1));
+        assert!(build_type_from_party_walls(&roof_room, &allowed)
+            .unwrap_err()
+            .contains("bungalow"));
+        // An editor roof part's members are the roof's, whatever their shape.
+        let roof_part = bungalow(vec![wall(
+            "0,0,1|8,0,1",
+            2.4,
+            json!({"hemie_bundle": {"kind": "roof", "bundle_id": "roof-1", "role": "slope:S"}}),
+        )]);
+        assert_eq!(storeys(&roof_part), Some(1));
+        // Full-height walls on the floor under the slopes make it a storey.
+        let upstairs = bungalow(vec![
+            slope(2),
+            wall("0,0,1|8,0,1", 2.4, json!({})),
+            wall("8,6,1|0,6,1", 2.4, json!({})),
+            wall("0,0,1|0,6,1", 4.0, gable),
+        ]);
+        assert_eq!(storeys(&upstairs), Some(2));
+        assert_eq!(
+            build_type_from_party_walls(&upstairs, &allowed).unwrap(),
+            ("detached", 0)
+        );
     }
 
     /// Paths of the full-input definitions that require `product_id`, with the `type` (or

@@ -269,16 +269,16 @@ impl Settings {
             .unwrap()
             .1;
         let source = if self.radiator_length.is_some() {
-            format!("Metadata row {RADIATOR_LENGTH_SETTING}")
+            "Radiator length when not drawn, on its heating system".to_string()
         } else {
-            format!("the default descriptor; set the Metadata row {RADIATOR_LENGTH_SETTING} to small, medium or large")
+            "the default; set Radiator length when not drawn on its heating system to small, medium or large".to_string()
         };
         let each = if units > 1.0 {
             format!(" per unit, {} m for {units} units", length * units)
         } else {
             String::new()
         };
-        let message = format!("Wet Emitters row '{row}' has no drawn length, so it uses {length} m{each}, the default length for a {descriptor} radiator ({source}).");
+        let message = format!("Radiator '{row}' is not drawn as a line and states no length, so it uses {length} m{each}, the length for a {descriptor} radiator ({source}).");
         (
             length * units,
             notice(&json_pointer(&["Wet Emitters", row, "length"]), message),
@@ -441,14 +441,14 @@ pub(crate) fn rule(
         ("SpaceHeatSystem/*/emitters/*", "radiator") => Some(Rule::Pick {
             tables: &["ConvectorRadiator"],
             filter: None,
-            ask: format!("pick a radiator type and height on the emitter, or once for the model with the Metadata row {RADIATOR_SETTING}"),
+            ask: "pick its type and height on the radiator, or set Radiator for the model on its heating system".into(),
             setting: Some(RADIATOR_SETTING),
         }),
         // DESNZ: the assessor records the system type, floor finish and system name.
         ("SpaceHeatSystem/*/emitters/*", "ufh") => Some(Rule::Pick {
             tables: &["UnderFloorHeating"],
             filter: None,
-            ask: format!("pick the underfloor heating system on the emitter, or once for the model with the Metadata row {UFH_SETTING}"),
+            ask: "pick its system on the emitter, or set Underfloor heating for the model on its heating system".into(),
             setting: Some(UFH_SETTING),
         }),
         // Single product for each type.
@@ -610,7 +610,14 @@ pub(crate) fn resolve_products(
                 kind.clone()
             };
             let who = if name.parse::<usize>().is_ok() {
-                format!("This {system_type}")
+                format!(
+                    "This {}",
+                    if system_type == "ufh" {
+                        "underfloor heating"
+                    } else {
+                        system_type.as_str()
+                    }
+                )
             } else {
                 format!("'{name}' ({system_type})")
             };
@@ -943,7 +950,7 @@ pub(crate) fn apply_weather_curves(
         let gradient = db.weather_curves[&curve];
         let replaced = controller
             .remove("min_flow_temp")
-            .map(|t| format!(" The curve sets the minimum flow temperature, so the authored min_flow_temp {t} is not sent."))
+            .map(|t| format!(" The curve sets the minimum flow temperature, so the minimum flow temperature you entered ({t} °C) is not used."))
             .unwrap_or_default();
         controller.insert("weather_compensation_curve_id".into(), json!(curve));
         notices.push(notice(&path, format!("'{name}' has ecodesign class {class} (weather compensation) and states no curve, so this existing building uses weather compensation curve {curve} (gradient {gradient}), the default curve for a {} with {emitter}.{replaced}", if source == "Boiler" { "boiler" } else { "heat pump" })));
@@ -1560,7 +1567,7 @@ pub(crate) mod tests {
             .1
             .contains("650000 (picked on the element) is a Convector Radiator"));
         assert!(error("/SpaceHeatSystem/rads/emitters/2").1.starts_with(
-            "This ufh needs a HEM Database product: pick the underfloor heating system"
+            "This underfloor heating needs a HEM Database product: pick its system on the emitter"
         ));
         assert!(error("/SpaceHeatSystem/storage")
             .1
@@ -1591,7 +1598,7 @@ pub(crate) mod tests {
         let (length, notice) = Settings::default().radiator_length("Hall", 1.0);
         assert_eq!(length, 0.9);
         assert!(notice.message.contains(
-            "uses 0.9 m, the default length for a medium radiator (the default descriptor"
+            "uses 0.9 m, the length for a medium radiator (the default; set Radiator length when not drawn"
         ));
         let large = Settings {
             radiator_length: Some("large"),
@@ -1599,7 +1606,7 @@ pub(crate) mod tests {
         };
         let (length, notice) = large.radiator_length("Hall", 2.0);
         assert_eq!(length, 2.4);
-        assert!(notice.message.contains("1.2 m per unit, 2.4 m for 2 units, the default length for a large radiator (Metadata row Product_radiator_length)"));
+        assert!(notice.message.contains("1.2 m per unit, 2.4 m for 2 units, the length for a large radiator (Radiator length when not drawn, on its heating system)"));
     }
 
     #[test]
@@ -1656,11 +1663,11 @@ pub(crate) mod tests {
         assert!(model["SpaceHeatSystem"]["hp rads"]["ecodesign_controller"]
             .get("min_flow_temp")
             .is_none());
-        assert!(notices
-            .iter()
-            .any(|n| n.message.contains(
-                "this existing building uses weather compensation curve 5 (gradient 1.2)"
-            ) && n.message.contains("authored min_flow_temp 30 is not sent")));
+        assert!(notices.iter().any(|n| n
+            .message
+            .contains("this existing building uses weather compensation curve 5 (gradient 1.2)")
+            && n.message
+                .contains("the minimum flow temperature you entered (30 °C) is not used")));
         assert_eq!(
             errors
                 .iter()

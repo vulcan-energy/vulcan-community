@@ -87,6 +87,24 @@ describe('DrawToolbar service-line modes', () => {
     expect(screen.getByRole('option', { name: /Primary pipework/i })).toBeInTheDocument();
   });
 
+  it('lists Door after External surface: it draws a hosted external door', () => {
+    const setDrawMode = vi.fn();
+    const setDrawElementType = vi.fn();
+    renderToolbar('BuildingElementOpaque', { drawMode: 'line', setDrawMode, setDrawElementType });
+    fireEvent.click(screen.getByRole('button', { name: 'Element type for new drawings' }));
+    fireEvent.click(screen.getByRole('option', { name: /^Door/ }));
+    expect(setDrawElementType).toHaveBeenCalledWith('BuildingElementOpaque');
+    expect(setDrawMode).toHaveBeenCalledWith('door');
+  });
+
+  it('hides the wall preset picker for the Door tool, which ignores it', () => {
+    const presetOptions = [{ value: 'cavity_wall', label: 'Cavity wall' }];
+    const { container, unmount } = renderToolbar('BuildingElementOpaque', { drawMode: 'line', presetOptions });
+    expect(container.querySelector('.preset-dropdown')).not.toBeNull();
+    unmount();
+    expect(renderToolbar('BuildingElementOpaque', { drawMode: 'door', presetOptions }).container.querySelector('.preset-dropdown')).toBeNull();
+  });
+
   it('shows one element type section at a time', () => {
     renderToolbar('BuildingElementOpaque');
 
@@ -165,5 +183,18 @@ describe('DrawToolbar service-line modes', () => {
     expect(setDrawElementType).toHaveBeenCalledWith('BuildingElementGround');
     expect(setDrawMode).toHaveBeenCalledWith('polygon');
     expect(setDrawPoints).toHaveBeenCalledWith([]);
+  });
+});
+
+describe('DrawToolbar Context Shading shapes', () => {
+  afterEach(cleanup);
+
+  it('offers a line as well as a polygon', () => {
+    const { container } = renderToolbar('ContextShading', { drawMode: 'polygon' });
+    const select = container.querySelector('.shape-dropdown select') as HTMLSelectElement;
+    expect([...select.options].map((option) => option.textContent)).toEqual(
+      expect.arrayContaining(['— Line [L]', '□ Polygon [P]']),
+    );
+    expect(select.value).toBe('polygon');
   });
 });

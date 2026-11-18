@@ -13,10 +13,14 @@ import {
   PITCH_CATEGORY_DEGREES,
   roofEdgeTypes,
   roofPitchDegrees,
+  roofRoom,
+  roomSection,
+  roofSpan,
   roofShape,
   shapeEdges,
   type RoofParameters,
   type RoofPitchCategory,
+  type RoofRoom,
   type RoofShape,
   type StoreyOutline,
 } from '../lib/roofPart';
@@ -38,6 +42,8 @@ const SHAPES: Array<{ value: Exclude<RoofShape, 'custom'>; label: string }> = [
 const CATEGORIES: RoofPitchCategory[] = ['Steep', 'Average', 'Moderate'];
 const REQUIRED = <span className="part-editor__required">required</span>;
 const fmt = (n: number) => String(roundToTwoDecimals(n));
+/** Degrees to 0.1°, whole ones without ".0" (45°, 25.5°). */
+const deg = (n: number) => `${Number(n.toFixed(1))}°`;
 
 function Labelled({ label, note, children }: { label: string; note?: ReactNode; children: ReactNode }) {
   return (
@@ -102,7 +108,12 @@ export function RoofPartFields({ view, epc, commit }: {
   commit: (next: Partial<RoofParameters>) => void;
 }) {
   const { parameters: p, outline, fit } = view;
-  const degrees = useRef<HTMLDivElement>(null);
+  const fields = useRef<HTMLDivElement>(null);
+  const focus = (field: string) => fields.current?.parentElement?.querySelector<HTMLInputElement>(`[data-field="${field}"] input`)?.focus();
+  const isRoom = p.use === 'room';
+  const measured = isRoom && outline && fit ? roofRoom(outline, p, fit) : null;
+  const room = measured && !('problem' in measured) ? measured : null;
+  const setIn = p.roomWalls === 'set-in';
   // As picked: Mansard shows (and asks for its break) before it can be drawn.
   const shape = outline ? roofShape(outline, p, true) : 'custom';
   const party = !!outline?.edges.some((e) => e.fixed === 'party');
@@ -114,10 +125,12 @@ export function RoofPartFields({ view, epc, commit }: {
   const pickShape = (next: Exclude<RoofShape, 'custom'>) => {
     if (!outline || next === shape) return;
     if (next === 'flat') {
-      commit({ flat: true, mansard: undefined });
+      commit({ flat: true, mansard: undefined, ...(isRoom ? { use: undefined } : {}) });
       return;
     }
-    commit({ flat: undefined, mansard: next === 'mansard' || next === 'gambrel' ? true : undefined, edges: shapeEdges(outline, fit, next === 'mansard' ? 'hipped' : next === 'gambrel' ? 'gable' : next) });
+    // A mansard and a room in the roof do not go together: the later choice wins.
+    const toMansard = next === 'mansard' || next === 'gambrel';
+    commit({ flat: undefined, mansard: toMansard ? true : undefined, ...(toMansard && isRoom ? { use: undefined } : {}), edges: shapeEdges(outline, fit, next === 'mansard' ? 'hipped' : next === 'gambrel' ? 'gable' : next) });
   };
   const options = [...SHAPES, ...(shape === 'custom' ? [{ value: 'custom' as const, label: 'Custom' }] : [])]
     .map((o) => ({ value: o.value, label: party && o.value !== 'flat' && o.value !== 'custom' ? `${o.label}, party gable` : o.label }));
@@ -133,9 +146,8 @@ export function RoofPartFields({ view, epc, commit }: {
           variant="ghost"
           size="md"
         />
-        {!p.flat ? <div className="field-source-note">Click an edge on the plan: eaves, gable, half-hip.</div> : null}
       </Labelled>
-      {!p.flat ? (
+      {!p.flat && !isRoom ? (
         <Labelled label="Pitch">
           <div className="part-editor__pitch">
             <CompactSegmentedControl
@@ -144,7 +156,7 @@ export function RoofPartFields({ view, epc, commit }: {
               options={CATEGORIES.map((c) => ({ value: c, label: `${c}\n≈${PITCH_CATEGORY_DEGREES[c]}°` }))}
               onChange={(c) => commit({ pitchChoice: c === p.pitchChoice ? undefined : c })}
             />
-            <div className="part-editor__pitch-or" ref={degrees}>
+            <div className="part-editor__pitch-or" data-field="pitch">
               <span>or</span>
               <NumberInput
                 label="Pitch in degrees"
@@ -177,17 +189,87 @@ export function RoofPartFields({ view, epc, commit }: {
           <CompactSegmentedControl
             ariaLabel="Use"
             value={p.use ?? 'loft'}
-            options={[{ value: 'loft', label: 'Loft' }, { value: 'vaulted', label: 'Vaulted ceiling' }]}
+            options={[
+              { value: 'loft', label: 'Loft' },
+              ...(mansard ? [] : [{ value: 'room' as const, label: 'Room in roof' }]),
+              { value: 'vaulted', label: 'Vaulted ceiling' },
+            ]}
             onChange={(use) => commit({ use: use === 'loft' ? undefined : use })}
           />
         </Labelled>
       ) : null}
+      <div ref={fields} hidden />
       {fit && outline ? (
         <RoofSection
-          input={{ points: fit.section.points, eaves: outline.eaves, pitch: { text: pitchText, editable: !p.flat }, use: p.use ?? 'loft' }}
-          onEditPitch={() => degrees.current?.querySelector('input')?.focus()}
+          input={{
+            points: room ? roomSection(room, fit.section.points) : fit.section.points,
+            eaves: outline.eaves,
+            pitch: room ? { text: deg(room.pitch), editable: false } : { text: pitchText, editable: !p.flat && !isRoom },
+            use: p.use ?? 'loft',
+            ...(room ? { room: { inset: (room.w - room.wi) / (room.mono ? 1 : 2), knee: room.hw, ceiling: room.hv, ceilingWidth: room.wc, width: room.wi, mono: room.mono, setIn } } : {}),
+          }}
+          onEdit={focus}
         />
       ) : null}
+      {/* With the outline gone the notice line says so; the room's fields need the outline. */}
+      {isRoom && !p.flat && outline ? <RoomFields parameters={p} outline={outline} fit={fit} commit={commit} room={room} /> : null}
     </>
   );
+}
+
+const two = (n: number | undefined) => (n === undefined ? '—' : `${n.toFixed(2)} m`);
+
+/** A room in the roof: HEM:EPC's measurements. The full width and length come from the fit; the pitch from the measurements. */
+function RoomFields({ parameters: p, outline, fit, commit, room }: {
+  parameters: RoofParameters;
+  outline: StoreyOutline;
+  fit: RoofFit | null;
+  commit: (next: Partial<RoofParameters>) => void;
+  room: RoofRoom | null;
+}) {
+  const setIn = p.roomWalls === 'set-in';
+  const span = fit ? roofSpan(fit) : null;
+  // `short`: the label shown, so a "required" tag keeps the row on one line; the field keeps its full name.
+  const field = (key: 'roomWidth' | 'kneeWallHeight' | 'maxCeilingHeight' | 'ceilingWidth', label: string, required = false, short = label) => (
+    <div data-field={key}>
+      <Labelled label={short} note={required && p[key] === undefined ? REQUIRED : undefined}>
+        <NumberInput label={label} unit="m" placeholder={required ? undefined : '0'} value={p[key]} onCommit={(value) => commit({ [key]: value })} />
+      </Labelled>
+    </div>
+  );
+  const types = roofEdgeTypes(outline, p);
+  const gables = outline.edges.flatMap((e, i) => (types[i] === 'gable' || types[i] === 'half-hip' ? [e.fixed === 'party' ? 'Party' : 'External'] : []));
+  const hips = roofShape(outline, p) === 'mono' ? 0 : Math.max(0, 2 - gables.length);
+  return (
+    <>
+      <div className="part-editor__two">
+        {readout('Full width', two(span?.w), 'outline')}
+        {readout('Length', two(span?.length), 'gable to gable')}
+      </div>
+      <Labelled label="Walls at the foot of the slopes">
+        <CompactSegmentedControl
+          ariaLabel="Walls at the foot of the slopes"
+          value={setIn ? 'set-in' : 'common'}
+          options={[{ value: 'common', label: 'Common' }, { value: 'set-in', label: 'Set in' }]}
+          onChange={(walls) => commit({ roomWalls: walls === 'set-in' ? 'set-in' : undefined, ...(walls === 'set-in' ? {} : { roomWidth: undefined }) })}
+        />
+      </Labelled>
+      <div className="part-editor__two">
+        {setIn ? field('roomWidth', 'Width', true) : null}
+        {field('kneeWallHeight', 'Knee wall height', !setIn, 'Knee height')}
+      </div>
+      <div className="part-editor__two">
+        {field('maxCeilingHeight', 'Max ceiling height', true, 'Max height')}
+        {field('ceilingWidth', 'Flat ceiling width')}
+      </div>
+      <div className="part-editor__two">
+        {room ? readout('Pitch', deg(room.pitch), 'from the room') : null}
+        {readout('Gables', [...gables, ...Array<string>(hips).fill('Hip end')].join(' · ') || '—', gables.length ? undefined : 'hip ends')}
+      </div>
+    </>
+  );
+}
+
+function readout(label: string, value: ReactNode, note?: ReactNode) {
+  return <Labelled label={label} note={note}><div className="part-editor__readout">{value}</div></Labelled>;
 }

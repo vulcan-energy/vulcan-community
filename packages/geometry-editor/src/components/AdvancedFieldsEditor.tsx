@@ -112,6 +112,8 @@ import {
   resolveHeatSourceWetReferenceName,
   SYSTEM_SUBCATEGORY_TO_DIR,
   withoutPresetPrimaryPipework,
+  collapsedHeatingFields,
+  energySupplyLabel,
 } from './systemEditorUtils';
 import type { SchemaNode } from '../lib/schemaTypes';
 import { MVHR_FIXED_ENERGY_SUPPLY } from '../lib/deriveForExport';
@@ -134,12 +136,6 @@ const COLLAPSED_ENGINE_FIELDS: ReadonlySet<string> = new Set(['areal_heat_capaci
 const COLLAPSED_BAND_WINDOW_FIELDS: ReadonlySet<string> = new Set([...COLLAPSED_ENGINE_FIELDS, 'g_value']);
 /** With a colour stated, the solar absorption coefficient is its override; without one it stays in view. */
 const COLLAPSED_COLOUR_FIELDS: ReadonlySet<string> = new Set(['solar_absorption_coeff']);
-/** A heating circuit's less common inputs: flow limits and rates, thermal mass and the weather curve. */
-const COLLAPSED_HEATING_FIELDS: ReadonlySet<string> = new Set([
-  'bypass_fraction_recirculated', 'design_flow_rate', 'max_flow_rate', 'min_flow_rate', 'variable_flow', 'temp_flow_limit_upper',
-  'thermal_mass', 'min_flow_temp', 'min_outdoor_temp', 'max_outdoor_temp', 'product_id', 'weather_compensation_curve_id',
-  'weather_comp_a', 'weather_comp_b', 'weather_comp_c', 'load_comp_a', 'load_comp_b', 'load_comp_c', 'dispatch_mode',
-]);
 /** An existing building's PV: HEM:EPC defaults the inverter's powers and the supply unless stated. */
 const COLLAPSED_PV_FIELDS: ReadonlySet<string> = new Set(['inverter_peak_power_ac', 'inverter_peak_power_dc', 'EnergySupply']);
 /** A cylinder's detail under "More": its heaters' settings, coil area, pipework and tank controls. */
@@ -491,20 +487,9 @@ function statesWeatherCoefficients(extraJson: unknown): boolean {
 /** A plant part's schema title as words: "Buffertank" -> "buffer tank", "dhw" -> "hot water". */
 const plantPartWords = (title: string): string => title.toLowerCase().replace('buffertank', 'buffer tank').replace(/\bdhw\b/g, 'hot water');
 
-/** The default supplies' names as an assessor reads them; a supply the user named stays as named. */
-const SUPPLY_LABELS: Readonly<Record<string, string>> = {
-  'mains elec': 'Mains electricity',
-  'mains gas': 'Mains gas',
-  'LPG bulk': 'LPG, bulk',
-  'LPG bottled': 'LPG, bottled',
-  'LPG condition 11F': 'LPG, special condition 11F',
-  'wood logs': 'Wood logs',
-  'wood pellets': 'Wood pellets',
-  'wood chips': 'Wood chips',
-  'house coal': 'House coal',
-  anthracite: 'Anthracite',
-  'smokeless fuel': 'Smokeless fuel',
-};
+
+/** A system's supply fields: each picks one of the model's energy supplies; an auxiliary or pump supply is electricity. */
+const SUPPLY_KEYS = new Set(['EnergySupply', 'EnergySupply_aux', 'EnergySupply_pump']);
 
 /** Systems that run on electricity only: their EnergySupply picks an electricity supply. */
 const ELECTRIC_ONLY_TYPES = new Set([
@@ -566,9 +551,9 @@ export function applyEcodesignControlClassEnum(
         // A heat-network product supply (HIU, DirectFeed) has an object branch: leave it as the schema has it.
         const hasObjectBranch = Array.isArray(readExtraJsonRecord(child).anyOf)
           && (readExtraJsonRecord(child).anyOf as unknown[]).some((branch) => readExtraJsonRecord(branch).type === 'object');
-        if (key === 'EnergySupply' && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
-          const names = allElectric || ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
-          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: names.map((name) => ({ const: name, title: SUPPLY_LABELS[name] ?? name })) };
+        if (SUPPLY_KEYS.has(key) && supplyNames.length && !hasObjectBranch && child && typeof child === 'object' && !Array.isArray(child)) {
+          const names = allElectric || key !== 'EnergySupply' || ELECTRIC_ONLY_TYPES.has(String(readExtraJsonRecord((properties as Record<string, unknown>).type).const)) ? electricSupplyNames : supplyNames;
+          const picker: Record<string, unknown> = { ...(child as Record<string, unknown>), type: 'string', oneOf: names.map((name) => ({ const: name, title: energySupplyLabel(name) })) };
           delete picker.anyOf;
           nextProperties[key] = picker;
           changed = true;
@@ -1166,11 +1151,13 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
   const [tankMethodChosen, setTankMethodChosen] = useKeyedState<Record<string, string>>(currentData?.id ?? '', {});
   // One field for the U-value or the construction resistance: the schema takes one or the other.
   const [resistanceChosen, setResistanceChosen] = useKeyedState<boolean>(currentData?.id ?? '', false);
-  const takesResistance = thermalMethod === 'u_value' && elementType !== 'BuildingElementTransparent' && elementType !== 'BuildingElementGround'
+  // Under Layers the layers give both: the toggle picks which one the field shows.
+  const underLayers = thermalMethod === 'calculation';
+  const takesResistance = (thermalMethod === 'u_value' || underLayers) && elementType !== 'BuildingElementTransparent' && elementType !== 'BuildingElementGround'
     && !!getActiveElementSubschema(elementType, subtype)?.properties?.thermal_resistance_construction;
   // The converter takes a stated U-value over R, so R shows only while no U-value is stated.
-  const resistanceShown = takesResistance && !stated(advancedFieldsRecord.u_value)
-    && (resistanceChosen || stated(advancedFieldsRecord.thermal_resistance_construction));
+  const resistanceShown = takesResistance && (underLayers ? resistanceChosen : !stated(advancedFieldsRecord.u_value)
+    && (resistanceChosen || stated(advancedFieldsRecord.thermal_resistance_construction)));
   const constructionDetails = inspectorContributions.constructionDetails;
   const externalDetailProfilesEnabled = constructionDetails?.isEnabled() ?? false;
   const currentElementData = useMemo(() => currentDataAsElement(currentData), [currentData]);
@@ -1204,11 +1191,12 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     () => collectHeatSourceWetNameLabelsFromProject(elementsById),
     [elementsById],
   );
-  /** `HotWaterSource[hw cylinder].HeatSourceWet` string (Combi/HIU/HeatBattery) for enum re-computation. */
+  /** The hot water system's `HeatSourceWet` string (Combi/HIU/HeatBattery) for enum re-computation. */
   const currentHotWaterCombiHeatSourceWetLink = useMemo(() => {
     if (elementType !== 'System' || subtype !== 'HotWaterSource') return '';
     const h = (advancedFieldsData as Record<string, unknown>)?.HotWaterSource;
-    const c = h && typeof h === 'object' && !Array.isArray(h) ? (h as Record<string, unknown>)['hw cylinder'] : undefined;
+    // The row's one system, whatever the user named it.
+    const c = h && typeof h === 'object' && !Array.isArray(h) ? Object.values(h as Record<string, unknown>)[0] : undefined;
     if (!c || typeof c !== 'object' || Array.isArray(c)) return '';
     const t = (c as { type?: string }).type;
     if (t !== 'CombiBoiler' && t !== 'HIU' && t !== 'HeatBattery') return '';
@@ -1533,7 +1521,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
     // method, first, as one field (a ground floor's calculation shows its calculated U-value);
     // the age band method takes a window's g-value from the glazing type, so it moves to More.
     if (thermalMethod) {
-      const keepU = thermalMethod === 'u_value' || (thermalMethod === 'calculation' && elementType === 'BuildingElementGround');
+      const keepU = thermalMethod === 'u_value' || thermalMethod === 'calculation';
       if (!keepU || resistanceShown) delete advancedProperties.u_value;
       if (!keepU || !resistanceShown) delete advancedProperties.thermal_resistance_construction;
       const first = new Set(['u_value', 'thermal_resistance_construction', ...(thermalMethod === 'band' ? [] : ['g_value'])]);
@@ -1628,6 +1616,9 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       if (useFHSSchema) {
         // The conversion gives every hot water source the model's cold water source (Global values), replacing its own.
         result = applyEcodesignControlClassEnum(result as Record<string, unknown>, { dropKeys: new Set(['ColdWaterSource']) }) as typeof result;
+      }
+      // The heat source link picks one of the model's heat sources (FHS and HEM:EPC).
+      if (useFHSSchema || hemDatabaseProducts) {
         inlineHotWaterSourceHeatSourceWetEnumOnHotWaterSubschema(result as Record<string, unknown>, {
           definedNames: projectHeatSourceWetNames,
           currentCombiLink: currentHotWaterCombiHeatSourceWetLink || null,
@@ -1979,6 +1970,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
             ? (elementId: string) => setSelection({ type: 'element', id: elementId })
             : undefined,
         assemblySourceValues,
+        arealHeatCapacityClasses: arealHeatCapacity.classes,
         fabricPresetSource,
         fabricRowField: fabricRow ? fabricRowField(fabricRow) : undefined,
         useFHSSchemaForValidation: useFHSSchema,
@@ -1990,7 +1982,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
         // Under "More": an existing building's construction-table values, a colour's coefficient,
         // and a heating circuit's less common inputs.
         collapsedEngineFields: elementType === 'System'
-          ? (subtype === 'SpaceHeatSystem' ? COLLAPSED_HEATING_FIELDS : tankDetailsUnderMore ? COLLAPSED_TANK_FIELDS : undefined)
+          ? (subtype === 'SpaceHeatSystem' ? collapsedHeatingFields(Boolean(existingBuilding && hemDatabaseProducts)) : tankDetailsUnderMore ? COLLAPSED_TANK_FIELDS : undefined)
           : existingBuilding && hemDatabaseProducts
             ? (elementType === 'OnSiteGeneration' ? COLLAPSED_PV_FIELDS
               : thermalMethod === 'band' && elementType === 'BuildingElementTransparent' ? COLLAPSED_BAND_WINDOW_FIELDS : COLLAPSED_ENGINE_FIELDS)
@@ -2018,6 +2010,10 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
               options={[{ value: 'u', label: 'U', title: 'U-value (W/m²·K)' }, { value: 'r', label: 'R', title: 'Construction resistance (m²·K/W)' }]}
               onChange={(next) => {
                 if ((next === 'r') === resistanceShown) return;
+                if (underLayers) {
+                  setResistanceChosen(next === 'r');
+                  return;
+                }
                 // One field: the value stated in the other unit goes.
                 const rest = { ...readExtraJsonRecord(currentData.extra_json) };
                 const had = rest.u_value !== undefined || rest.thermal_resistance_construction !== undefined;
@@ -2052,6 +2048,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       shouldUseGroundThermalTransmWallsAutofill,
       setSelection,
       assemblySourceValues,
+      arealHeatCapacity.classes,
       fabricPresetSource,
       fabricRow,
       useFHSSchema,
@@ -2067,6 +2064,7 @@ const AdvancedFieldsEditorComponent: React.FC<AdvancedFieldsEditorProps> = ({
       thermalMethod,
       colourAbsorption,
       takesResistance,
+      underLayers,
       resistanceShown,
       setResistanceChosen,
       currentData,

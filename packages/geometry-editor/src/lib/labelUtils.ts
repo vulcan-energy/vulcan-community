@@ -265,12 +265,16 @@ export function getSmartLabelPillTexts(
   if (element.type === 'ContextShading') {
     const start = element.start_angle;
     const end = element.end_angle;
-    const distance = element.distance;
+    // Parts differ in distance: show the range, not any one part.
+    const distances = (element.parts?.length ? element.parts.map((part) => part.distance) : [element.distance])
+      .filter((distance) => Number.isFinite(distance) && distance > 0);
     if (Number.isFinite(start) && Number.isFinite(end)) {
       pills.push(`${Math.round(start)}°-${Math.round(end)}°`);
     }
-    if (Number.isFinite(distance) && distance > 0) {
-      pills.push(`${Number(distance).toFixed(2)}m`);
+    if (distances.length > 0) {
+      const nearest = Math.min(...distances).toFixed(2);
+      const furthest = Math.max(...distances).toFixed(2);
+      pills.push(nearest === furthest ? `${nearest}m` : `${nearest}–${furthest}m`);
     }
     return pills;
   }

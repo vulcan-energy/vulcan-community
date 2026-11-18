@@ -88,7 +88,7 @@ export const hotWaterDemandFormModule: ElementFormModule<HotWaterDemandFormState
               });
             }}
             options={[
-              { value: 'OtherWaterUseDetails', label: 'Other Water Use Details' },
+              { value: 'OtherWaterUseDetails', label: 'Taps' },
               { value: 'MixerShower', label: 'Mixer Shower' },
               { value: 'InstantElecShower', label: 'Instant Electric Shower' },
               { value: 'Bath', label: 'Bath' }

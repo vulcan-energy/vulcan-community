@@ -89,6 +89,7 @@ it('labels fields and values for people, with units', () => {
   expect(hemieValueLabel('glazing_gap', 12)).toBe('12 mm');
   expect(hemieValueLabel('frame_material', 'wood or PVC')).toBe('Wood or PVC');
   expect(hemieValueLabel('insulation_location', 'at_joists')).toBe('At joists');
+  expect(hemieValueLabel('wall_layers', [{ material: 'PIR', thickness_mm: 100 }, { material: 'Brick', thickness_mm: 225 }])).toBe('2 layers');
   expect(hemieValueLabel('insulation_location', 'at_joists', 'flat_roof')).toBe('At joists (cold roof)');
   expect(hemieValueLabel('insulation_location', 'above_joists', 'mini_flat_roof')).toBe('Above joists (warm roof)');
   expect(hemieValueLabel('glazing_gap', 16)).toBe('16 mm or more');

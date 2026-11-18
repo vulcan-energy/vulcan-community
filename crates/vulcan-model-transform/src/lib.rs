@@ -25,7 +25,7 @@ mod schema_validation;
 mod target_mappings;
 pub use builder::add_builtin_energy_supplies;
 pub use ground_u_value::ground_floor_u_value;
-pub use hemie::{HemieQuadrant, HemieShading};
+pub use hemie::{BuildingPartElements, HemieQuadrant, HemieShading};
 pub use target_mappings::map_target_unobstructed_shading;
 
 use serde::{Deserialize, Serialize};
@@ -94,6 +94,15 @@ impl ModelProfile {
         }
     }
 
+    /// A zone with no living room area (its spaces not labelled) is one error asking for the
+    /// labels, before the schema's failure of the zone as a whole. FHS keeps its own checks.
+    pub(crate) fn asks_for_space_labels(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
     /// A transparent element with no positive `area` gets width × height as its area.
     /// EPC: `$defs/BuildingElementTransparent` has no `area`.
     pub(crate) fn derives_transparent_area_from_dimensions(self) -> bool {
@@ -116,6 +125,14 @@ impl ModelProfile {
     /// never from defaults-template entries. This also repoints a hot-water source's
     /// missing wet heat source reference to the first wet heat source. EPC: every
     /// system needs a HEM Database product, which a template entry cannot carry.
+    /// The model's zones come only from the drawing, never from the defaults template.
+    pub(crate) fn requires_authored_zones(self) -> bool {
+        match self {
+            Self::Core | Self::Fhs => false,
+            Self::Epc => true,
+        }
+    }
+
     pub(crate) fn requires_authored_heating_systems(self) -> bool {
         match self {
             Self::Core => false,
@@ -144,12 +161,12 @@ impl ModelProfile {
     }
 
     /// A hot water source that states no cold water source takes the model's, as one that states
-    /// it does (`apply_wrapper_cold_water_source`): every FHS hot water source type requires one.
-    /// EPC differs: its tanks are built by the converter with the model's source.
+    /// it does (`apply_wrapper_cold_water_source`): every FHS and EPC hot water source type
+    /// requires one, and the editor asks for it once, in the model's settings.
     pub(crate) fn fills_hot_water_cold_water_source(self) -> bool {
         match self {
-            Self::Core | Self::Epc => false,
-            Self::Fhs => true,
+            Self::Core => false,
+            Self::Fhs | Self::Epc => true,
         }
     }
 
@@ -407,6 +424,9 @@ pub(crate) struct InputContract {
     pub elements: ElementInputConvention,
     pub party_wall_requires_whole_u: bool,
     pub requires_main_hot_water_source: bool,
+    /// The wrapper reads the main hot water source by the fixed name `hw cylinder` after the
+    /// run, so a single source the user named otherwise takes that name in the model.
+    pub names_main_hot_water_source: bool,
     pub requires_detailed_thermal_bridges: bool,
     pub uses_exact_empty_shading_sectors: bool,
     /// Pinned Python core meters fan-coil power through the wet system's own `EnergySupply` and
@@ -512,9 +532,12 @@ impl ConversionProfile {
                 ElementInputConvention::DividedOpeningHalfPartition
             },
             party_wall_requires_whole_u: whole_u,
-            // FHS notional indexes the `hw cylinder` key; the EPC wrapper takes any key.
+            // FHS notional indexes the `hw cylinder` key. The EPC wrapper's schema takes any key,
+            // but its results read `hw cylinder` (epc_wrapper project_lookups.py
+            // `_is_water_heating` at 0.13.2), so the EPC model names its source that.
             requires_main_hot_water_source: physical_openings
                 && !matches!(self, Self::EpcFullInputV1),
+            names_main_hot_water_source: matches!(self, Self::EpcFullInputV1),
             requires_detailed_thermal_bridges: detailed_bridges,
             uses_exact_empty_shading_sectors: physical_openings,
             fan_coil_needs_energy_supply: physical_openings,
@@ -655,8 +678,13 @@ pub struct TransformOutput {
     /// An existing building's distant shading as converted, for the editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hemie_shading: Option<HemieShading>,
+    /// An existing building's parts, each with its elements (element paths), for the editor's
+    /// "Select this part". Given once the parts are found, even when the conversion then fails.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub building_parts: Vec<BuildingPartElements>,
     /// An existing building's converted nodes (JSON pointer) to the element or Metadata row each
-    /// comes from, for naming them in a run failure. Never part of the model.
+    /// comes from, and a renamed hot water source to the user's name for it, for naming them in a
+    /// run failure. Never part of the model.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub provenance: std::collections::BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -788,8 +816,9 @@ pub fn transform_geometry_csv(
             schema_error.keyword.as_deref() == Some("anyOf")
                 && path.starts_with(&format!("{}/", schema_error.path))
         };
+        // An unpicked product (`E_PRODUCT_REQUIRED`) is left out on purpose too.
         !errors.iter().any(|error| {
-            error.code.starts_with("E_EPC_")
+            (error.code.starts_with("E_EPC_") || error.code == "E_PRODUCT_REQUIRED")
                 && (Some(&error.path) == missing.as_ref() || inside(&error.path))
         })
     });
@@ -805,6 +834,19 @@ pub fn transform_geometry_csv(
     };
 
     enforce_pure_hem_input(&builder, &validation_model, &validation, request.profile)?;
+    // After every check, so diagnostics, slots and derived values keep the user's name.
+    let mut model = model;
+    let mut provenance = builder.take_provenance();
+    if let Some(authored) = target_mappings::map_main_hot_water_source_name(
+        &mut model,
+        request.conversion_profile.input_contract(),
+    ) {
+        // A run failure inside the renamed source names the user's own.
+        provenance.insert(
+            json_pointer(&["HotWaterSource", target_mappings::MAIN_HOT_WATER_SOURCE]),
+            json_pointer(&["HotWaterSource", &authored]),
+        );
+    }
 
     Ok(TransformOutput {
         model,
@@ -814,7 +856,8 @@ pub fn transform_geometry_csv(
         product_slots: builder.take_product_slots(),
         product_candidates: builder.take_product_candidates(),
         hemie_shading: builder.take_hemie_shading(),
-        provenance: builder.take_provenance(),
+        building_parts: builder.take_building_parts(),
+        provenance,
         derived_defaults: builder.take_derived_defaults(),
         weather_curves: builder.weather_curves(),
         hidden_inputs,
@@ -993,6 +1036,25 @@ pub fn validate_target_input(
             message: "This HEM version reads only the main hot water source, and this model has none. Add a hot water system in Systems. Vulcan does not rename a hot water source given in other model data.".into(),
             schema_path: None, keyword: None,
         });
+    }
+    if contract.names_main_hot_water_source {
+        let sources = model.get("HotWaterSource").and_then(Value::as_object);
+        if let Some(sources) = sources.filter(|sources| sources.len() > 1) {
+            // The wrapper classifies water heating by its one main source alone.
+            let names = sources
+                .keys()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            for name in sources.keys() {
+                errors.push(ValidationError {
+                    code: "E_EPC_HOT_WATER_SOURCES".into(),
+                    path: json_pointer(&["HotWaterSource", name]),
+                    message: format!("HEM:EPC takes one hot water system, and this model has {}: {names}. Keep one and remove the others.", sources.len()),
+                    schema_path: None, keyword: None,
+                });
+            }
+        }
     }
     if contract.uses_exact_empty_shading_sectors
         && model

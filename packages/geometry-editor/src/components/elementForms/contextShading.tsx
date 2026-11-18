@@ -13,26 +13,22 @@
 // renderPanel — which the module contract does not hand
 // ctx.shared directly — can still reach them.
 //
-// calculateContextShadingAngles / calculateShadingAngularRange /
-// calculateContextShadingDistance are geometry-store selectors (the legacy
-// component called useGeometryStore(...) at the top of ElementCreator's render);
-// this module pulls them the same way, but from inside useFormState — the one
-// hook-rule-safe call site the module contract guarantees runs every render.
-//
-// ADJACENT_LIKE_ELEMENT_TYPES: RESOLVED in slice-6 STAGE 6 — used to mirror
-// ElementCreator's own copy as a local duplicate (modules cannot import from
-// the orchestrator without an import cycle). Now imported from
-// lib/elementArea.ts, a cycle-free shared home also used by ElementCreator.tsx,
-// wallShared.tsx, and adjacentLikeElement.tsx.
+// deriveContextShadingFor and setContextShadingCentre are geometry-store actions;
+// this module pulls them from inside useFormState — the one hook-rule-safe call
+// site the module contract guarantees runs every render. The Directions table
+// (ContextShadingDirections.tsx) replaces the old Start Angle, End Angle and Distance fields.
 
 import { useState } from 'react';
 import type { ContextShading, Element } from '../../geometry/types';
-import { useGeometryStore } from '../../stores/geometryStore';
+import { useGeometryStore, useGeometryStoreApi, type GeometryState, type GeometryStoreApi } from '../../stores/geometryStore';
 import { FieldValidationIndicator } from '../ValidationIndicator';
 import { StandardInput } from '../StandardInput';
 import { StandardDropdown } from '../StandardDropdown';
-import { decimalInputProps, useIntegerInput, type NumericDraftInputBinding } from './formPrimitives';
-import { ADJACENT_LIKE_ELEMENT_TYPES } from '../../lib/elementArea';
+import { decimalInputProps, type NumericDraftInputBinding } from './formPrimitives';
+import { CONTEXT_SHADING_DEFAULT_CENTRE, isFloorPlate, planContextShadingLineEdit } from '../../lib/contextShadingGeometry';
+import { contextShadingSplitRefusal, isContextGeneratedElement } from '../../lib/developmentContextShading';
+import { ContextShadingDirections, type DirectionIssue, type DirectionRow } from './ContextShadingDirections';
+import { editStoredRow } from '../../lib/contextShadingDrawing';
 import { ELEMENT_TYPE_COMPACT_LABELS } from '../../lib/elementTypeMetadata';
 import type { ElementFormModule, ElementFormStateCtx } from './types';
 
@@ -41,49 +37,40 @@ type ContextShadingType = '' | 'obstacle' | 'overhang';
 export interface ContextShadingFormState {
   contextShadingType: ContextShadingType;
   setContextShadingType: (value: ContextShadingType) => void;
-  startAngleInput: ReturnType<typeof useIntegerInput>;
-  endAngleInput: ReturnType<typeof useIntegerInput>;
   /** Shared with the wall family and WindowShading — see module header comment. */
   heightInput: NumericDraftInputBinding;
   distanceInput: NumericDraftInputBinding;
   parentElement: string;
   setParentElement: (value: string) => void;
-  calculateContextShadingAngles: (
-    contextShading: ContextShading,
-    parent: Element,
-    globalOrientationOffset?: number,
-  ) => { start_angle: number; end_angle: number };
-  calculateShadingAngularRange: (
-    contextShading: ContextShading,
-    parent: Element,
-    globalOrientationOffset?: number,
-  ) => { start_angle: number; end_angle: number };
-  calculateContextShadingDistance: (contextShading: ContextShading, parent: Element) => number;
+  deriveContextShadingFor: GeometryState['deriveContextShadingFor'];
+  setContextShadingCentre: GeometryState['setContextShadingCentre'];
+  geometryStore: GeometryStoreApi;
+  hoveredPart: GeometryState['hoveredContextShadingPart'];
+  setHoveredPart: GeometryState['setHoveredContextShadingPart'];
   /** Rows in stated distant shading quadrants only, which the conversion does not use. */
   unusedNames: readonly string[] | undefined;
 }
 
 function useFormState(ctx: ElementFormStateCtx): ContextShadingFormState {
   const [contextShadingType, setContextShadingType] = useState<ContextShadingType>('');
-  const startAngleInput = useIntegerInput('', ctx.commitElementNumericField('start_angle'), { commitOnChange: true });
-  const endAngleInput = useIntegerInput('', ctx.commitElementNumericField('end_angle'), { commitOnChange: true });
-  const calculateContextShadingAngles = useGeometryStore((s) => s.calculateContextShadingAngles);
-  const calculateShadingAngularRange = useGeometryStore((s) => s.calculateShadingAngularRange);
-  const calculateContextShadingDistance = useGeometryStore((s) => s.calculateContextShadingDistance);
+  const deriveContextShadingFor = useGeometryStore((s) => s.deriveContextShadingFor);
+  const setContextShadingCentre = useGeometryStore((s) => s.setContextShadingCentre);
   const unusedNames = useGeometryStore((s) => s.targetValidation?.distantShading?.unused_objects);
+  const hoveredPart = useGeometryStore((s) => s.hoveredContextShadingPart);
+  const setHoveredPart = useGeometryStore((s) => s.setHoveredContextShadingPart);
 
   return {
     contextShadingType,
     setContextShadingType,
-    startAngleInput,
-    endAngleInput,
     heightInput: ctx.shared.heightInput,
     distanceInput: ctx.shared.distanceInput,
     parentElement: ctx.shared.parentElement,
     setParentElement: ctx.shared.setParentElement,
-    calculateContextShadingAngles,
-    calculateShadingAngularRange,
-    calculateContextShadingDistance,
+    deriveContextShadingFor,
+    setContextShadingCentre,
+    geometryStore: useGeometryStoreApi(),
+    hoveredPart,
+    setHoveredPart,
     unusedNames,
   };
 }
@@ -95,8 +82,6 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
   hydrate(state, element) {
     if (element.type !== 'ContextShading') return;
     state.setContextShadingType('shading_type' in element ? element.shading_type ?? '' : '');
-    state.startAngleInput.setValue('start_angle' in element && typeof element.start_angle === 'number' ? Math.round(element.start_angle) : '');
-    state.endAngleInput.setValue('end_angle' in element && typeof element.end_angle === 'number' ? Math.round(element.end_angle) : '');
     state.distanceInput.setValue('distance' in element ? element.distance ?? '' : '');
     state.heightInput.setValue('height' in element ? element.height ?? '' : '');
     state.setParentElement('parent_element' in element ? element.parent_element ?? '' : '');
@@ -104,8 +89,6 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
 
   reset(state) {
     state.setContextShadingType('');
-    state.startAngleInput.setValue('');
-    state.endAngleInput.setValue('');
     // height/distance/parentElement are shared (wall family + WindowShading) and
     // are reset directly by the orchestrator's resetFormFields.
   },
@@ -114,15 +97,14 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
     const {
       contextShadingType,
       setContextShadingType,
-      startAngleInput,
-      endAngleInput,
       heightInput,
-      distanceInput,
       parentElement,
       setParentElement,
-      calculateContextShadingAngles,
-      calculateShadingAngularRange,
-      calculateContextShadingDistance,
+      deriveContextShadingFor,
+      setContextShadingCentre,
+      geometryStore,
+      hoveredPart,
+      setHoveredPart,
       unusedNames,
     } = state;
     const {
@@ -133,14 +115,78 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
       renderFieldLabel,
       registerBaseFieldRefs,
       getFieldValidationIssue,
+      getFieldValidationState,
       commitExistingElementDraft,
+      updateElement,
       selection,
       getElementById,
-      updateElement,
-      getGlobalOrientationOffset,
     } = ctx;
 
-    const selectedName = selection?.id ? getElementById(selection.id)?.name : undefined;
+    // Resolved by id: the Elements list, the canvas and the draw tools select this object as 'global', other paths as 'element'.
+    const selected = selection?.id ? getElementById(selection.id) : undefined;
+    const shading = selected?.type === 'ContextShading' ? (selected as ContextShading) : undefined;
+    const shadingId = shading?.id;
+    const drawn = (shading?.coordinates?.length ?? 0) >= 2;
+    const isLine = drawn && shading?.coordinates?.length === 2;
+    const derived = shading && drawn && shading.parent_element?.trim() ? deriveContextShadingFor(shading) : null;
+    const generated = !!shading && isContextGeneratedElement(shading);
+    // One row per part. A drawn object's come from the drawing; a row with no coordinates keeps what it stores,
+    // and so does a drawn object with no centre (older files), which has nothing to measure from.
+    const storedRows: DirectionRow[] = shading?.parts?.length
+      ? shading.parts.map((part) => ({ from: part.start_angle, to: part.end_angle, distance: part.distance, key: part.start_angle }))
+      : shading && Number.isFinite(shading.start_angle) && Number.isFinite(shading.end_angle) && Number.isFinite(shading.distance)
+        ? [{ from: shading.start_angle, to: shading.end_angle, distance: shading.distance, key: 'range' }]
+        : [];
+    const noCentre = drawn && !shading?.parent_element?.trim();
+    let rows: DirectionRow[] = [];
+    if (shading && drawn && !noCentre) {
+      if (derived && !('issue' in derived)) rows = derived.parts.map((part, index) => ({ from: part.start_angle, to: part.end_angle, distance: part.distance, key: `${index}-${part.face}` }));
+    } else if (shading) {
+      rows = storedRows;
+    }
+    const issues: DirectionIssue[] = rows.map((row, index) => (
+      getFieldValidationState(`parts.${index}.distance`, row.distance)
+      ?? (rows.length === 1 ? getFieldValidationState('distance', row.distance) : null)
+    ));
+    // Null when the edit is taken, otherwise why it was refused.
+    const editRow = (index: number, field: 'start_angle' | 'end_angle' | 'distance', value: number): string | null => {
+      if (!shading) return 'Nothing is selected.';
+      if (drawn) {
+        const state = geometryStore.getState();
+        const plan = planContextShadingLineEdit(shading, Object.values(state.elementsById), state.floors, state.globalOrientationOffset, { field, value });
+        if ('refusal' in plan) return plan.refusal;
+        return state.editContextShadingLine(shading.id, { field, value }) ? null : "That edit couldn't be applied.";
+      }
+      const update = editStoredRow(shading, index, field, value);
+      if (!update) {
+        if (field === 'distance') return 'Distance must be above 0 m.';
+        const other = field === 'start_angle' ? rows[index].to : rows[index].from;
+        return rows.length === 1 || Math.round(value) === Math.round(other)
+          ? 'From and To must differ.'
+          : "Directions can't overlap or run out of order, and together can't pass 360 degrees.";
+      }
+      updateElement(shading.id, update);
+      return null;
+    };
+    // Lines, rows without a drawing and generated objects show neither the button nor a note; for the rest
+    // the refusal that is left is the shared-object one.
+    const splittable = !!shading && !isLine && drawn && !noCentre && !generated && rows.length > 0;
+    const splitRefusal = splittable ? contextShadingSplitRefusal(shading) : null;
+    const canSplit = splittable && !splitRefusal;
+    const centreState = getFieldValidationState('parent_element', parentElement);
+    const centreOptions = [
+      { value: CONTEXT_SHADING_DEFAULT_CENTRE, label: 'Default (lowest floor)' },
+      ...elementIds
+        .map(id => elementsById[id])
+        .filter((el): el is Element => !!el && isFloorPlate(el))
+        .map(el => ({ value: el.name, label: `${el.name} (${ELEMENT_TYPE_COMPACT_LABELS[el.type]})` }))
+    ];
+    // A stored centre that names no floor (renamed, removed or miscased) stays visible, marked, until another is chosen.
+    if (parentElement && !centreOptions.some((option) => option.value === parentElement)) {
+      centreOptions.unshift({ value: parentElement, label: `${parentElement} (not found)` });
+    }
+
+    const selectedName = shading?.name;
     return (
       <>
         {selectedName && unusedNames?.includes(selectedName) && (
@@ -166,139 +212,23 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
           />
         </div>
 
-        {renderFieldLabel('Parent Element:', elementType, 'parent_element')}
+        {renderFieldLabel('Shading Centre:', elementType, 'parent_element')}
         <div className="element-input" ref={registerBaseFieldRefs(['parentElement', 'parent_element'])}>
           <StandardDropdown
             value={parentElement || ''}
             onChange={(value) => {
               setParentElement(value || '');
-              // Auto-calculate angles AND distance when parent changes
-              if (value && selection?.type === 'element') {
-                const contextShading = getElementById(selection.id) as any;
-                const parentEl = elementIds
-                  .map(id => elementsById[id])
-                  .find(el => el && el.name === value);
-                if (contextShading && parentEl) {
-                  const { start_angle, end_angle } = calculateContextShadingAngles(
-                    contextShading,
-                    parentEl,
-                    getGlobalOrientationOffset(),
-                  );
-                  startAngleInput.setValue(start_angle);
-                  endAngleInput.setValue(end_angle);
-                  // Calculate and store distance immediately
-                  const distance = calculateContextShadingDistance(contextShading, parentEl);
-                  updateElement(selection.id, { parent_element: value, start_angle, end_angle, distance });
-                }
-              }
+              // One centre for the model: every object takes it.
+              setContextShadingCentre(value || null);
             }}
-            options={[
-              { value: '', label: 'None' },
-              ...elementIds
-                .map(id => elementsById[id])
-                .filter(el => el && ['BuildingElementGround', 'BuildingElementOpaque', ...ADJACENT_LIKE_ELEMENT_TYPES].includes(el.type))
-                .map(el => ({ value: el!.name, label: `${el!.name} (${ELEMENT_TYPE_COMPACT_LABELS[el!.type]})` }))
-            ]}
+            options={centreOptions}
+            placeholder="Choose a centre"
             variant="ghost"
             size="md"
           />
+          <FieldValidationIndicator hasIssue={!!centreState} issue={centreState?.message} variant={centreState?.variant} />
         </div>
 
-        {renderFieldLabel('Start Angle (degrees):', elementType)}
-        <div className="element-input">
-          <StandardInput
-            type="text"
-            inputMode="numeric"
-            value={(() => {
-              // Calculate angles in real-time for ContextShading elements using the new angular range approach
-              if (selection?.type === 'element' && elementType === 'ContextShading') {
-                const contextShading = getElementById(selection.id) as any;
-                const parentEl = elementIds
-                  .map(id => elementsById[id])
-                  .find(el => el && el.name === parentElement);
-                if (contextShading && parentEl) {
-                  const offset = getGlobalOrientationOffset();
-                  const range = calculateShadingAngularRange(contextShading, parentEl, offset);
-                  const shownStart = range.start_angle;
-                  return Number.isFinite(shownStart) ? Number(shownStart.toFixed(2)) : 0;
-                }
-              }
-              return startAngleInput.value;
-            })()}
-            unit={fieldUnit('start_angle')}
-            onChange={startAngleInput.handleInputChange}
-            onBlur={startAngleInput.handleBlur}
-            step="1"
-            min="0"
-            max="360"
-            required
-            variant="ghost"
-            size="md"
-          />
-        </div>
-        {renderFieldLabel('End Angle (degrees):', elementType)}
-        <div className="element-input">
-          <StandardInput
-            type="text"
-            inputMode="numeric"
-            value={(() => {
-              // Calculate angles in real-time for ContextShading elements using the new angular range approach
-              if (selection?.type === 'element' && elementType === 'ContextShading') {
-                const contextShading = getElementById(selection.id) as any;
-                const parentEl = elementIds
-                  .map(id => elementsById[id])
-                  .find(el => el && el.name === parentElement);
-                if (contextShading && parentEl) {
-                  const offset = getGlobalOrientationOffset();
-                  const range = calculateShadingAngularRange(contextShading, parentEl, offset);
-                  const shownEnd = range.end_angle;
-                  return Number.isFinite(shownEnd) ? Number(shownEnd.toFixed(2)) : 0;
-                }
-              }
-              return endAngleInput.value;
-            })()}
-            unit={fieldUnit('end_angle')}
-            onChange={endAngleInput.handleInputChange}
-            onBlur={endAngleInput.handleBlur}
-            step="1"
-            min="0"
-            max="360"
-            required
-            variant="ghost"
-            size="md"
-          />
-        </div>
-        {renderFieldLabel('Distance (m):', elementType)}
-        <div className="element-input" ref={registerBaseFieldRefs('distance')}>
-          <StandardInput
-            type="text"
-            inputMode="numeric"
-            value={(() => {
-              if (selection?.type === 'element' && elementType === 'ContextShading') {
-                const contextShading = getElementById(selection.id) as any;
-                const parentEl = elementIds
-                  .map(id => elementsById[id])
-                  .find(el => el && el.name === parentElement);
-                if (contextShading && parentEl) {
-                  const d = calculateContextShadingDistance(contextShading, parentEl);
-                  return Number.isFinite(d) ? Number(d.toFixed(2)) : 0;
-                }
-              }
-              const d = typeof distanceInput.value === 'number' ? distanceInput.value : parseFloat(String(distanceInput.value)) || 0;
-              return Number.isFinite(d) ? Number(d.toFixed(2)) : 0;
-            })()}
-            unit={fieldUnit('distance')}
-            onChange={() => {}}
-            disabled
-            step="0.01"
-            min="0"
-            required
-            variant="ghost"
-            size="md"
-            className="flex-1"
-          />
-          <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('distance', distanceInput.value)} issue={getFieldValidationIssue('distance', distanceInput.value) || undefined} />
-        </div>
         {renderFieldLabel('Height (m):', elementType)}
         <div className="element-input" ref={registerBaseFieldRefs('height')}>
           <StandardInput
@@ -312,6 +242,38 @@ export const contextShadingFormModule: ElementFormModule<ContextShadingFormState
           />
           <FieldValidationIndicator hasIssue={!!getFieldValidationIssue('height', heightInput.value)} issue={getFieldValidationIssue('height', heightInput.value) || undefined} />
         </div>
+
+        {rows.length > 0 && renderFieldLabel('Directions, clockwise from north:', elementType)}
+        {rows.length > 0 && (
+          <div className="element-input element-input--stacked" ref={registerBaseFieldRefs(['distance', 'start_angle', 'end_angle', 'parts'])}>
+            <ContextShadingDirections
+              rows={rows}
+              editable={!generated && !noCentre && (isLine || !drawn)}
+              issues={issues}
+              hoveredIndex={shading && hoveredPart?.elementId === shading.id ? hoveredPart.index : null}
+              onHover={(index) => setHoveredPart(shading && index !== null ? { elementId: shading.id, index } : null)}
+              onEdit={editRow}
+            />
+            {canSplit && shadingId && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setHoveredPart(null);
+                  geometryStore.getState().splitContextShadingIntoLines(shadingId);
+                }}
+              >
+                Split into lines
+              </button>
+            )}
+            {canSplit && (
+              <div className="element-editor-note">
+                Replaces this shape with one editable line per direction. Select a line to edit it. Undo restores the shape.
+              </div>
+            )}
+            {splitRefusal && <div className="element-editor-note">{splitRefusal}</div>}
+          </div>
+        )}
       </>
     );
   },

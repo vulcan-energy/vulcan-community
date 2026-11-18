@@ -49,7 +49,8 @@ export const CANVAS_CONSTANTS = {
       'WetEmitter',
       'BuildingElementAdjacentConditionedSpace',
       'BuildingElementAdjacentUnconditionedSpace_Simple',
-      'BuildingElementPartyWall'
+      'BuildingElementPartyWall',
+      'ContextShading'
     ] as const,
 
     POLYGON: [

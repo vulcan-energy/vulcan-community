@@ -41,7 +41,7 @@ export interface FabricUWritesFromConstructionR {
 
 /**
  * From raw combined-mean and series construction resistances (m²K/W), produce rounded R values and
- * 2 s.f. U values aligned with {@link AssemblyCalculatorModal} apply and
+ * 2 s.f. U values aligned with {@link AssemblyLayers} apply and
  * {@link computePatchFromSavedAssembly}. `annexFDeltaU_W_m2K` is the Annex F ΔU total added to the
  * combined-method U (0 when no corrections apply).
  */

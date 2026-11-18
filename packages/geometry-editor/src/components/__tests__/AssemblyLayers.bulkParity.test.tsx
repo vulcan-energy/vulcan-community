@@ -15,7 +15,7 @@ vi.mock('../../lib/assemblyLibrary', () => ({
   upsertUserAssembly: assemblyLibraryMocks.upsert,
 }));
 
-import { AssemblyCalculatorModal } from '../AssemblyCalculatorModal';
+import { AssemblyLayers } from '../AssemblyLayers';
 import { computePatchFromSavedAssembly } from '../../lib/multiSelectAssemblyApply';
 
 const workspacePort = {
@@ -61,7 +61,7 @@ const library = {
   materialCategories: [],
 } as BundledAssemblyLibrary;
 
-describe('saved assembly: calculator apply versus bulk apply', () => {
+describe('saved assembly: inline layers versus bulk apply', () => {
   // Party wall: Annex F on the full wall, then half its corrected R (the halved R_tot gave 1.46).
   it.each<[AssemblyElementMode, number]>([
     ['BuildingElementOpaque', 2.94],
@@ -72,19 +72,17 @@ describe('saved assembly: calculator apply versus bulk apply', () => {
       assemblyLibraryMocks.load.mockResolvedValue(library);
       const onApply = vi.fn();
       render(
-        <AssemblyCalculatorModal
-          isOpen
-          onClose={vi.fn()}
+        <AssemblyLayers
           elementMode={elementMode}
           elementPitchDeg={90}
+          opaqueSubtype="wall"
           onApply={onApply}
           workspaceResourcePort={workspacePort}
         />,
       );
       fireEvent.click(await screen.findByRole('button', { name: 'Search assemblies…' }));
       fireEvent.click(screen.getByText('Air-void wall'));
-      fireEvent.click(screen.getByRole('button', { name: 'Update element' }));
-      const modalPatch = onApply.mock.calls[0]![0] as Record<string, unknown>;
+        const modalPatch = onApply.mock.calls[0]![0] as Record<string, unknown>;
       expect(modalPatch.thermal_resistance_construction).toBe(expectedR);
 
       const bulk = computePatchFromSavedAssembly(assembly, library, elementMode, 90);

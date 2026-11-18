@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Where an element field's value comes from when nobody entered it: the one answer the element
-// editors show ("default", "from the assembly") and the provenance table compares against.
+// editors show ("default", "from the layers") and the provenance table compares against.
 
 import type { ArealHeatCapacityInput } from '../../../geometry-editor-host/src/schemaPort';
-import { roundToTwoDecimals, SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
+import { SUSPENDED_GROUND_DEFAULT_HEIGHT_UPPER_SURFACE_M } from '../geometry/constants';
 import type { Element } from '../geometry/types';
-import { parseVulcanAssemblyV1FromExtraJson } from './assemblyAppliedUi';
-import { arealHeatCapacityBandFromJPerM2K, arealHeatCapacityWrite } from './assemblyCalculator';
+import { envelopeFabricValues, parseVulcanAssemblyV1FromExtraJson, setAsideAssemblyEnvelope } from './assemblyAppliedUi';
 import { ROW_ONLY_ELEMENT_TYPES } from '../geometry/io/geometryCsvLayouts';
 import type { DefaultsLookup, OpaqueFabricVariant } from './defaultsCache';
 import { parseWindShieldLocation } from './groundFloor';
@@ -365,39 +364,10 @@ export function assemblySourceValuesFor(
   arealHeatCapacity: ArealHeatCapacityInput,
 ): Record<string, unknown> {
   const envelope = parseVulcanAssemblyV1FromExtraJson(extraJson);
-  if (!envelope) return {};
-  const out: Record<string, unknown> = {};
-  if (typeof envelope.uValueWrittenToElement_W_m2K === 'number') {
-    out.u_value = envelope.uValueWrittenToElement_W_m2K;
-  }
-  if (typeof envelope.thermalResistanceConstruction_m2K_W === 'number') {
-    out[
-      elementType === 'BuildingElementGround'
-        ? 'thermal_resistance_floor_construction'
-        : 'thermal_resistance_construction'
-    ] = envelope.thermalResistanceConstruction_m2K_W;
-  }
-  if (typeof envelope.thermalResistanceGroundInsulation_m2K_W === 'number') {
-    out.thermal_resist_insul = envelope.thermalResistanceGroundInsulation_m2K_W;
-  }
-  if (typeof envelope.arealHeatCapacityWrittenToElement_J_m2K === 'number' && elementType) {
-    const jWritten = envelope.arealHeatCapacityWrittenToElement_J_m2K;
-    // A target that takes a class stores its label; the envelope keeps the class's J/(m²·K).
-    const write = arealHeatCapacityWrite(arealHeatCapacity, elementType);
-    out.areal_heat_capacity = write === 'number' ? jWritten : arealHeatCapacityBandFromJPerM2K(jWritten, write);
-  }
-  if (typeof envelope.massDistributionClass === 'string') {
-    out.mass_distribution_class = envelope.massDistributionClass;
-  }
-  if (
-    elementType === 'BuildingElementGround' &&
-    subtype === 'Suspended_floor' &&
-    typeof envelope.suspendedHeightUpperSurfaceM === 'number' &&
-    Number.isFinite(envelope.suspendedHeightUpperSurfaceM)
-  ) {
-    out.height_upper_surface = roundToTwoDecimals(envelope.suspendedHeightUpperSurfaceM);
-  }
-  return out;
+  // Layers a typed value set aside are its source still: a field's reset brings them back.
+  const setAside = envelope ? null : setAsideAssemblyEnvelope(extraJson);
+  if (setAside) return elementType === 'BuildingElementGround' ? {} : envelopeFabricValues(setAside, elementType, subtype, arealHeatCapacity);
+  return envelope ? envelopeFabricValues(envelope, elementType, subtype, arealHeatCapacity) : {};
 }
 
 // The element field each type's editor reads its defaults subtype from.

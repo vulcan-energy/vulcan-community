@@ -402,6 +402,10 @@
   min-width: 0;
 }
 
+.save-error-action {
+  margin-top: 6px;
+}
+
 .save-error-location {
   background: var(--surface-control-hover);
   border: 1px solid var(--border-subtle);

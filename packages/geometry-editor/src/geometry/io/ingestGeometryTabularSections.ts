@@ -39,6 +39,7 @@ import type { CsvRow, CsvSection } from './csvSectionRows';
 import { wallFootFromExportedBaseHeight } from '../../lib/profileLineFace';
 import {
   decodePromotedExtraJsonFields,
+  parseContextShadingPartsCell,
   validateGeometrySectionHeaders,
 } from './geometryCsvLayouts';
 import {
@@ -128,6 +129,13 @@ function takeRowText(): Record<string, string> | undefined {
   const cells = rowText;
   rowText = {};
   return Object.keys(cells).length > 0 ? cells : undefined;
+}
+
+/** A Context Shading row's parts; an unreadable cell is kept as typed for validation and the save. */
+function contextShadingPartsPatch(d: Record<string, string>): { parts?: ContextShading['parts'] } {
+  const parts = parseContextShadingPartsCell(V(d, 'parts'));
+  if (parts === null) rowText.parts = V(d, 'parts');
+  return parts ? { parts } : {};
 }
 
 function viewerBaseHeightPatch(d: Record<string, string>): { _base_height?: number } {
@@ -622,6 +630,7 @@ export function ingestGeometryTabularSections(
             start_angle: reqNum(d, 'start_angle', startAngleCell),
             end_angle: reqNum(d, 'end_angle', endAngleCell),
             distance: reqNum(d, 'distance'),
+            ...contextShadingPartsPatch(d),
             height: reqNum(d, 'height'),
             parent_element: V(d, 'parent_element') || null,
             coordinates: coords,

@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { describe, expect, it } from 'vitest';
-import { buildErrorListItems, displayBuildErrorRows, globalSettingsFieldOf, targetValidationIssues, withTargetIssues } from '../buildErrorDisplay';
+import { describe, expect, it, vi } from 'vitest';
+import { buildErrorFixAction, buildErrorListItems, buildErrorTechnicalText, displayBuildErrorRows, globalSettingsFieldOf, targetValidationIssues, withTargetIssues } from '../buildErrorDisplay';
 import { resolveIssueTarget } from '../issueTarget';
+import { globalSettingsFieldSection } from '../globalSettingsValidation';
 
 const model = {
   zones: [{ id: 'z1', name: 'Zone 1' }],
@@ -92,6 +93,36 @@ describe('displayBuildErrorRows', () => {
     expect(message('HasElectricitySmartMeter')).toBe('Choose yes or no for electricity smart meter.');
   });
 
+  it('asks for the missing system, not a section check, and words its consequence once', () => {
+    const rows = displayBuildErrorRows([
+      { source: 'schema', code: 'E026', keyword: 'type', path: '/HotWaterSource', message: 'null is not of type "object"' },
+      { source: 'schema', code: 'E026', keyword: 'anyOf', path: '/HotWaterDemand', message: 'not valid under any of the given schemas' },
+      { source: 'schema', code: 'E026', keyword: 'type', path: '/SpaceHeatSystem', message: 'null is not of type "object"' },
+    ], (path) => resolveIssueTarget(path, model));
+    expect(rows.map((row) => row.userMessage)).toEqual(['Add a hot water system.', 'Add a heating system.']);
+  });
+
+  it('keeps its own message for any other schema error on a system section, and the demand row with it', () => {
+    const rows = displayBuildErrorRows([
+      { source: 'schema', code: 'E026', keyword: 'unevaluatedProperties', path: '/HotWaterSource', message: 'Unevaluated properties are not allowed (\'stray\' was unexpected)' },
+      { source: 'schema', code: 'E026', keyword: 'anyOf', path: '/HotWaterDemand', message: 'not valid under any of the given schemas' },
+    ], (path) => resolveIssueTarget(path, model));
+    expect(rows.map((row) => row.userMessage)).not.toContain('Add a hot water system.');
+    expect(rows.some((row) => row.item.path === '/HotWaterDemand')).toBe(true);
+  });
+
+  it('asks for an outlet on the hot water system while the demand has none', () => {
+    const plant = {
+      zones: model.zones,
+      elements: [{ id: 'hw', name: 'Hot water', extra_json: { HotWaterSource: { 'Hot water': { type: 'CombiBoiler' } } } }],
+    };
+    const [row] = displayBuildErrorRows(
+      [{ source: 'schema', code: 'E026', keyword: 'anyOf', path: '/HotWaterDemand', message: 'not valid under any of the given schemas' }],
+      (path, message) => resolveIssueTarget(path, plant, message),
+    );
+    expect(row).toMatchObject({ userMessage: 'Add a shower, bath or tap.', target: { elementId: 'hw' } });
+  });
+
   it('asks for a light on a zone that has none', () => {
     const [row] = displayBuildErrorRows(
       [{ source: 'schema', code: 'E026', keyword: 'type', path: '/Zone/Zone 1/Lighting', message: 'null is not of type "object"' }],
@@ -136,6 +167,10 @@ describe('displayBuildErrorRows', () => {
     expect(location('/Metadata/HEMIE_number_of_open_fireplaces')).toBe('Global Settings > Air test');
     expect(location('/Metadata/HEMIE_double_glazing_installation_period')).toBe('Global Settings > Air test');
     expect(location('/Metadata/HEMIE_heat_loss_corridor')).toBe('Global Settings > Air test');
+    // Distant shading is read out under Site, and its notice opens it there.
+    expect(location('/Metadata/HEMIE_distant_shading')).toBe('Global Settings > Site');
+    expect(globalSettingsFieldOf('/Metadata/HEMIE_distant_shading')).toBe('HEMIE_distant_shading');
+    expect(globalSettingsFieldSection('HEMIE_distant_shading')).toBe('ventilation');
   });
 
   it('names an unstated HEM:EPC input by its label, where the form asks it', () => {
@@ -145,6 +180,35 @@ describe('displayBuildErrorRows', () => {
       { epcForm: true },
     );
     expect(row).toMatchObject({ userMessage: 'Enter cold water source.', location: 'Global Settings > Rooms and services' });
+  });
+
+  it('names the Global Settings field a value out of range is in', () => {
+    const [row] = displayBuildErrorRows(
+      [{ source: 'schema', code: 'E026', keyword: 'minimum', path: '/NumberOfHabitableRooms', message: '0 is less than the minimum of 1' }],
+      (p) => resolveIssueTarget(p, model),
+      { epcForm: true },
+    );
+    expect(row).toMatchObject({ userMessage: 'Number of habitable rooms must be at least 1.', location: 'Global Settings > Rooms and services' });
+  });
+
+  it('shows a schema error without the converted value in its details', () => {
+    const zone = { source: 'schema' as const, keyword: 'anyOf', path: '/Zone/Zone 1',
+      message: '{"area":52.8,"livingroom_area":null,"BuildingElement":{"Wall (S)":{"type":"BuildingElementOpaque"}}} is not valid under any of the schemas listed in the \'anyOf\' keyword' };
+    expect(buildErrorTechnicalText(zone)).toBe("The value is not valid under any of the schemas listed in the 'anyOf' keyword");
+    expect(buildErrorTechnicalText({ source: 'build', message: 'Wall (S) has no height.' })).toBe('Wall (S) has no height.');
+    expect(buildErrorTechnicalText({ ...zone, technicalMessage: 'stated' })).toBe('stated');
+  });
+
+  it('uses the HEM:EPC form label of each field it asks for', () => {
+    const message = (path: string) => displayBuildErrorRows(
+      [{ source: 'schema', code: 'E_EPC_REQUIRED_INPUT', path, message: 'm' }],
+      (p) => resolveIssueTarget(p, model),
+      { epcForm: true },
+    )[0]?.userMessage;
+    expect(message('/Metadata/Ventilation_shield_class')).toBe('Enter shelter.');
+    expect(message('/Metadata/AirPermeability_ventilation_zone_height')).toBe('Enter zone height.');
+    expect(message('/Metadata/Ventilation_cross_vent_possible')).toBe('Choose yes or no for cross ventilation.');
+    expect(message('/Metadata/HasElectricitySmartMeter')).toBe('Choose yes or no for smart electricity meter.');
   });
 
   it('links a zone row to the one element its message names', () => {
@@ -185,12 +249,34 @@ describe('globalSettingsFieldOf', () => {
 
 describe('buildErrorListItems', () => {
   const live = [{ source: 'schema' as const, message: 'live' }, { source: 'schema' as const, message: 'notice', severity: 'warning' as const }];
-  it("lists the last save's errors, else the live check's errors and notices, then the save's other notices", () => {
-    const saved = [{ source: 'build' as const, message: 'saved' }];
-    expect(buildErrorListItems(saved, live)).toBe(saved);
+  it("lists the live check's items once it has run, then the save's own messages; the save's check until then", () => {
+    const saved = [{ source: 'schema' as const, message: 'saved' }];
+    // A fix made after Save shows as soon as the live check has run: it replaces the save's check.
+    expect(buildErrorListItems(saved, live).map((item) => item.message)).toEqual(['live', 'notice']);
+    expect(buildErrorListItems(saved, [])).toEqual([]);
+    expect(buildErrorListItems(saved, undefined)).toBe(saved);
+    // A load's data loss is no check result: it stays.
+    const dataLoss = { source: 'build' as const, message: 'Malformed extra_json dropped' };
+    expect(buildErrorListItems([...saved, dataLoss], live).map((item) => item.message)).toEqual(['live', 'notice', dataLoss.message]);
     const notices = [{ source: 'build' as const, message: 'n', severity: 'warning' as const }, live[1]!];
     expect(buildErrorListItems(notices, live).map((item) => item.message)).toEqual(['live', 'notice', 'n']);
     expect(buildErrorListItems([], live.slice(1)).map((item) => item.message)).toEqual(['notice']);
     expect(buildErrorListItems(notices, undefined)).toBe(notices);
+  });
+});
+
+describe('buildErrorFixAction', () => {
+  const overLimit = 'HEM takes at most 8 segments, but this model needs 10. Or set the Metadata row ContextShadingJoinParts to TRUE to join neighbouring parts of an object at the nearer distance.';
+
+  it('offers Join parts for the over-limit error and sets the setting when run', () => {
+    const setComplianceSettings = vi.fn();
+    const action = buildErrorFixAction(overLimit, setComplianceSettings);
+    expect(action?.label).toBe('Join parts');
+    action?.run();
+    expect(setComplianceSettings).toHaveBeenCalledWith({ ContextShadingJoinParts: true });
+  });
+
+  it('offers nothing for other errors', () => {
+    expect(buildErrorFixAction('"x" is a required property', vi.fn())).toBeUndefined();
   });
 });

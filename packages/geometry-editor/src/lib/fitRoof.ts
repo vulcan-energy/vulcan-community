@@ -406,7 +406,8 @@ export function fitRoof(input: FitRoofInput): RoofFit | { problem: string } {
   }
   const len = Math.hypot(along.x, along.y);
   const d = { x: -along.y / len, y: along.x / len };
-  const mid = peak.length ? { x: (ridge.a.x + ridge.b.x) / 2, y: (ridge.a.y + ridge.b.y) / 2 } : c;
+  // A ridge that is one point (a pyramid, or a ridge tilted by a jog in the outline): through the wing's middle.
+  const mid = dist(ridge.a, ridge.b) > 1e-6 ? { x: (ridge.a.x + ridge.b.x) / 2, y: (ridge.a.y + ridge.b.y) / 2 } : c;
   const ss: number[] = [];
   for (const r of [wings[0], ...main.map((f) => f.ring)]) {
     r.forEach((p, i) => {

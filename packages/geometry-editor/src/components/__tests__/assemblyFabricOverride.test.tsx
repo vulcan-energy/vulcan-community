@@ -23,6 +23,8 @@ import type { Element } from '../../geometry/types';
 import { AdvancedFieldsEditor } from '../AdvancedFieldsEditor';
 import { MultiSelectPanel } from '../MultiSelectPanel';
 import { dormerThermalOverrideAfterEdit } from '../../lib/dormerGeometry';
+import { ASSEMBLY_SET_ASIDE_KEY } from '../../lib/assemblyAppliedUi';
+import { A7_AREAL_HEAT_CAPACITY_INPUT } from '../../../../geometry-editor-host/src/schemaPort';
 
 beforeAll(async () => {
   configureGeometrySchemaAssetSource({
@@ -116,13 +118,88 @@ describe('assembly versus U-value edits', () => {
   it.each([
     ['single element', editSingleElementU],
     ['multi-select', editMultiSelectU],
-  ])('%s: a U override clears the assembly envelope', async (_surface, edit) => {
+  ])('%s: a U override sets the layers aside, out of the converter\'s reach', async (_surface, edit) => {
     const store = storeWith(wall());
     edit(store, '0.16');
     await waitFor(() => expect(extra(store).u_value).toBe(0.16));
     expect(extra(store).vulcan_assembly_v1).toBeUndefined();
+    expect(extra(store)[ASSEMBLY_SET_ASIDE_KEY]).toEqual(envelope);
     // With R left behind the converter would drop the user's U (hem-target-core target_contracts).
     expect(extra(store).thermal_resistance_construction).toBeUndefined();
+  });
+
+  it('the U-value back at the layers\' value, or blank, brings the layers back', () => {
+    for (const u of [0.18, undefined]) {
+      const store = storeWith(wall());
+      const { updateElement } = store.getState();
+      updateElement('wall', { extra_json: { ...extra(store), u_value: 0.3 } });
+      updateElement('wall', { extra_json: { ...extra(store), u_value: u } });
+      expect(extra(store), String(u)).toMatchObject({ u_value: 0.18, thermal_resistance_construction: 5, vulcan_assembly_v1: envelope });
+      expect(extra(store)[ASSEMBLY_SET_ASIDE_KEY], String(u)).toBeUndefined();
+    }
+  });
+
+  const massEnvelope = { ...envelope, arealHeatCapacityWrittenToElement_J_m2K: 110000, massDistributionClass: 'I: Mass concentrated at internal side' };
+  const massWall = () => ({ ...wall(), extra_json: {
+    u_value: 0.18, thermal_resistance_construction: 5, areal_heat_capacity: 'Medium',
+    mass_distribution_class: 'I: Mass concentrated at internal side', vulcan_assembly_v1: massEnvelope,
+  } } as Element);
+  // The store's default target (HEM:FHS a7) takes a class, on the surface scale.
+  const edited = { ...massEnvelope, uValueWrittenToElement_W_m2K: 0.2, thermalResistanceConstruction_m2K_W: 4.8, arealHeatCapacityWrittenToElement_J_m2K: 175000 };
+
+  it('a row edit while set aside moves the values that still follow the layers, not the typed one', () => {
+    const store = storeWith(massWall());
+    const { updateElement } = store.getState();
+    updateElement('wall', { extra_json: { ...extra(store), areal_heat_capacity: 'Light' } });
+    updateElement('wall', { extra_json: { ...extra(store), [ASSEMBLY_SET_ASIDE_KEY]: edited } });
+    expect(extra(store)).toMatchObject({ u_value: 0.2, thermal_resistance_construction: 4.8, areal_heat_capacity: 'Light', [ASSEMBLY_SET_ASIDE_KEY]: edited });
+    // Under a typed U, the heat capacity and mass the layers give still follow them.
+    const typed = storeWith(massWall());
+    typed.getState().updateElement('wall', { extra_json: { ...extra(typed), u_value: 0.3 } });
+    typed.getState().updateElement('wall', { extra_json: { ...extra(typed), [ASSEMBLY_SET_ASIDE_KEY]: edited } });
+    expect(extra(typed)).toMatchObject({ u_value: 0.3, areal_heat_capacity: 'Heavy', [ASSEMBLY_SET_ASIDE_KEY]: edited });
+    expect(extra(typed).thermal_resistance_construction).toBeUndefined();
+  });
+
+  it('"Use the layers" on one field brings back every value the layers give, whatever the others say', () => {
+    for (const override of [{ areal_heat_capacity: 'Light' }, { thermal_resistance_construction: 4 }]) {
+      const store = storeWith(massWall());
+      const { updateElement } = store.getState();
+      updateElement('wall', { extra_json: { ...extra(store), ...override } });
+      updateElement('wall', { extra_json: { ...extra(store), u_value: 0.4, thermal_resistance_construction: 2 } });
+      updateElement('wall', { extra_json: { ...extra(store), [ASSEMBLY_SET_ASIDE_KEY]: edited } });
+      updateElement('wall', { extra_json: { ...extra(store), u_value: 0.2 } });
+      expect(extra(store), JSON.stringify(override)).toMatchObject({
+        u_value: 0.2, thermal_resistance_construction: 4.8, areal_heat_capacity: 'Heavy',
+        mass_distribution_class: 'I: Mass concentrated at internal side', vulcan_assembly_v1: edited,
+      });
+      expect(extra(store)[ASSEMBLY_SET_ASIDE_KEY]).toBeUndefined();
+    }
+  });
+
+  it('a heat capacity or mass class put back at the layers\' value keeps a typed U: it only sets that field', () => {
+    const store = storeWith(massWall());
+    const { updateElement } = store.getState();
+    updateElement('wall', { extra_json: { ...extra(store), u_value: 0.3 } });
+    updateElement('wall', { extra_json: { ...extra(store), mass_distribution_class: 'E: Mass concentrated at external side' } });
+    updateElement('wall', { extra_json: { ...extra(store), mass_distribution_class: 'I: Mass concentrated at internal side' } });
+    expect(extra(store)).toMatchObject({ u_value: 0.3, mass_distribution_class: 'I: Mass concentrated at internal side', [ASSEMBLY_SET_ASIDE_KEY]: massEnvelope });
+    expect(extra(store).vulcan_assembly_v1).toBeUndefined();
+    // With U and R at the layers' values (or blank), the same reset brings the layers back.
+    const kappa = storeWith(massWall());
+    kappa.getState().updateElement('wall', { extra_json: { ...extra(kappa), areal_heat_capacity: 'Light' } });
+    kappa.getState().updateElement('wall', { extra_json: { ...extra(kappa), areal_heat_capacity: 'Medium' } });
+    expect(extra(kappa)).toMatchObject({ u_value: 0.18, areal_heat_capacity: 'Medium', vulcan_assembly_v1: massEnvelope });
+  });
+
+  it('a fresh build-up replaces layers set aside', () => {
+    const store = storeWith(wall());
+    const { updateElement } = store.getState();
+    updateElement('wall', { extra_json: { ...extra(store), u_value: 0.3 } });
+    const fresh = { ...envelope, assemblyId: 'other' };
+    updateElement('wall', { extra_json: { ...extra(store), u_value: 0.18, thermal_resistance_construction: 5, vulcan_assembly_v1: fresh } });
+    expect(extra(store).vulcan_assembly_v1).toEqual(fresh);
+    expect(extra(store)[ASSEMBLY_SET_ASIDE_KEY]).toBeUndefined();
   });
 
   it('an R, whole-wall U or mass override keeps the other values as entered values', () => {
@@ -194,10 +271,10 @@ describe('assembly versus U-value edits', () => {
     const representative = { u_value: 0.25, thermal_resistance_construction: 5, vulcan_assembly_v1: envelope };
     const next = dormerThermalOverrideAfterEdit('BuildingElementOpaque', undefined, representative, {
       ...representative, colour: 'Dark',
-    });
+    }, A7_AREAL_HEAT_CAPACITY_INPUT);
     expect(next).toMatchObject({ thermal_resistance_construction: 5, vulcan_assembly_v1: envelope });
     expect(dormerThermalOverrideAfterEdit('BuildingElementOpaque', undefined, representative, {
       ...representative, u_value: 0.3,
-    })).toEqual({ u_value: 0.3 });
+    }, A7_AREAL_HEAT_CAPACITY_INPUT)).toEqual({ u_value: 0.3, [ASSEMBLY_SET_ASIDE_KEY]: envelope });
   });
 });

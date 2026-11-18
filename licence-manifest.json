@@ -1479,8 +1479,8 @@
       "classification": "public_community_test_suite"
     },
     {
-      "path": "packages/geometry-editor/src/components/__tests__/AssemblyCalculatorModal.resourcePorts.test.tsx",
-      "source_path": "packages/geometry-editor/src/components/__tests__/AssemblyCalculatorModal.resourcePorts.test.tsx",
+      "path": "packages/geometry-editor/src/components/__tests__/AssemblyLayers.resourcePorts.test.tsx",
+      "source_path": "packages/geometry-editor/src/components/__tests__/AssemblyLayers.resourcePorts.test.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -1591,8 +1591,16 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
-      "path": "packages/geometry-editor/src/components/AssemblyCalculatorModal.tsx",
-      "source_path": "packages/geometry-editor/src/components/AssemblyCalculatorModal.tsx",
+      "path": "packages/geometry-editor/src/components/AssemblyLayers.tsx",
+      "source_path": "packages/geometry-editor/src/components/AssemblyLayers.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/AssemblyLibraryPicker.tsx",
+      "source_path": "packages/geometry-editor/src/components/AssemblyLibraryPicker.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -1767,6 +1775,14 @@
       "classification": "public_canonical_editor_dependency"
     },
     {
+      "path": "packages/geometry-editor/src/components/canvas/contextShadingLiveCoordinates.ts",
+      "source_path": "packages/geometry-editor/src/components/canvas/contextShadingLiveCoordinates.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
       "path": "packages/geometry-editor/src/components/canvas/DrawingPreview.tsx",
       "source_path": "packages/geometry-editor/src/components/canvas/DrawingPreview.tsx",
       "license": "AGPL-3.0-only",
@@ -1897,6 +1913,14 @@
     {
       "path": "packages/geometry-editor/src/components/canvas/HidePanelsDropdown.tsx",
       "source_path": "packages/geometry-editor/src/components/canvas/HidePanelsDropdown.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/canvas/LiveContextShadingPills.tsx",
+      "source_path": "packages/geometry-editor/src/components/canvas/LiveContextShadingPills.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2225,6 +2249,14 @@
     {
       "path": "packages/geometry-editor/src/components/elementForms/contextShading.tsx",
       "source_path": "packages/geometry-editor/src/components/elementForms/contextShading.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/elementForms/ContextShadingDirections.tsx",
+      "source_path": "packages/geometry-editor/src/components/elementForms/ContextShadingDirections.tsx",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -2617,6 +2649,22 @@
     {
       "path": "packages/geometry-editor/src/components/jsonformsRenderers.tsx",
       "source_path": "packages/geometry-editor/src/components/jsonformsRenderers.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/LayerRow.tsx",
+      "source_path": "packages/geometry-editor/src/components/LayerRow.tsx",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/components/layerRowStyle.ts",
+      "source_path": "packages/geometry-editor/src/components/layerRowStyle.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",
@@ -4906,6 +4954,22 @@
     {
       "path": "packages/geometry-editor/src/lib/categoryMap.ts",
       "source_path": "packages/geometry-editor/src/lib/categoryMap.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/contextShadingDerivedCache.ts",
+      "source_path": "packages/geometry-editor/src/lib/contextShadingDerivedCache.ts",
+      "license": "AGPL-3.0-only",
+      "additional_terms": "Vulcan-Origin-Terms-1.0",
+      "rights_status": "approved",
+      "classification": "public_canonical_editor_dependency"
+    },
+    {
+      "path": "packages/geometry-editor/src/lib/contextShadingDrawing.ts",
+      "source_path": "packages/geometry-editor/src/lib/contextShadingDrawing.ts",
       "license": "AGPL-3.0-only",
       "additional_terms": "Vulcan-Origin-Terms-1.0",
       "rights_status": "approved",

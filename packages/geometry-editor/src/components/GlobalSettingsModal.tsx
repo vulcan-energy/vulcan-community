@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { targetRules, targetSchemaMode } from '../../../geometry-editor-host/src/schemaPort';
+import { isContextShadingJoinPartsError } from '../lib/contextShadingGeometry';
 import { targetValidationFlags } from '../geometry/validation/validateElement';
 import React, {
   useCallback,
@@ -36,6 +37,8 @@ import {
   smartMeterGuidIssue,
   targetBuildTypes,
   buildTypeHasStoreyRows,
+  EPC_FORM_LABELS,
+  REQUIRED_SETTINGS_LABELS,
   EPC_GLOBAL_VALUES_TITLES,
   GLOBAL_SETTINGS_SECTION_TITLES,
   usesEpcGlobalValues,
@@ -660,6 +663,9 @@ export function GlobalSettingsModal({
       defaultsJson: state.defaultsLoading ? undefined : state.defaultsJson,
     }))
   );
+  // Joining Context Shading parts is a conversion switch most models never need: shown while it is on
+  // or while the converter's over-limit error asks for it.
+  const joinPartsNeeded = useGeometryStore((state) => !!state.targetValidation?.items?.some((item) => isContextShadingJoinPartsError(item.message)));
   const setDefaultsPath = useGeometryStore((state) => state.setDefaultsPath);
   const pinnedDefaultsPath = useGeometryStore((state) => state.pinnedDefaultsPath(state.targetBundleId));
   const setPropertyPostcode = useGeometryStore(
@@ -1264,7 +1270,8 @@ export function GlobalSettingsModal({
       setActiveTab(section === "fabric" ? "fabric" : "settings");
       if (section === "dwelling") setComplianceSettingsExpanded(true);
       if (section === "airTightness") setAirTightnessExpanded(true);
-      if (section === "ventilation") setVentilationEnvExpanded(true);
+      // Distant shading is read out above Site's More.
+      if (section === "ventilation" && focusRequest !== "HEMIE_distant_shading") setVentilationEnvExpanded(true);
       if (section === "thermalBridging") setThermalBridgingExpanded(true);
       if (focusRequest === "JunctionPsiDefaultsPath") setJunctionPsiFallbackExpanded(true);
     }
@@ -1457,6 +1464,23 @@ export function GlobalSettingsModal({
                               size="md"
                             />
                           </>
+  ) : null;
+  const joinPartsRow = complianceSettings.ContextShadingJoinParts || joinPartsNeeded ? (
+    <div data-field-key="ContextShadingJoinParts" style={{ marginTop: "var(--spacing-md)" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)" }}>
+      <input
+        type="checkbox"
+        id="context_shading_join_parts"
+        checked={complianceSettings.ContextShadingJoinParts ?? false}
+        onChange={(e) => setComplianceSettings({ ContextShadingJoinParts: e.target.checked })}
+        style={{ margin: 0 }}
+      />
+      <label htmlFor="context_shading_join_parts" style={{ fontSize: "var(--font-size-sm)", color: "var(--text-primary)", cursor: "pointer" }}>
+        Join shading parts to fit HEM&apos;s segment limit
+      </label>
+    </div>
+    <div style={EPC_HELP}>When a model has more segments than HEM takes, neighbouring parts of one object are joined at the nearer distance.</div>
+    </div>
   ) : null;
   // Thermal bridging defaults: every target but an existing building's, which takes none.
   const thermalBridgingSection = constructionBands ? null : (
@@ -1868,7 +1892,7 @@ export function GlobalSettingsModal({
         </div>
         <div style={EPC_COLUMNS}>
           <StandardDropdown
-            label={epcLabel("Heating controls", "HeatingControlType")}
+            label={epcLabel(EPC_FORM_LABELS.HeatingControlType, "HeatingControlType")}
             value={complianceSettings.HeatingControlType || ""}
             onChange={(value) => setComplianceSettings({
               HeatingControlType: (value || undefined) as "SeparateTempControl" | "SeparateTimeAndTempControl" | undefined,
@@ -1882,7 +1906,7 @@ export function GlobalSettingsModal({
             size="md"
           />
           <StandardDropdown
-            label={epcLabel("Cold water from", "ColdWaterSource")}
+            label={epcLabel(REQUIRED_SETTINGS_LABELS.ColdWaterSource, "ColdWaterSource")}
             value={complianceSettings.ColdWaterSource || ""}
             onChange={(value) => setComplianceSettings({ ColdWaterSource: (value || undefined) as "mains water" | "header tank" | undefined })}
             options={[
@@ -1893,7 +1917,7 @@ export function GlobalSettingsModal({
             variant="ghost"
             size="md"
           />
-          <YesNoField label="Smart electricity meter" fieldKey="HasElectricitySmartMeter"
+          <YesNoField label={EPC_FORM_LABELS.HasElectricitySmartMeter} fieldKey="HasElectricitySmartMeter"
             value={complianceSettings.HasElectricitySmartMeter}
             onChange={(value) => setComplianceSettings({ HasElectricitySmartMeter: value })} />
           <YesNoField label="Water use meets Part G" fieldKey="PartGcompliance"
@@ -2027,7 +2051,7 @@ export function GlobalSettingsModal({
         <h3 style={EPC_GROUP_TITLE}>{EPC_GLOBAL_VALUES_TITLES.ventilation}</h3>
         <div style={EPC_COLUMNS}>
           <StandardDropdown
-            label={<span data-field-key="Ventilation_terrain_class">Terrain</span>}
+            label={<span data-field-key="Ventilation_terrain_class">{EPC_FORM_LABELS.Ventilation_terrain_class}</span>}
             value={complianceSettings.Ventilation_terrain_class || ""}
             onChange={(value) => setComplianceSettings({
               Ventilation_terrain_class: (value || undefined) as "OpenWater" | "OpenField" | "Suburban" | "Urban" | undefined,
@@ -2071,7 +2095,7 @@ export function GlobalSettingsModal({
           </summary>
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)", paddingTop: "var(--spacing-md)" }}>
             <StandardDropdown
-              label={<span data-field-key="Ventilation_shield_class">Shelter</span>}
+              label={<span data-field-key="Ventilation_shield_class">{EPC_FORM_LABELS.Ventilation_shield_class}</span>}
               value={complianceSettings.Ventilation_shield_class || ""}
               onChange={(value) => setComplianceSettings({ Ventilation_shield_class: (value || undefined) as "Open" | "Normal" | "Shielded" | undefined })}
               options={[
@@ -2086,13 +2110,13 @@ export function GlobalSettingsModal({
             />
             <div style={EPC_COLUMNS}>
               {/* HEM:EPC is removing the noise nuisance input: the converter applies the default No. */}
-              <YesNoField label="Cross ventilation" fieldKey="Ventilation_cross_vent_possible"
+              <YesNoField label={EPC_FORM_LABELS.Ventilation_cross_vent_possible} fieldKey="Ventilation_cross_vent_possible"
                 value={complianceSettings.Ventilation_cross_vent_possible}
                 onChange={(value) => setComplianceSettings({ Ventilation_cross_vent_possible: value })} />
             </div>
             <div style={EPC_COLUMNS}>
               <DerivedNumberField
-                label={<span data-field-key="AirPermeability_ventilation_zone_height">Zone height</span>}
+                label={<span data-field-key="AirPermeability_ventilation_zone_height">{EPC_FORM_LABELS.AirPermeability_ventilation_zone_height}</span>}
                 unit="m"
                 derivedValue={shownVentHeight}
                 manualValue={complianceSettings.AirPermeability_ventilation_zone_height}
@@ -2137,6 +2161,7 @@ export function GlobalSettingsModal({
         </details>
       </section>
       {thermalBridgingSection}
+{joinPartsRow}
     </>
   );
 
@@ -3600,6 +3625,7 @@ export function GlobalSettingsModal({
               </div>
 
               {thermalBridgingSection}
+{joinPartsRow}
             </>
           )}
         </div>

@@ -129,6 +129,10 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     description: 'The wall or roof this vent is in. The vent takes its orientation and pitch from it.',
     type: 'string',
   },
+  'ContextShading:parent_element': {
+    description: 'Where every External shading object\'s directions and distances are measured from: DefaultCentre (the centre of the lowest occupied storey\'s floor plates, measured from their outside walls) or one floor\'s name. A blank value keeps the directions and distances the row states.',
+    type: 'string',
+  },
   'linked_wall': {
     description: 'The wall this window is in. The window takes its pitch and orientation from the wall.',
     type: 'string',
@@ -912,9 +916,13 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     units: 'degrees',
   },
   'distance': {
-    description: 'Distance measurement. For ContextShading: distance measured at right angles from the nearest external wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
+    description: 'Distance measurement. For ContextShading: distance measured at right angles from the dwelling\'s nearest wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
     type: 'number',
     units: 'm',
+  },
+  'parts': {
+    description: 'One direction range and distance for each face of the object seen from the dwelling\'s centre, clockwise. Vulcan derives them from the drawing; each face is its own shading object in HEM. Start Angle, End Angle and Distance hold the whole object: its first start, its last end and its nearest distance.',
+    type: 'string',
   },
   'height': {
     description: 'Height of the building element (unit: m).',
@@ -941,7 +949,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'string',
   },
   'context_shading_distance': {
-    description: 'Distance measured at right angles from the nearest external wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
+    description: 'Distance measured at right angles from the dwelling\'s nearest wall to the obstacle\'s nearest face (unit: m). Vulcan derives it from the drawing.',
     type: 'number',
     units: 'm',
   },
@@ -1241,7 +1249,7 @@ export const TOOLTIP_OVERRIDES: Record<string, HardcodedFieldInfo> = {
     type: 'boolean',
   },
   'is_external_door': {
-    description: 'Whether this is an external door (boolean). When true, the element uses door-specific U-values and air permeability in fabric heat loss calculations. If the door is more than 60% glazed, model it as a window instead (HEM:FHS Building Fabric guidance).',
+    description: 'Tick for an external door: the heat loss then uses a door\'s U-value and air permeability. A door more than 60% glazed is a window: draw it as one.',
     type: 'boolean',
   },
   // BuildingElementTransparent

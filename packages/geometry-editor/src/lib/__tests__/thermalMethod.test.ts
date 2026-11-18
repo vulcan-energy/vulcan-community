@@ -13,7 +13,10 @@ const wall = (extra: Record<string, unknown>) => el({ type: 'BuildingElementOpaq
 const assembly = { vulcan_assembly_v1: { schemaVersion: 1, assemblyId: 'a', appliedAt: 't', thermalResistanceConstruction_m2K_W: 4 } };
 
 it('offers the methods each target takes', () => {
-  expect(thermalMethods('BuildingElementOpaque', true).map((m) => m.label)).toEqual(['Age band', 'Calculation', 'U-value']);
+  expect(thermalMethods('BuildingElementOpaque', true).map((m) => m.label)).toEqual(['Age band', 'Layers', 'U-value']);
+  expect(thermalMethods('BuildingElementAdjacentUnconditionedSpace_Simple', true).map((m) => m.label)).toEqual(['Age band', 'Layers', 'U-value']);
+  // A ground floor's calculation is its ground calculation, not layers.
+  expect(thermalMethods('BuildingElementGround', true).map((m) => m.label)).toEqual(['Age band', 'Calculation', 'U-value']);
   expect(thermalMethods('BuildingElementOpaque', false).map((m) => m.label)).toEqual(['U-value', 'Layers']);
   expect(thermalMethods('BuildingElementGround', false).map((m) => m.label)).toEqual(['U-value', 'Calculation']);
   expect(thermalMethods('BuildingElementTransparent', true).map((m) => m.label)).toEqual(['Glazing description', 'U and g']);
@@ -49,6 +52,9 @@ it('clears the old method only, in one patch', () => {
   expect(bandOnlyFields('suspended_floor')).toEqual(['age_band', 'insulation_location', 'insulation_thickness', 'insulation_type', 'insulation_thermal_conductivity']);
   expect(thermalMethodSwitchPatch(wall({ age_band: 'D', wall_construction_type: 'cavity' }), 'band', 'u_value', { constructionBands: true, constructionType: 'external_wall' }).extra_json)
     .toEqual({ age_band: 'D', wall_construction_type: 'cavity' });
+  // A wall's edited layers belong to its age band method: a U-value or build-up replaces them.
+  expect(thermalMethodSwitchPatch(wall({ age_band: 'D', wall_layers: [{ material: 'PIR', thickness_mm: 100 }] }), 'band', 'calculation', { constructionBands: true, constructionType: 'external_wall' }).extra_json)
+    .toEqual({ age_band: 'D' });
   // A window with no g-value takes it from its glazing type, so the glazing type stays.
   const window = el({ type: 'BuildingElementTransparent', extra_json: { age_band: 'D', glazing_type: 'double', glazing_gap: 12, frame_material: 'wood' } });
   expect(thermalMethodSwitchPatch(window, 'band', 'u_value', { constructionBands: true, constructionType: 'window' }).extra_json)
@@ -65,6 +71,9 @@ it('clears the old method only, in one patch', () => {
   expect(thermalMethodSwitchPatch(entered, 'u_value', 'band', { constructionBands: true })).toEqual({ u_value: undefined, extra_json: { areal_heat_capacity: 'Medium' } });
   expect(thermalMethodSwitchPatch(wall({ ...assembly, u_value: 0.2, mass_distribution_class: 'IE' }), 'calculation', 'u_value', { constructionBands: false }).extra_json)
     .toEqual({ mass_distribution_class: 'IE' });
+  // A typed U over layers set aside is already the U-value method's value: the switch keeps it.
+  expect(thermalMethodSwitchPatch(wall({ u_value: 0.2, mass_distribution_class: 'IE', _vulcan_assembly_v1_overridden: assembly.vulcan_assembly_v1 }), 'calculation', 'u_value', { constructionBands: false }).extra_json)
+    .toEqual({ u_value: 0.2, mass_distribution_class: 'IE' });
   const ground = el({ type: 'BuildingElementGround', extra_json: { u_value: 0.4, _ground_u_value_manual: true } });
   expect(thermalMethodSwitchPatch(ground, 'u_value', 'calculation', { constructionBands: false, groundComputedU: 0.21 }).extra_json).toEqual({ u_value: 0.21 });
   expect(thermalMethodSwitchPatch(ground, 'u_value', 'calculation', { constructionBands: true, groundComputedU: 0.21 }).extra_json).toEqual({ u_value: 0.21, _ground_u_value_manual: true });

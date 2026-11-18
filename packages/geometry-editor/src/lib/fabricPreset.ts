@@ -3,6 +3,7 @@
 
 import type { TargetRules } from '../../../geometry-editor-host/src/schemaPort';
 import type { Element } from '../geometry/types';
+import { ASSEMBLY_SET_ASIDE_KEY } from './assemblyAppliedUi';
 import { GROUND_U_VALUE_MANUAL_KEY } from './groundSuspendedFabricSync';
 import type { CreationDefaultAssemblyIds } from './multiSelectAssemblyApply';
 import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
@@ -156,6 +157,9 @@ export function ownFabricClear(element: Element, row: FabricRow, buildUpValues: 
     delete extra[key];
     if (stated(fields[key])) patch[key] = undefined;
   }
+  // An existing wall's edited age band layers, and layers a typed value set aside: the preset's values replace them too.
+  delete extra.wall_layers;
+  delete extra[ASSEMBLY_SET_ASIDE_KEY];
   return { ...patch, extra_json: extra } as Partial<Element>;
 }
 

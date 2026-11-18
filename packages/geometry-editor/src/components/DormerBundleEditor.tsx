@@ -48,17 +48,6 @@
 // Selection.type 'dormer' plumbing and assembly-calculator modal invocation
 // stay orchestrator-owned" turns out to reach further than just the modal
 // invocation itself):
-// - dormerAssemblySection/setDormerAssemblySection: NOT dormer-exclusive.
-//   Grepped every setDormerAssemblySection(...) call site in the pre-move
-//   file: 2 are dormer-owned (the thermal-accordion "Edit assembly" button,
-//   the assembly modal's onClose), but 3 are NOT —
-//   handleDetailedJunctionHostReadinessAction (a generic thermal-bridge-
-//   junction handler for Opaque/Ground elements) and BOTH of the plain
-//   (non-dormer) "Assembly calculator" buttons (AdjacentConditionedSpace's
-//   party-floor button, Opaque/Ground/PartyWall/AdjacentUnconditionedSpace's
-//   button) null it out defensively before opening the modal for a
-//   non-dormer element. Moving this state into this hook would mean threading
-//   a setter back out to 3 non-dormer call sites — worse than leaving it.
 // - selectedDormerMetadata/selectedIsDormerAnchor: pure selection-derived
 //   values (`getDormerBundleMetadata`/`isDormerAnchorElement` applied to
 //   whatever's currently selected) read by orchestrator-generic code well
@@ -66,7 +55,7 @@
 //   button dispatch, the "Advanced Fields" ternary) — selection machinery,
 //   not dormer-editing machinery.
 // - selectedDormerBundleElements/dormerThermalRepresentatives/
-//   dormerAssemblyRepresentative/buildDormerThermalEditorData/
+//   buildDormerThermalEditorData/
 //   commitDormerThermalSectionChanges/renderDormerThermalAccordionSection:
 //   these render in a SEPARATE part of ElementCreator's JSX tree (the
 //   "dormer-editor-thermal-stack", a sibling of the generic AdvancedFieldsEditor
@@ -77,9 +66,8 @@
 //   branch immediately below it in the same ternary. That infrastructure is
 //   orchestrator-wide, not dormer-specific; threading it through here would
 //   duplicate it rather than relocate it.
-// - The AssemblyCalculatorModal invocation, assemblyInitialSnapshot/
-//   appliedAssemblyEnvelope (which already blend dormer + non-dormer element
-//   data in unified memos), and handleResetDormerNameToAuto/
+// - The inline layers (renderAssemblyLayers, shared by dormer sections and
+//   plain elements), and handleResetDormerNameToAuto/
 //   selectedDormerNameIsManual (dormer bundles rename through
 //   commitDormerAnchorChanges, called back into from ElementCreator) — all
 //   decision-10 orchestrator-owned wiring.
@@ -157,14 +145,14 @@ import {
   useDecimalInput,
   decimalInputProps,
   numericDraftValueOrDefault,
-  formatConditionalDecimals,
 } from './elementForms/formPrimitives';
 import type { ElementFormSelection } from './elementForms/types';
 import type { WallSharedFormGroup } from './elementForms/wallShared';
 import { ParentElementDropdown } from './ParentElementDropdown';
-import { StandardDropdown } from './StandardDropdown';
 import { useTargetRules } from '../hooks/useTargetRules';
 import { StandardInput } from './StandardInput';
+import { CompactSegmentedControl } from './WindowDetailControls';
+import './HemieBundleEditor.css';
 
 /** Local copy of ElementCreator's shared inline-note style — see
  * MvhrDuctTerminalManager.tsx's header for the same precedent (dozens of
@@ -204,6 +192,16 @@ export interface DormerBundleEditorApi {
   resetDormer: () => void;
 }
 
+/** A labelled field in the part editor's style. */
+function field(label: string, control: ReactNode, note?: ReactNode) {
+  return (
+    <div className="part-editor__field">
+      <div className="element-label part-editor__label"><span>{label}</span>{note ? <span className="part-editor__note">{note}</span> : null}</div>
+      {control}
+    </div>
+  );
+}
+
 export function useDormerBundleEditor(args: {
   selection: ElementFormSelection;
   elementsById: Record<string, Element>;
@@ -240,7 +238,6 @@ export function useDormerBundleEditor(args: {
     setSelection,
     elementType,
     fieldUnit,
-    renderFieldLabel,
   } = args;
   // A flat dormer is HEMIE's dormer roof type; elsewhere a dormer is plain geometry, where a
   // mono-pitch dormer at 0° draws the same roof.
@@ -678,10 +675,12 @@ export function useDormerBundleEditor(args: {
     setDormerRoofIsUnheatedPitchedRoof(false);
   };
 
+  // The part editor's slots (as the roof, bay and conservatory): the host, the shape, the
+  // measurements in HEM:EPC's terms and the window, each a labelled field.
+  const pitchInput = selectedDormerType === 'mono-pitch' ? dormerRoofPitchInput : gableRoofPitchInput;
   const renderDormerBundleEditor = (): ReactNode => (
-    <>
-      {renderFieldLabel('Host Roof:', elementType, 'parent_element')}
-      <div className="element-input">
+    <div className="part-editor__body">
+      {field('On', (
         <ParentElementDropdown
           value={wallShared.parentElement}
           onChange={(value) => {
@@ -694,179 +693,72 @@ export function useDormerBundleEditor(args: {
           only={(parent) => parent.type === 'BuildingElementOpaque' && typeof parent.pitch === 'number' && parent.pitch > 0 && parent.pitch < 90 && (!getDormerBundleInfo(parent) || getDormerBundleInfo(parent)?.bundle_id !== (selection.type === 'element' ? getDormerBundleInfo(elementsById[selection.id])?.bundle_id : undefined))}
           selfId={selection.type === 'element' ? selection.id : undefined}
         />
-        <div className="field-source-note">
-          Changes regenerate the dormer roof, cheek walls, window, and roof cutout instantly.
-        </div>
-      </div>
-      {renderFieldLabel('Dormer Shape:', elementType)}
-      <div className="element-input">
-        <StandardDropdown
+      ))}
+      {field('Shape', (
+        <CompactSegmentedControl
+          ariaLabel="Dormer shape"
           value={selectedDormerType}
-          onChange={(value) => {
-            const nextValue = value as DormerType;
-            setSelectedDormerType(nextValue);
-            commitDormerAnchorChanges({ parameters: { dormerType: nextValue } });
-          }}
           options={[
-            { value: 'mono-pitch', label: 'Mono-pitch' },
-            ...(hemieBundles || selectedDormerType === 'flat' ? [{ value: 'flat', label: 'Flat' }] : []),
-            { value: 'gable-front', label: 'Gable-front' },
-            { value: 'hip', label: 'Hip' },
+            ...(hemieBundles || selectedDormerType === 'flat' ? [{ value: 'flat' as const, label: 'Flat' }] : []),
+            { value: 'mono-pitch' as const, label: 'Mono' },
+            { value: 'gable-front' as const, label: 'Dual' },
+            { value: 'hip' as const, label: 'Hip' },
           ]}
-          variant="ghost"
-          size="md"
+          onChange={(value) => {
+            setSelectedDormerType(value);
+            commitDormerAnchorChanges({ parameters: { dormerType: value } });
+          }}
         />
+      ))}
+      <div className="part-editor__two">
+        {field('Width', <StandardInput {...decimalInputProps(dormerWidthInput)} unit={fieldUnit('width')} step="0.1" min="0" variant="ghost" size="md" />, 'drawn')}
+        {field('Front height', <StandardInput {...decimalInputProps(dormerFrontWallHeightInput)} unit={fieldUnit('height')} step="0.1" min="0" variant="ghost" size="md" />)}
       </div>
-      {renderFieldLabel('Dormer Width (m):', elementType, 'width')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWidthInput)}
-          unit={fieldUnit('width')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {renderFieldLabel('Dormer Depth (derived):', elementType, 'depth')}
-      <div className="element-input">
-        <StandardInput
-          type="text"
-          inputMode="numeric"
-          value={formatConditionalDecimals(dormerDepth)}
-          unit={fieldUnit('depth')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-          readOnly
-        />
-      </div>
-      {renderFieldLabel('Front Wall Height (m):', elementType, 'height')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerFrontWallHeightInput)}
-          unit={fieldUnit('height')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {selectedDormerType === 'flat' ? null : selectedDormerType === 'mono-pitch' ? (
-        <>
-          {renderFieldLabel('Dormer Roof Pitch (degrees):', elementType, 'pitch')}
-          <div className="element-input">
-            <StandardInput
-              {...decimalInputProps(dormerRoofPitchInput)}
-              unit={fieldUnit('pitch')}
-              step="1"
-              min="0"
-              max="89"
-              variant="ghost"
-              size="md"
-            />
-          </div>
-        </>
-      ) : (
-        <>
-          {renderFieldLabel('Side Roof Pitch (degrees):', elementType, 'pitch')}
-          <div className="element-input">
-            <StandardInput
-              {...decimalInputProps(gableRoofPitchInput)}
-              unit={fieldUnit('pitch')}
-              step="1"
-              min="1"
-              max="89"
-              variant="ghost"
-              size="md"
-            />
-          </div>
-        </>
+      {selectedDormerType === 'flat' ? null : (
+        <div className="part-editor__two">
+          {field(
+            'Roof pitch',
+            <StandardInput {...decimalInputProps(pitchInput)} unit="°" step="1" min="0" max="89" variant="ghost" size="md" />,
+            selectedDormerType === 'mono-pitch' ? undefined : 'side slopes',
+          )}
+        </div>
       )}
-      {renderFieldLabel('Unheated pitched roof', elementType)}
-      <div className="element-input">
-        <label className="checkbox-container">
-          <input
-            type="checkbox"
-            className="styled-checkbox"
-            checked={!!dormerRoofIsUnheatedPitchedRoof}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setDormerRoofIsUnheatedPitchedRoof(checked);
-              commitDormerAnchorChanges({ parameters: { isUnheatedPitchedRoof: checked } });
-            }}
-            id="dormer-unheated-pitched-roof"
-          />
-          <span className="checkbox-custom"></span>
-        </label>
+      <div className="part-editor__divider" />
+      <div className="part-editor__two">
+        {field('Window width', <StandardInput {...decimalInputProps(dormerWindowWidthInput)} unit={fieldUnit('width', 'BuildingElementTransparent')} step="0.1" min="0" variant="ghost" size="md" />)}
+        {field('Window height', <StandardInput {...decimalInputProps(dormerWindowHeightInput)} unit={fieldUnit('height', 'BuildingElementTransparent')} step="0.1" min="0" variant="ghost" size="md" />)}
       </div>
-      {renderFieldLabel('Window Width (m):', 'BuildingElementTransparent', 'width')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWindowWidthInput)}
-          unit={fieldUnit('width', 'BuildingElementTransparent')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
+      <div className="part-editor__two">
+        {field('Sill height', <StandardInput {...decimalInputProps(dormerWindowSillHeightInput)} unit={fieldUnit('base_height', 'BuildingElementTransparent')} step="0.1" min="0" variant="ghost" size="md" />)}
+        {!constructionBands
+          ? field('Frame fraction', <StandardInput {...decimalInputProps(dormerFrameAreaFractionInput)} unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')} step="0.01" min="0" max="1" variant="ghost" size="md" />)
+          : null}
+      </div>
+      {existingBuilding ? field('Side windows', (
+        <CompactSegmentedControl
+          ariaLabel="Side windows"
+          value={dormerSideWindows ? 'yes' : 'no'}
+          options={[{ value: 'no', label: 'No side windows' }, { value: 'yes', label: 'Both sides' }]}
+          onChange={(value) => {
+            setDormerSideWindows(value === 'yes');
+            commitDormerAnchorChanges({ parameters: { sideWindows: value === 'yes' } });
+          }}
         />
-      </div>
-      {renderFieldLabel('Window Height (m):', 'BuildingElementTransparent', 'height')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWindowHeightInput)}
-          unit={fieldUnit('height', 'BuildingElementTransparent')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
+      )) : null}
+      {dormerError && existingBuilding ? <div className="field-source-note part-editor__notice" role="alert">{dormerError}</div> : null}
+      {field('Roof', (
+        <CompactSegmentedControl
+          ariaLabel="Dormer roof"
+          value={dormerRoofIsUnheatedPitchedRoof ? 'unheated' : 'heated'}
+          options={[{ value: 'heated', label: 'Heated' }, { value: 'unheated', label: 'Unheated pitched' }]}
+          onChange={(value) => {
+            setDormerRoofIsUnheatedPitchedRoof(value === 'unheated');
+            commitDormerAnchorChanges({ parameters: { isUnheatedPitchedRoof: value === 'unheated' } });
+          }}
         />
-      </div>
-      {renderFieldLabel('Window Sill Height (m):', 'BuildingElementTransparent', 'base_height')}
-      <div className="element-input">
-        <StandardInput
-          {...decimalInputProps(dormerWindowSillHeightInput)}
-          unit={fieldUnit('base_height', 'BuildingElementTransparent')}
-          step="0.1"
-          min="0"
-          variant="ghost"
-          size="md"
-        />
-      </div>
-      {existingBuilding && (
-        <>
-          <StandardDropdown
-            label="Side windows"
-            value={dormerSideWindows ? 'yes' : 'no'}
-            onChange={(value) => {
-              setDormerSideWindows(value === 'yes');
-              commitDormerAnchorChanges({ parameters: { sideWindows: value === 'yes' } });
-            }}
-            options={[{ value: 'yes', label: 'Yes, the same window in both side walls' }, { value: 'no', label: 'No' }]}
-            variant="ghost"
-            size="md"
-          />
-          {dormerError && <p className="hem-target-help" role="alert">{dormerError}</p>}
-        </>
-      )}
-      {!constructionBands && (
-        <>
-          {renderFieldLabel('Window frame area fraction:', 'BuildingElementTransparent', 'frame_area_fraction')}
-          <div className="element-input">
-            <StandardInput
-              {...decimalInputProps(dormerFrameAreaFractionInput)}
-              unit={fieldUnit('frame_area_fraction', 'BuildingElementTransparent')}
-              step="0.01"
-              min="0"
-              max="1"
-              variant="ghost"
-              size="md"
-            />
-          </div>
-        </>
-      )}
-    </>
+      ))}
+      <div className="field-source-note">Changes redraw the dormer's roof, cheeks, window and roof cutout.</div>
+    </div>
   );
 
   return {

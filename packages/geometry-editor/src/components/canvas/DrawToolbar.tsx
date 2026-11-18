@@ -65,6 +65,7 @@ function getDrawModeOptionsForElementType(type: ElementType, hemieBundles: boole
     options.push({ value: 'roof', label: '⌂ Roof' });
     // A bay is ordinary walls, windows, floor and roof: every target takes it. HEM:EPC alone has
     // a conservatory form.
+    options.push({ value: 'door', label: '▯ Door' });
     options.push({ value: 'bay', label: '⌓ Bay window' });
     if (hemieBundles) options.push({ value: 'conservatory', label: '▤ Conservatory' });
   }
@@ -221,6 +222,7 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
     };
     return [
       { key: 'roof', label: 'Roof', subtitle: 'Click inside a storey outline to fit it', after: 'BuildingElementOpaque', selected: drawMode === 'roof', onSelect: pick('roof') },
+      { key: 'door', label: 'Door', subtitle: hemieBundles ? 'Front or back door on an outside, party or sheltered wall' : 'Front or back door on an outside wall', after: 'BuildingElementOpaque', selected: drawMode === 'door', onSelect: pick('door') },
       { key: 'bay', label: 'Bay window', subtitle: 'Opening on a wall, then its projection', after: 'BuildingElementOpaque', selected: drawMode === 'bay', onSelect: pick('bay') },
       ...(hemieBundles
         ? [{ key: 'conservatory', label: 'Conservatory', subtitle: 'On a ground-floor wall', after: 'BuildingElementOpaque' as const, selected: drawMode === 'conservatory', onSelect: pick('conservatory') }]
@@ -341,8 +343,9 @@ export const DrawToolbar = memo<DrawToolbarProps>(function DrawToolbar({
           />
         )}
 
-        {/* Element preset selector - only shown when presets exist for the element type */}
-        {presetOptions.length > 0 && (
+        {/* Element preset selector - only shown when presets exist for the element type. A door
+            takes no wall preset (lineDrawPresetProps), so the Door tool hides it. */}
+        {presetOptions.length > 0 && drawMode !== 'door' && (
           <StandardDropdown
             value={drawPreset}
             onChange={(value: string) => setDrawPreset(value)}

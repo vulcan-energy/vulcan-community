@@ -22,7 +22,7 @@ vi.mock('../../lib/assemblyLibrary', () => ({
   upsertUserAssembly: assemblyLibraryMocks.upsert,
 }));
 
-import { AssemblyCalculatorModal } from '../AssemblyCalculatorModal';
+import { AssemblyLayers } from '../AssemblyLayers';
 import { arealHeatCapacityBandFromJPerM2K } from '../../lib/assemblyCalculator';
 import type { AssemblyExample, RepeatingBridgeDefinition } from '../../lib/assemblyTypes';
 
@@ -64,11 +64,10 @@ const externalDetailCataloguePort = {
 
 function renderModal(extraProps: Record<string, unknown> = {}) {
   return render(
-    <AssemblyCalculatorModal
-      isOpen
-      onClose={vi.fn()}
+    <AssemblyLayers
       elementMode="BuildingElementOpaque"
       elementPitchDeg={90}
+      opaqueSubtype="wall"
       onApply={vi.fn()}
       workspaceResourcePort={workspacePort}
       {...extraProps}
@@ -76,7 +75,7 @@ function renderModal(extraProps: Record<string, unknown> = {}) {
   );
 }
 
-describe('AssemblyCalculatorModal resource ports', () => {
+describe('AssemblyLayers resource ports', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     assemblyLibraryMocks.load.mockResolvedValue({
@@ -91,7 +90,7 @@ describe('AssemblyCalculatorModal resource ports', () => {
 
   it('has no direct private catalogue or file-service dependency', () => {
     const source = readFileSync(
-      resolve(import.meta.dirname, '../AssemblyCalculatorModal.tsx'),
+      resolve(import.meta.dirname, '../AssemblyLayers.tsx'),
       'utf8',
     );
     expect(source).not.toContain("from '../lib/externalDetailLibraries'");
@@ -101,7 +100,6 @@ describe('AssemblyCalculatorModal resource ports', () => {
   it('loads the current calculator through the supplied workspace resource port', async () => {
     renderModal();
 
-    expect(screen.getByText('Assembly calculator')).toBeInTheDocument();
     await waitFor(() => expect(assemblyLibraryMocks.load).toHaveBeenCalledWith(workspacePort));
     expect(screen.queryByText('Detail profile')).not.toBeInTheDocument();
   });
@@ -127,7 +125,6 @@ describe('AssemblyCalculatorModal resource ports', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Search assemblies…' }));
     fireEvent.click(screen.getByText('Saved framed wall'));
-    fireEvent.click(screen.getByRole('button', { name: 'Update element' }));
 
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
       u_value: 0.28,

@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import type { Element } from '../../geometry/types';
 import type { RoofEdgeType } from '../../lib/fitRoof';
-import { fitRoofPart, roofEdgeTypes, roofParameters, storeyOutline, turnedEdges, type RoofParameters } from '../../lib/roofPart';
+import { fitRoofPart, roofEdgeTypes, roofParameters, roofRoom, roomHeight, storeyOutline, turnedEdges, type RoofParameters } from '../../lib/roofPart';
 import '../HemieBundleEditor.css';
 
 type P = { x: number; y: number };
@@ -25,10 +25,16 @@ export function RoofPartChips({ anchor, elementsById, toScreen, commit }: {
   // Fitted once per change to the model, not on every pan or zoom.
   const view = useMemo(() => {
     const outline = p && storeyOutline(Object.values(elementsById), p.level, p.at);
-    return p && outline && !p.flat ? { outline, fit: fitRoofPart(outline, p), types: roofEdgeTypes(outline, p), turned: turnedEdges(outline, p) } : null;
+    if (!p || !outline || p.flat) return null;
+    const fit = fitRoofPart(outline, p);
+    // The ridge height the section and 3D show: a room in the roof shifts the fitted roof.
+    const measured = p.use === 'room' && 'faces' in fit ? roofRoom(outline, p, fit) : null;
+    const room = measured && !('problem' in measured) ? measured : null;
+    const ridge = 'faces' in fit ? (room ? roomHeight(room, fit.ridge.height) : fit.ridge.height) : 0;
+    return { outline, fit, ridge, types: roofEdgeTypes(outline, p), turned: turnedEdges(outline, p) };
   }, [p, elementsById]);
   if (!p || !view) return null;
-  const { outline, fit, types, turned } = view;
+  const { outline, fit, ridge, types, turned } = view;
   /** `out`: a model-space direction to push the chip off its point by 16 px (edge chips sit outside the wall). */
   const chip = (key: string, at: P, body: React.ReactNode, className: string, onClick?: () => void, out?: P) => {
     const s0 = toScreen(at);
@@ -62,7 +68,7 @@ export function RoofPartChips({ anchor, elementsById, toScreen, commit }: {
         }, out);
       })}
       {'faces' in fit && !mono && fit.ridge.height > 0 && Math.hypot(fit.ridge.b.x - fit.ridge.a.x, fit.ridge.b.y - fit.ridge.a.y) > 0.5
-        ? chip('ridge', mid(fit.ridge.a, fit.ridge.b, turned ? 0.2 : 0.5), `ridge ${(outline.eaves + fit.ridge.height).toFixed(2)} m`, 'roof-chip--quiet')
+        ? chip('ridge', mid(fit.ridge.a, fit.ridge.b, turned ? 0.2 : 0.5), `ridge ${(outline.eaves + ridge).toFixed(2)} m`, 'roof-chip--quiet')
         : null}
       {turned && 'faces' in fit ? chip('turn', mono ? centre : mid(fit.ridge.a, fit.ridge.b), '↻ Turn', 'roof-chip--on', () => commit({ edges: turned })) : null}
       {'faces' in fit && fit.junctionAt

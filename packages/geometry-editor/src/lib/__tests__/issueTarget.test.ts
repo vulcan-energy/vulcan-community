@@ -48,7 +48,7 @@ describe('resolveIssueTarget', () => {
     const rad = { id: 'rad', name: 'Rad 1' };
     const withCircuit = { ...model, elements: [...model.elements, tank, circuit, rad] };
     // The row the message names wins over the system holding it.
-    expect(resolveIssueTarget('/SpaceHeatSystem/Zone 1 circuit/emitters/0/n', withCircuit, "Wet Emitters row 'Rad 1' (system 'Zone 1 circuit'): n is required."))
+    expect(resolveIssueTarget('/SpaceHeatSystem/Zone 1 circuit/emitters/0/n', withCircuit, "Emitter 'Rad 1' on 'Zone 1 circuit': n is required."))
       .toMatchObject({ elementId: 'rad' });
     expect(resolveIssueTarget('/SpaceHeatSystem/Zone 1 circuit/emitters/0/n', withCircuit)).toMatchObject({ elementId: 'circuit', fieldKey: undefined });
     // Only the section the plant is in, and only one holder.

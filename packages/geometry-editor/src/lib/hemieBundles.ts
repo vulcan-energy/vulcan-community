@@ -84,7 +84,7 @@ export interface HemieBundleTag {
 
 export interface HemieBundleMemberDraft {
   role: string;
-  type: 'BuildingElementOpaque' | 'BuildingElementTransparent' | 'BuildingElementGround';
+  type: 'BuildingElementOpaque' | 'BuildingElementTransparent' | 'BuildingElementGround' | 'BuildingElementPartyWall' | 'BuildingElementAdjacentUnconditionedSpace_Simple';
   name: string;
   parent_element: string | null;
   updates: Record<string, unknown> & { coordinates: Element['coordinates']; extra_json: Record<string, unknown> };
@@ -982,10 +982,28 @@ export interface HemieBundlePart {
   mixed: boolean;
 }
 
+const ROOM_ROWS: Array<[string, string, string]> = [
+  ['slope', 'Room slope', 'room slopes'],
+  ['void', 'Void slope', 'void slopes'],
+  ['over', 'Ceiling', 'ceiling slopes'],
+  ['knee', 'Knee wall', 'knee walls'],
+  ['gable', 'Gable', 'gables'],
+];
+
 export function hemieBundleParts(members: Element[]): HemieBundlePart[] {
   const kind = getHemieBundle(members[0])?.kind;
   // A roof's slopes, each its own part, named as its member is (without the roof's name).
   if (kind === 'roof') {
+    const role = (m: Element) => getHemieBundle(m)!.role.split(':')[0];
+    // A room in the roof: its members in rows, as HEM:EPC names them.
+    if (members.some((m) => role(m) === 'knee' || role(m) === 'gable' || role(m) === 'void' || role(m) === 'over')) {
+      return ROOM_ROWS.flatMap(([r, one, many]) => {
+        const row = members.filter((m) => role(m) === r);
+        // A gable's or knee wall's type comes from its edge (party, external), not from the user.
+        const set = (m: Element) => JSON.stringify({ ...authoredFields(m), type: undefined });
+        return row.length ? [{ label: row.length === 1 ? one : `${row.length} ${many}`, ids: row.map((m) => m.id), mixed: new Set(row.map(set)).size > 1 }] : [];
+      });
+    }
     const stem = getHemieBundle(members.find((m) => getHemieBundle(m)?.bundle_name) ?? members[0])?.bundle_name ?? '';
     return members.map((m) => ({ label: m.name.startsWith(`${stem} `) ? m.name.slice(stem.length + 1) : m.name, ids: [m.id], mixed: false }));
   }

@@ -437,6 +437,20 @@
   border-color: var(--border-hover);
 }
 
+/* New Model's starts: one row each, the name over what it sets, truncating rather than wrapping. */
+.geometry-files-menu .files-dropdown-footer--starts {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.geometry-files-menu .files-dropdown-start-label,
+.geometry-files-menu .files-dropdown-start-detail {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A New Model start: its name, then what it sets. */
 .geometry-files-menu .files-dropdown-new-btn--start {
   flex-direction: column;
@@ -452,12 +466,6 @@
   color: var(--text-secondary);
 }
 
-.geometry-files-menu .files-dropdown-start-note {
-  margin: 0;
-  padding: 0 12px 8px;
-  font-size: var(--font-size-xxs, 11px);
-  color: var(--text-secondary);
-}
 
 .geometry-files-menu .files-dropdown-new-btn--primary {
   background: var(--accent-primary);

@@ -3,7 +3,7 @@
 
 /**
  * Saved-assembly apply + fabric fingerprint helpers for multi-select construction UX.
- * Mirrors {@link AssemblyCalculatorModal} handleApply semantics per element pitch.
+ * Mirrors {@link AssemblyLayers} handleApply semantics per element pitch.
  */
 
 import type {
@@ -56,7 +56,7 @@ import type { ArealHeatCapacityInput, ArealHeatCapacityScale } from '../../../ge
 import { getDefaultValueForElementField, type DefaultsLookup } from './defaultsCache';
 import { classifyOpaqueFabricVariantFromElement } from './opaqueFabricVariant';
 import { getElementShape } from './shapeUtils';
-import { resolveAssemblyHeatTransferContext } from './assemblyCavityModel';
+import { cavityHeatFlowDirectionForPitch, resolveAssemblyHeatTransferContext } from './assemblyCavityModel';
 
 export function isFabricAssemblyElement(el: Element): boolean {
   const t = el.type;
@@ -83,7 +83,7 @@ export function assemblyElementMode(el: Element): AssemblyElementMode | null {
   return null;
 }
 
-/** Match ElementCreator / AssemblyCalculatorModal pitch convention. */
+/** Match ElementCreator / AssemblyLayers pitch convention. */
 export function assemblyPitchDegForElement(el: Element): number {
   if (el.type === 'BuildingElementGround') return 180;
   const p = (el as { pitch?: number }).pitch;
@@ -92,9 +92,10 @@ export function assemblyPitchDegForElement(el: Element): number {
 
 export function inferOpaqueSubtype(el: Element): 'wall' | 'roof' {
   const shape = getElementShape(el);
-  if (shape === 'sloped-polygon') return 'roof';
   const p = (el as { pitch?: number }).pitch;
-  if (typeof p === 'number' && p > 0 && p < 90) return 'roof';
+  // Not the drawn shape (any 0–90° slope draws as a sloped polygon, a mansard's steep lower slope too):
+  // the ISO 6946 rule the calculator uses for heat flow: below 60° flows upwards (a roof); 60–120° is a wall.
+  if (typeof p === 'number' && p > 0 && cavityHeatFlowDirectionForPitch(p) === 'upwards') return 'roof';
   // Flat roof: getElementShape reports a pitch-0 polygon as a plain 'polygon'.
   if (el.type === 'BuildingElementOpaque' && p === 0 && shape === 'polygon') return 'roof';
   return 'wall';
@@ -281,7 +282,7 @@ export interface ComputePatchFromSavedAssemblyOptions {
 }
 
 /**
- * Build the same extra_json patch as AssemblyCalculatorModal handleApply for a saved library row.
+ * Build the same extra_json patch as AssemblyLayers handleApply for a saved library row.
  */
 export function computePatchFromSavedAssembly(
   row: AssemblyExample,
@@ -502,10 +503,27 @@ export function computePatchFromSavedAssembly(
       mass_distribution_class: massDistributionClass,
       areal_heat_capacity: arealElementValue, // undefined clears a stale value (no ρ/c)
       vulcan_assembly_v1: envelope,
+      wall_layers: undefined, // an existing wall's edited age band layers: the build-up replaces them
     },
     preview: { u: uWrite, r: rWrite, mass: massDistributionClass ?? '—', arealHeat_kJ_m2K: arealPreviewKj },
     errors: [],
   };
+}
+
+/**
+ * The figure an option shows for one element: its U, or a ground floor's R_f (its U comes from the
+ * ground calculation). Null when the row does not compute for it.
+ */
+export function libraryRowFigure(
+  row: AssemblyExample,
+  library: BundledAssemblyLibrary,
+  mode: AssemblyElementMode,
+  pitchDeg: number,
+  options?: ComputePatchFromSavedAssemblyOptions,
+): string | null {
+  const saved = computePatchFromSavedAssembly(row, library, mode, pitchDeg, options);
+  if (!saved || saved.errors.length > 0) return null;
+  return mode === 'BuildingElementGround' ? `R_f ${saved.preview.r.toFixed(2)}` : saved.preview.u.toFixed(2);
 }
 
 export type CreationDefaultAssemblyIds = Partial<

@@ -58,6 +58,9 @@
 }
 
 .roof-section__roof { fill: var(--accent-primary); fill-opacity: 0.18; stroke: var(--text-secondary); stroke-width: 2; stroke-linejoin: round; }
+.roof-section__roof--void { fill: var(--text-muted); fill-opacity: 0.12; }
+.roof-section__room { fill: var(--accent-primary); fill-opacity: 0.22; }
+.roof-section__wall { stroke: var(--accent-primary); stroke-width: 2; stroke-linecap: round; }
 .roof-section__eaves { stroke: var(--text-secondary); stroke-width: 2; stroke-linecap: round; }
 .roof-section__svg .roof-section__fill { fill: var(--text-muted); }
 

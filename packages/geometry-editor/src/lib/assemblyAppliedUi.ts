@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Home Energy Foundry Limited and contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { roundToTwoDecimals } from '../geometry/constants';
 import {
   arealHeatCapacityBandFromJPerM2K,
   arealHeatCapacityJPerM2KFromBand,
@@ -109,12 +110,110 @@ function sameFabricValue(field: string, a: unknown, b: unknown): boolean {
 }
 
 /**
+ * Where an override keeps the layers it replaced: a UI-only key (the `_` prefix keeps it out of
+ * the HEM input), so the converter sees an element with no build-up, as it did when an override
+ * removed it. A field put back at the layers' value (a U-value or resistance also blank) brings them back.
+ */
+export const ASSEMBLY_SET_ASIDE_KEY = '_vulcan_assembly_v1_overridden';
+
+/** The layers an override set aside, when the element has no applied ones. */
+export function setAsideAssemblyEnvelope(extra: unknown): VulcanAssemblyV1Envelope | null {
+  if (!extra || typeof extra !== 'object' || Array.isArray(extra)) return null;
+  const record = extra as Record<string, unknown>;
+  return record.vulcan_assembly_v1 ? null : parseVulcanAssemblyV1FromExtraJson({ vulcan_assembly_v1: record[ASSEMBLY_SET_ASIDE_KEY] });
+}
+
+/**
+ * The values layers give the element's fields, by field: U, R (a floor's under its own key),
+ * ground insulation R, heat capacity (a class label where the target takes one) and mass class.
+ */
+export function envelopeFabricValues(
+  envelope: VulcanAssemblyV1Envelope,
+  elementType: string | undefined,
+  subtype: string | undefined,
+  arealHeatCapacity: ArealHeatCapacityInput,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (typeof envelope.uValueWrittenToElement_W_m2K === 'number') {
+    out.u_value = envelope.uValueWrittenToElement_W_m2K;
+  }
+  if (typeof envelope.thermalResistanceConstruction_m2K_W === 'number') {
+    out[
+      elementType === 'BuildingElementGround'
+        ? 'thermal_resistance_floor_construction'
+        : 'thermal_resistance_construction'
+    ] = envelope.thermalResistanceConstruction_m2K_W;
+  }
+  if (typeof envelope.thermalResistanceGroundInsulation_m2K_W === 'number') {
+    out.thermal_resist_insul = envelope.thermalResistanceGroundInsulation_m2K_W;
+  }
+  if (typeof envelope.arealHeatCapacityWrittenToElement_J_m2K === 'number' && elementType) {
+    const jWritten = envelope.arealHeatCapacityWrittenToElement_J_m2K;
+    // A target that takes a class stores its label; the envelope keeps the class's J/(m²·K).
+    const write = arealHeatCapacityWrite(arealHeatCapacity, elementType);
+    out.areal_heat_capacity = write === 'number' ? jWritten : arealHeatCapacityBandFromJPerM2K(jWritten, write);
+  }
+  if (typeof envelope.massDistributionClass === 'string') {
+    out.mass_distribution_class = envelope.massDistributionClass;
+  }
+  if (
+    elementType === 'BuildingElementGround' &&
+    subtype === 'Suspended_floor' &&
+    typeof envelope.suspendedHeightUpperSurfaceM === 'number' &&
+    Number.isFinite(envelope.suspendedHeightUpperSurfaceM)
+  ) {
+    out.height_upper_surface = roundToTwoDecimals(envelope.suspendedHeightUpperSurfaceM);
+  }
+  return out;
+}
+
+/** The fields whose blank, like their layers' value, brings set-aside layers back. */
+const BLANK_RESTORES = new Set(['u_value', 'thermal_resistance_construction']);
+
+/**
+ * An edit to an element whose layers are set aside. A row edit (new set-aside layers) moves
+ * every value that still held the old layers' value. Otherwise, a U-value or resistance put back
+ * at the layers' value (or blank) brings the layers back, with every value they give, whatever the
+ * other fields say. A heat capacity or mass class put back does so only when the U-value and
+ * resistance already follow the layers.
+ */
+function editWithLayersSetAside(
+  elementType: string,
+  prev: Record<string, unknown>,
+  nextExtra: Record<string, unknown>,
+  arealHeatCapacity: ArealHeatCapacityInput,
+): Record<string, unknown> {
+  const envelope = setAsideAssemblyEnvelope(nextExtra);
+  if (!envelope || elementType === 'BuildingElementGround') return nextExtra;
+  const sources = envelopeFabricValues(envelope, elementType, undefined, arealHeatCapacity);
+  const before = setAsideAssemblyEnvelope(prev);
+  if (before && JSON.stringify(prev[ASSEMBLY_SET_ASIDE_KEY]) !== JSON.stringify(nextExtra[ASSEMBLY_SET_ASIDE_KEY])) {
+    const old = envelopeFabricValues(before, elementType, undefined, arealHeatCapacity);
+    const next = { ...nextExtra };
+    for (const [field, value] of Object.entries(sources)) {
+      if (field in old && sameFabricValue(field, old[field], nextExtra[field])) next[field] = value;
+    }
+    return next;
+  }
+  const atLayers = (field: string) => sameFabricValue(field, sources[field], nextExtra[field])
+    || (BLANK_RESTORES.has(field) && comparableFabricValue(field, nextExtra[field]) === undefined);
+  const edited = Object.keys(sources).filter((field) => !sameFabricValue(field, prev[field], nextExtra[field]));
+  // A U or R reset decides alone. A heat capacity or mass class back at the layers' value restores
+  // them only once the U-value and resistance follow the layers too: otherwise it sets that field.
+  const reset = edited.length > 0 && edited.every(atLayers)
+    && (edited.some((field) => BLANK_RESTORES.has(field)) || [...BLANK_RESTORES].every((field) => !(field in sources) || atLayers(field)));
+  if (!reset) return nextExtra;
+  const rest: Record<string, unknown> = { ...nextExtra, ...sources, vulcan_assembly_v1: nextExtra[ASSEMBLY_SET_ASIDE_KEY] };
+  delete rest[ASSEMBLY_SET_ASIDE_KEY];
+  return rest;
+}
+
+/**
  * An applied assembly makes its fabric values derived. Changing one of them to anything but the
- * assembly's own value is an override, and the override removes `vulcan_assembly_v1` so the
- * element has one unambiguous fabric source. An atomic write of the assembly's own value (Reset to
- * assembly, or a fresh apply that brings its own envelope) keeps it; a field committed keystroke
- * by keystroke has already overridden on the first differing keystroke, so typing the value back
- * does not restore the assembly. Returns `nextExtra` itself when nothing is removed.
+ * assembly's own value is an override, and the override sets `vulcan_assembly_v1` aside
+ * (`ASSEMBLY_SET_ASIDE_KEY`) so the element has one unambiguous fabric source. An atomic write of
+ * the assembly's own value (a fresh apply that brings its own envelope) keeps it, and replaces any
+ * layers set aside. Returns `nextExtra` itself when nothing changes.
  *
  * An overridden U that is a number also removes the assembly's `thermal_resistance_construction`
  * (unless the same edit sets it; clearing U leaves R as the source): the converter keeps R and drops U when both are present, and the party-wall and
@@ -126,10 +225,15 @@ export function dropAssemblyEnvelopeOnFabricOverride(
   elementType: string,
   prevExtra: unknown,
   nextExtra: Record<string, unknown>,
+  arealHeatCapacity: ArealHeatCapacityInput,
 ): Record<string, unknown> {
   const envelope = nextExtra.vulcan_assembly_v1;
-  if (!envelope || typeof envelope !== 'object') return nextExtra;
   const prev = prevExtra && typeof prevExtra === 'object' ? (prevExtra as Record<string, unknown>) : {};
+  if (!envelope || typeof envelope !== 'object') return editWithLayersSetAside(elementType, prev, nextExtra, arealHeatCapacity);
+  if (nextExtra[ASSEMBLY_SET_ASIDE_KEY] !== undefined) {
+    nextExtra = { ...nextExtra };
+    delete nextExtra[ASSEMBLY_SET_ASIDE_KEY];
+  }
   const changed = (field: string) => !sameFabricValue(field, prev[field], nextExtra[field]);
   const overridden = Object.entries(ASSEMBLY_FABRIC_FIELDS).flatMap(([field, assemblyValue]) =>
     !(field === 'u_value' && elementType === 'BuildingElementGround')
@@ -138,7 +242,7 @@ export function dropAssemblyEnvelopeOnFabricOverride(
       ? [field]
       : []);
   if (overridden.length === 0) return nextExtra;
-  const rest = { ...nextExtra };
+  const rest: Record<string, unknown> = { ...nextExtra, [ASSEMBLY_SET_ASIDE_KEY]: envelope };
   delete rest.vulcan_assembly_v1;
   if (
     overridden.includes('u_value')

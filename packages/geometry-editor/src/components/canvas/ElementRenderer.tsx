@@ -9,6 +9,7 @@ import { HOVER_GLOW } from './elementRendererPalette';
 import { getElementShape, getElementColor, worldToCanvas, canvasToWorld } from '../../lib/shapeUtils';
 import type { Element, Floor } from '../../geometry/types';
 import {
+  useGeometryStore,
   useGeometryStoreApi,
   type GeometryStoreApi,
   generateDefaultCoordinates,
@@ -36,7 +37,10 @@ import { getDormerBundleInfo } from '../../lib/dormerGeometry';
 import { deriveRoofCutout, effectiveFloorsOf, elementsOf } from '../../lib/roofCutouts';
 import { isElementOnActiveCanvasFloor } from '../../lib/elementCanvasFloor';
 import { isDevelopmentContextGeneratedShading } from '../../lib/developmentContextShading';
-import { contextShadingDistanceDetails, getPlanCenter } from '../../lib/contextShadingGeometry';
+import { deriveContextShading } from '../../lib/contextShadingGeometry';
+import { deriveContextShadingCached } from '../../lib/contextShadingDerivedCache';
+import { wallExtension } from '../../lib/contextShadingDrawing';
+import { setLiveContextShadingCoordinates, useLiveContextShadingCoordinates } from './contextShadingLiveCoordinates';
 import {
   cascadeHostedDescendantGeometry,
   collectHostedDescendantElementIds,
@@ -695,6 +699,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   mvhrBadgeInline = false,
 }) => {
   const geometryStore = useGeometryStoreApi();
+  // The hovered part of this object's Directions table or plan pill, or -1.
+  const hoveredPartIndex = useGeometryStore((state) => (state.hoveredContextShadingPart?.elementId === element.id ? state.hoveredContextShadingPart.index : -1));
   const arrowRotateInteractionRef = useRef<{
     target: ArrowRotateDragTarget;
     session: CanvasInteractionSession<ArrowRotateSnapshot>;
@@ -709,7 +715,13 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     }
   }, []);
   const resolvedGlobalOrientationOffset = globalOrientationOffset ?? geometryStore.getState().globalOrientationOffset;
+  // A Context Shading vertex drag moves Konva nodes only: the rays and pills follow its live coordinates.
+  const liveCoordinates = useLiveContextShadingCoordinates(element.type === 'ContextShading' ? element.id : undefined)?.coordinates;
   const coordinates = element.coordinates || [];
+  const publishContextShadingDrag = (vertexIndex: number, world: { x: number; y: number }) => {
+    if (element.type !== 'ContextShading') return;
+    setLiveContextShadingCoordinates({ elementId: element.id, coordinates: coordinates.map((point, i) => (i === vertexIndex ? { ...point, x: world.x, y: world.y } : point)) });
+  };
   const parentElementName = (element as { parent_element?: string | null }).parent_element;
   const lineParentElement = parentElementName
     ? elementsById[nameToId[parentElementName]]
@@ -804,7 +816,10 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
       coordinates: previewCoordinates,
       elements: elementsForPreview,
     });
-    session?.addCleanup(() => snapFeedbackSignal.reset());
+    session?.addCleanup(() => {
+      snapFeedbackSignal.reset();
+      setLiveContextShadingCoordinates(null);
+    });
   }, [element.coordinates, element.id, elementsById, getLineHostedDescendantPreviewParentIds, snapFeedbackSignal]);
   const cleanupVertexInteractionAfterDragEnd = useCallback((target: DragPreviewTarget) => {
     if (getVertexDragState()) {
@@ -1388,6 +1403,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
     [element, elementsById, selection, floors, resolvedGlobalOrientationOffset, scale, panOffset, canvasCenter],
   );
 
+  // An External shading row with no drawing (a typed row) has no place on the plan.
+  if (coordinates.length === 0 && element.type === 'ContextShading') return null;
   if (coordinates.length === 0) {
     // Generate default coordinates for elements without them
     const defaultCoords = generateDefaultCoordinates(element);
@@ -1447,6 +1464,65 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
   const hoverGlow = isHovered ? { shadowColor: elementColor, ...HOVER_GLOW } : undefined;
   const elementFill = typeColor.fill || elementColor;
   const hoverStroke = isHoveredFromMenu ? canvasElementPalette.hover : elementColor;
+  // ContextShading, selected: the centre, a ray at each part boundary, each part's face and its measured distance.
+  const contextShadingParts = isSelected && element.type === 'ContextShading'
+    ? (() => {
+      // The object's stored drawing shares the canvas's derivation; a vertex drag derives from its live coordinates.
+      const shared = deriveContextShadingCached(element, elementsById, floors ?? [], resolvedGlobalOrientationOffset);
+      if (!shared) return null;
+      const { centre } = shared;
+      const derived = liveCoordinates
+        ? deriveContextShading({ coordinates: liveCoordinates }, centre, Object.values(elementsById), resolvedGlobalOrientationOffset)
+        : shared.derived;
+      if (!derived || 'issue' in derived) return null;
+      const project = (point: { x: number; y: number }) => worldToCanvas(point, scale, panOffset, canvasCenter);
+      const origin = project(centre.point);
+      const flat = (points: { x: number; y: number }[]) => points.flatMap((point) => {
+        const canvasPoint = project(point);
+        return [canvasPoint.x, canvasPoint.y];
+      });
+      // One ray per boundary: the parts of an object seen all round share their first and last.
+      const rayEnds = new Map<string, { x: number; y: number }>();
+      for (const part of derived.parts) {
+        for (const end of part.stretch) rayEnds.set(`${end.x.toFixed(6)},${end.y.toFixed(6)}`, end);
+      }
+      return (
+        <Group key={`context-shading-parts-${element.id}`} listening={false}>
+          {hoveredPartIndex >= 0 && derived.parts[hoveredPartIndex] && (
+            <Line
+              points={flat([centre.point, ...derived.parts[hoveredPartIndex].stretch])}
+              closed
+              fill={canvasInteractionPalette.guideFill}
+            />
+          )}
+          {[...rayEnds.values()].map((end, rayIndex) => (
+            <Line
+              key={`ray-${rayIndex}`}
+              points={flat([centre.point, end])}
+              stroke={canvasInteractionPalette.guide}
+              strokeWidth={1}
+              dash={[6, 4]}
+              opacity={0.7}
+            />
+          ))}
+          {derived.parts.map((part, index) => {
+            const color = part.distance > 0 ? canvasInteractionPalette.guide : canvasInteractionPalette.warningGuide;
+            const extension = wallExtension(part.wall, part.from);
+            return (
+              <Group key={`part-${index}-${part.face}`}>
+                <Line points={flat(part.stretch)} stroke={color} strokeWidth={5} lineCap="round" />
+                <Line points={flat([...part.wall])} stroke={color} strokeWidth={3} lineCap="round" />
+                {extension && <Line points={flat(extension)} stroke={color} strokeWidth={1} dash={[4, 4]} />}
+                <Line points={flat([part.from, part.to])} stroke={color} strokeWidth={2} dash={[5, 5]} />
+              </Group>
+            );
+          })}
+          <Circle x={origin.x} y={origin.y} radius={4} fill={canvasInteractionPalette.guide} />
+        </Group>
+      );
+    })()
+    : null;
+
   // Render point elements (single coordinate)
   if (shape === 'point') {
     const windowObjectScreen = getWindowShadingObjectScreenGeometry(element, elementsById, nameToId);
@@ -1611,22 +1687,9 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             const updated = [...coordinates];
             updated[0] = { ...updated[0], x: newWorld.x, y: newWorld.y } as any;
 
-            // Auto-calculate angles and distance for ContextShading with parent
-            if (element.type === 'ContextShading' && (element as any).parent_element) {
-              const parentId = nameToId[(element as any).parent_element as string];
-              const parentElement = parentId ? elementsById[parentId] : undefined;
-              if (parentElement) {
-                const { calculateShadingAngularRange, calculateContextShadingDistance } = geometryStore.getState();
-                const { start_angle, end_angle } = calculateShadingAngularRange(
-                  { ...element, coordinates: updated },
-                  parentElement,
-                  geometryStore.getState().globalOrientationOffset,
-                );
-                const distance = calculateContextShadingDistance({ ...element, coordinates: updated }, parentElement);
-                updateElement(element.id, { coordinates: updated, start_angle, end_angle, distance });
-              } else {
-                updateElement(element.id, { coordinates: updated });
-              }
+            // A Context Shading update re-derives its directions and distance in the store.
+            if (element.type === 'ContextShading') {
+              updateElement(element.id, { coordinates: updated });
             } else if (windowObjectScreen) {
               const dx = newWorld.x - windowObjectScreen.midpoint.x;
               const dy = newWorld.y - windowObjectScreen.midpoint.y;
@@ -1987,6 +2050,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                   if (e.evt?.shiftKey) setLineVertexDragHintIfChanged(null);
                   else applyLineVertexSnapHint(0, { x: finalWorldPos.x, y: finalWorldPos.y });
+                  publishContextShadingDrag(0, finalWorldPos);
 
                   // IMPERATIVE: Update connected nodes directly if vertex snap mode is active
                   if (vertexSnapMode && vertexDragState && vertexDragState.elementId === element.id && vertexDragState.vertexIndex === 0) {
@@ -2205,6 +2269,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                     draggedNode.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                     if (e.evt?.shiftKey) setLineVertexDragHintIfChanged(null);
                     else applyLineVertexSnapHint(1, { x: newWorld.x, y: newWorld.y });
+                    publishContextShadingDrag(1, newWorld);
 
                   // IMPERATIVE: Update connected nodes directly if vertex snap mode is active
                   if (vertexSnapMode && vertexDragState && vertexDragState.elementId === element.id && vertexDragState.vertexIndex === 1) {
@@ -2332,6 +2397,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
               </>
             );
           })()}
+          {contextShadingParts}
         </Group>
       );
     }
@@ -2545,6 +2611,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         ? { ...snapEvent, position: { x: newWorld.x, y: newWorld.y } }
                         : null,
                     });
+                    publishContextShadingDrag(index, newWorld);
 
                     // Visual: change handle color while snapped (no batchDraw here - will batch at end)
                     try {
@@ -2573,26 +2640,6 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   const updatedCoords = [...coordinates];
                   updatedCoords[index] = { ...updatedCoords[index], x: newWorld.x, y: newWorld.y };
 
-                  // Auto-calculate angles and distance for ContextShading with parent
-                  if (element.type === 'ContextShading' && (element as any).parent_element) {
-                    const parentElement = elementIds
-                .map(id => elementsById[id])
-                .find(el => el && el.name === (element as any).parent_element);
-                    if (parentElement) {
-                      const { calculateShadingAngularRange, calculateContextShadingDistance } = geometryStore.getState();
-                      const { start_angle, end_angle } = calculateShadingAngularRange(
-                        { ...element, coordinates: updatedCoords },
-                        parentElement,
-                        geometryStore.getState().globalOrientationOffset,
-                      );
-                      const distance = calculateContextShadingDistance({ ...element, coordinates: updatedCoords }, parentElement);
-                      e.target.setAttr('__vulcanPendingDragUpdates', { start_angle, end_angle, distance });
-                    } else {
-                      e.target.setAttr('__vulcanPendingDragUpdates', null);
-                    }
-                  } else {
-                    e.target.setAttr('__vulcanPendingDragUpdates', null);
-                  }
                     updateDraggedElementShapeFromCoords(
                       draggedNode,
                       element.id,
@@ -2670,26 +2717,8 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                   const updated = [...coordinates];
                     updated[index] = { ...updated[index], x: finalWorldPos.x, y: finalWorldPos.y };
 
-                  // Auto-calculate angles and distance for ContextShading with parent
-                  if (element.type === 'ContextShading' && (element as any).parent_element) {
-                    const parentElement = elementIds
-                .map(id => elementsById[id])
-                .find(el => el && el.name === (element as any).parent_element);
-                    if (parentElement) {
-                      const { calculateShadingAngularRange, calculateContextShadingDistance } = geometryStore.getState();
-                      const { start_angle, end_angle } = calculateShadingAngularRange(
-                        { ...element, coordinates: updated },
-                        parentElement,
-                        geometryStore.getState().globalOrientationOffset,
-                      );
-                      const distance = calculateContextShadingDistance({ ...element, coordinates: updated }, parentElement);
-                      updateElement(element.id, { coordinates: updated, start_angle, end_angle, distance });
-                    } else {
-                      updateElement(element.id, { coordinates: updated });
-                    }
-                  } else {
-                    updateElement(element.id, { coordinates: updated });
-                  }
+                  // A Context Shading update re-derives its directions and distance in the store.
+                  updateElement(element.id, { coordinates: updated });
                   }
 
                   cleanupVertexInteractionAfterDragEnd(draggedNode);
@@ -2699,135 +2728,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
             );
           })}
 
-          {/* ContextShading Visual Arc */}
-          {isSelected && element.type === 'ContextShading' && (element as any).parent_element && (
-            (() => {
-              const contextShading = elementsById[element.id] as any; // Get current element data from store
-              const parentElement = elementIds
-                .map(id => elementsById[id])
-                .find(el => el && el.name === contextShading.parent_element);
-              if (!parentElement || !parentElement.coordinates) return null;
-
-              // Calculate parent center
-              const parentCenter = getPlanCenter(parentElement.coordinates);
-              if (!parentCenter) return null;
-              const parentCenterCanvas = worldToCanvas(parentCenter, scale, panOffset, canvasCenter);
-
-              // The distance, from the same function that stores
-              // it, using current coordinates (real-time during drag).
-              const measured = contextShadingDistanceDetails(
-                { coordinates },
-                parentElement,
-                elementIds.map((id) => elementsById[id]).filter(Boolean),
-              );
-              if (!measured) return null;
-              const measuredFrom = worldToCanvas(measured.from, scale, panOffset, canvasCenter);
-              const measuredTo = worldToCanvas(measured.to, scale, panOffset, canvasCenter);
-              const distanceColor = measured.distance > 0 ? canvasInteractionPalette.guide : canvasInteractionPalette.warningGuide;
-              const distanceLabel = `${measured.distance.toFixed(2)}m${measured.thickness.source === 'none' ? ' (internal line)' : ''}`;
-
-              // Calculate angles in real-time using current coordinates
-              const { calculateShadingAngularRange } = geometryStore.getState();
-              const { start_angle, end_angle } = calculateShadingAngularRange({ ...element, coordinates }, parentElement);
-
-              // Use raw azimuth for geometry (visual arc should reflect real-world position)
-              // Convert azimuth (0°=N) to canvas angle (0°=E) by rotating -90° (+270°)
-              const canvasStartDeg = (start_angle + 270) % 360;
-              let canvasEndDeg = (end_angle + 270) % 360;
-              // Normalize sweep so end >= start for rendering a positive arc
-              if (canvasEndDeg < canvasStartDeg) canvasEndDeg += 360;
-              const startAngleRad = (canvasStartDeg * Math.PI) / 180;
-              const endAngleRad = (canvasEndDeg * Math.PI) / 180;
-
-              const maxDistance = Math.max(...coordinates.map((coord: any) =>
-                Math.hypot(coord.x - parentCenter.x, coord.y - parentCenter.y)
-              ));
-
-              // Match worldToCanvas' metres-to-pixels scale.
-              const arcRadius = maxDistance * 50 * scale;
-
-              // Calculate start and end points of the arc.
-              const startX = parentCenterCanvas.x + Math.cos(startAngleRad) * arcRadius;
-              const startY = parentCenterCanvas.y + Math.sin(startAngleRad) * arcRadius;
-              const endX = parentCenterCanvas.x + Math.cos(endAngleRad) * arcRadius;
-              const endY = parentCenterCanvas.y + Math.sin(endAngleRad) * arcRadius;
-
-              // Debug logs removed
-
-              return (
-                <Group key={`context-shading-arc-${element.id}`}>
-                  {/* Parent center highlight */}
-                  <Circle
-                    x={parentCenterCanvas.x}
-                    y={parentCenterCanvas.y}
-                    radius={8}
-                    fill={canvasInteractionPalette.guideFill}
-                    stroke={canvasInteractionPalette.guide}
-                    strokeWidth={2}
-                    listening={false}
-                  />
-
-                  {/* Reference lines at start/end angles */}
-                  <Line
-                    points={[parentCenterCanvas.x, parentCenterCanvas.y, startX, startY]}
-                    stroke="var(--error-text)"
-                    strokeWidth={4}
-                    dash={[10, 5]}
-                    listening={false}
-                  />
-                  <Line
-                    points={[parentCenterCanvas.x, parentCenterCanvas.y, endX, endY]}
-                    stroke="var(--error-text)"
-                    strokeWidth={4}
-                    dash={[10, 5]}
-                    listening={false}
-                  />
-
-                  {/* Shading arc segment - simple arc between start and end angles */}
-                  {(() => {
-                    const arcPoints = [];
-                    const numSegments = Math.max(16, Math.abs(endAngleRad - startAngleRad) * 20);
-                    for (let i = 0; i <= numSegments; i++) {
-                      const angle = startAngleRad + (endAngleRad - startAngleRad) * (i / numSegments);
-                      const x = parentCenterCanvas.x + Math.cos(angle) * arcRadius;
-                      const y = parentCenterCanvas.y + Math.sin(angle) * arcRadius;
-                      arcPoints.push(x, y);
-                    }
-                    return (
-                      <Line
-                        points={arcPoints}
-                        stroke={canvasInteractionPalette.guide}
-                        strokeWidth={8}
-                        lineCap="round"
-                        lineJoin="round"
-                        listening={false}
-                      />
-                    );
-                  })()}
-
-                  {/* Distance: closest external wall's outside face to the object's closest face */}
-                  <Line
-                    points={[measuredFrom.x, measuredFrom.y, measuredTo.x, measuredTo.y]}
-                    stroke={distanceColor}
-                    strokeWidth={2}
-                    dash={[5, 5]}
-                    listening={false}
-                  />
-
-                  {/* Distance label: the value stored and sent to HEM */}
-                  <Text
-                    x={(measuredFrom.x + measuredTo.x) / 2 + 8}
-                    y={(measuredFrom.y + measuredTo.y) / 2 - 6}
-                    text={distanceLabel}
-                    fontSize={12}
-                    fill={distanceColor}
-                    fontStyle="bold"
-                    listening={false}
-                  />
-                </Group>
-              );
-            })()
-          )}
+          {contextShadingParts}
 
         </Group>
       );
@@ -3120,6 +3021,7 @@ const ElementRendererComponent: React.FC<ElementRendererProps> = ({
                         ? { ...snapEvent, position: { x: newWorld.x, y: newWorld.y } }
                         : null,
                     });
+                    publishContextShadingDrag(index, newWorld);
                     const snappedCanvas = worldToCanvas(newWorld, scale, panOffset, canvasCenter);
                     e.target.position({ x: snappedCanvas.x, y: snappedCanvas.y });
                     try { (e.target as any).attrs.fill = didSnap ? canvasInteractionPalette.snap : canvasInteractionPalette.handleFill; (e.target as any).getLayer()?.batchDraw?.(); } catch { /* swallow: best-effort */ }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /** R6 parity fence: panel/store behavior, not a proposed descriptor helper. */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GeometryEditorServicePortsProvider } from '../../../../geometry-editor-host/src/editorServicePorts';
@@ -770,7 +770,7 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     expect(trigger).not.toBeDisabled();
     await user.click(trigger);
     expect(screen.getByRole('option', { name: /200mm test board/ })).toBeInTheDocument();
-    const searchInput = screen.getByPlaceholderText('Search assemblies…');
+    const searchInput = screen.getByPlaceholderText('Filter');
     await waitFor(() => expect(screen.getByRole('listbox').parentElement).toHaveStyle({ pointerEvents: 'auto' }));
     await user.type(searchInput, '100mm');
     expect(screen.queryByRole('option', { name: /200mm test board/ })).not.toBeInTheDocument();
@@ -788,6 +788,7 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
         thermal_resistance_construction: 0.5,
         mass_distribution_class: 'D: Mass equally distributed',
         areal_heat_capacity: 'Light',
+        wall_layers: undefined, // an existing wall's edited layers: the build-up replaces them
         vulcan_assembly_v1: {
           schemaVersion: 1,
           assemblyId: 'test.wall',
@@ -822,13 +823,72 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
     }
   });
 
+  it('applies the picked layers to every selected wall in one undo step; each option shows its U', async () => {
+    const walls = ['a', 'b', 'c', 'd'].map((id) => ({ ...fabric(`wall-${id}`), zoneId: 'zone' }) as Element);
+    const { store } = mount(walls, undefined, resolvedAssemblyResources);
+    act(() => store.getState().saveToHistory('fixture baseline'));
+    expect(fieldLabels()).toContain('Layers');
+    fireEvent.click(await screen.findByRole('button', { name: 'Search assemblies…' }));
+    const option = screen.getByRole('option', { name: /100mm test board/ });
+    expect(within(option).getByText('1.50')).toBeInTheDocument();
+    fireEvent.click(option);
+    for (const wall of walls) {
+      expect(store.getState().elementsById[wall.id]?.extra_json).toMatchObject({
+        u_value: 1.5, vulcan_assembly_v1: { assemblyId: 'test.wall' },
+      });
+    }
+    expect(screen.getByRole('button', { name: '100mm test board' })).toBeInTheDocument();
+    await waitFor(() => expect(store.getState().history).toHaveLength(2));
+    act(() => store.getState().undo());
+    for (const wall of walls) {
+      expect(store.getState().elementsById[wall.id]?.extra_json?.vulcan_assembly_v1).toBeUndefined();
+    }
+  });
+
+  it('a pick on a wall whose typed U set its layers aside keeps the U and sets the picked layers aside, as the element panel does', async () => {
+    const typed = {
+      ...fabric('typed'), zoneId: 'zone',
+      extra_json: { u_value: 0.3, _vulcan_assembly_v1_overridden: {
+        schemaVersion: 1, assemblyId: 'distractor.wall', appliedAt: '2026-11-18T00:00:00.000Z', thermalResistanceConstruction_m2K_W: 1,
+      } },
+    } as Element;
+    const plain = { ...fabric('plain'), zoneId: 'zone' } as Element;
+    const { store } = mount([typed, plain], undefined, resolvedAssemblyResources);
+    fireEvent.click(await screen.findByRole('button', { name: 'Search assemblies…' }));
+    fireEvent.click(screen.getByRole('option', { name: /100mm test board/ }));
+    const typedExtra = store.getState().elementsById.typed?.extra_json as Record<string, unknown>;
+    expect(typedExtra.u_value).toBe(0.3);
+    expect(typedExtra.vulcan_assembly_v1).toBeUndefined();
+    expect(typedExtra._vulcan_assembly_v1_overridden).toMatchObject({ assemblyId: 'test.wall' });
+    expect(store.getState().elementsById.plain?.extra_json).toMatchObject({ u_value: 1.5, vulcan_assembly_v1: { assemblyId: 'test.wall' } });
+  });
+
+  it('offers only layers that fit every selected element, and no picker when none fits', async () => {
+    // Both are sloped surfaces: a 30° roof and a 70° mansard slope, which the wall library fits.
+    const roof = { ...fabric('roof'), pitch: 30 } as Element;
+    const mansard = { ...fabric('mansard'), pitch: 70 } as Element;
+    mount([roof, mansard], undefined, resolvedAssemblyResources);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fieldLabels()).not.toContain('Layers');
+    expect(screen.queryByRole('button', { name: 'Search assemblies…' })).not.toBeInTheDocument();
+    expect(input('U-Value')).toBeInTheDocument();
+  });
+
+  it('reads Mixed when the selected elements carry different layers', async () => {
+    const withAssembly = (id: string, assemblyId: string) =>
+      ({ ...fabric(id), extra_json: { vulcan_assembly_v1: {
+        schemaVersion: 1, assemblyId, appliedAt: '2026-11-18T00:00:00.000Z', thermalResistanceConstruction_m2K_W: 0.5,
+      } } }) as Element;
+    mount([withAssembly('a', 'test.wall'), withAssembly('b', 'distractor.wall')], undefined, resolvedAssemblyResources);
+    expect(await screen.findByRole('button', { name: 'Mixed' })).toBeInTheDocument();
+  });
+
   it('surfaces a host assembly load failure without hiding the fabric controls', async () => {
     mount([fabric('wall')], undefined, rejectedAssemblyResources);
 
     expect(await screen.findByText('assembly fixture unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Assembly')).toBeInTheDocument();
+    expect(screen.getByText('Layers')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Loading assemblies…' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
     expect(input('U-Value')).not.toBeDisabled();
     expect(input('U-Value')).toHaveValue('');
     expect(input('Construction thermal resistance')).not.toBeDisabled();
@@ -841,15 +901,16 @@ describe('R6 MultiSelect parity fence — assembly seam', () => {
 
   it('keeps assembly controls host-neutral and hidden for non-fabric selections', () => {
     mount([lighting('light', { efficacy: 90, count: 4, power: 8 })]);
-    expect(screen.queryByText('Assembly')).not.toBeInTheDocument();
+    expect(screen.queryByText('Layers')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument();
     cleanup();
     mount([thermalBridgePoint('point')]);
-    expect(screen.queryByText('Assembly')).not.toBeInTheDocument();
+    expect(screen.queryByText('Layers')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument();
     cleanup();
     mount([fabric('wall')]);
-    expect(screen.getByText('Assembly')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Library' })).not.toBeDisabled();
+    expect(screen.getByText('Layers')).toBeInTheDocument();
+    // The Assembly picker applies to every selected element; no calculator for the first one alone.
+    expect(screen.queryByRole('button', { name: 'Library' })).not.toBeInTheDocument();
   });
 });

@@ -108,9 +108,9 @@ describe('shared Geometry Files menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Files menu' }));
     fireEvent.click(screen.getByRole('button', { name: 'New Model' }));
     expect(onNewDocument).not.toHaveBeenCalled();
-    // Each start says what it sets; the note says none of it is final.
+    // Each start says what it sets, and nothing more.
     expect(screen.getByText('Version 2 · values')).toBeInTheDocument();
-    expect(screen.getByText('The HEM version and defaults can be changed later in Global Settings.')).toBeInTheDocument();
+    expect(screen.queryByText(/can be changed later/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Start B Version 2 · values' }));
     expect(onNewDocument).toHaveBeenCalledWith('b');
     expect(screen.queryByRole('button', { name: 'Start A' })).not.toBeInTheDocument();

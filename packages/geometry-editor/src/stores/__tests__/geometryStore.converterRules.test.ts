@@ -322,7 +322,7 @@ function load(c: Case) {
     ...(c.requires ? { targetRules: () => ({ requiredMetadataRows: c.requires! }) } : {}),
   };
   const store = createGeometryStore({ defaultDefaultsPath: null, schemaPort });
-  const { warnings } = store.getState().loadFromCSV(c.edit(sample));
+  const { warnings, notices: loadNotices } = store.getState().loadFromCSV(c.edit(sample));
   if (c.defaults) store.setState({ defaultsJson: defaults, defaultsLoading: false } as never);
   c.then?.(store);
   const state = store.getState();
@@ -342,7 +342,7 @@ function load(c: Case) {
     const [key, value] = line.split(',');
     if (key && value !== undefined && !cells.has(`Metadata|${key}`)) cells.set(`Metadata|${key}`, value);
   }
-  return { issues, all, cells, notices: [...warnings, state.lateLoadNotice ?? ''].join(' '), state };
+  return { issues, all, cells, notices: [...warnings, ...loadNotices, state.lateLoadNotice ?? ''].join(' '), state };
 }
 
 it.each(CASES)('$name', (c) => {

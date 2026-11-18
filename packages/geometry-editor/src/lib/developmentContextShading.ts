@@ -7,18 +7,22 @@ import { roundToTwoDecimals } from '../geometry/constants';
 import polygonClipping, { type Polygon } from 'polygon-clipping';
 import { calculatePolygonArea } from './polygonSync';
 import {
-  calculateContextShadingAngularRangeFromCoordinates,
-  calculateContextShadingDistanceFromCoordinates,
+  CONTEXT_SHADING_DEFAULT_CENTRE,
+  deriveContextShadingInModel,
+  generatedNeighbourStoredFields,
+  floorPlates,
+  lowestOccupiedPlates,
+  SAME_FLOOR_TOLERANCE_M,
+  type FloorPlate,
 } from './contextShadingGeometry';
 import { deriveFloorsFromElements } from './floorDerivation';
 import { elementBaseElevationMForTb, slabElevationMForFloorZ } from './geometry3dMapper';
 import { fhsStoreyToCanvasFloor } from './storeySemantics';
 import { ventilationZoneBaseDrawingZ } from './effectiveDwellingDetails';
-import { isWalkableFloorHorizontalPolygon, withEffectiveStoreyHeights } from './zoneDerivation';
+import { withEffectiveStoreyHeights } from './zoneDerivation';
 
 export const DEVELOPMENT_CONTEXT_SHADING_META_KEY = 'development_context_shading';
 
-const SAME_FLOOR_TOLERANCE_M = 0.25;
 const FOOTPRINT_OVERLAP_TOLERANCE_M2 = 0.01;
 
 type Coord = { x: number; y: number; z: number };
@@ -169,8 +173,24 @@ function overlapAreaM2(outline: Coord[], footprints: Coord[][]): number {
       area + (index ? -1 : 1) * Math.abs(calculatePolygonArea(rings.map(([x, y]) => ({ x, y, z: 0 })))), 0), sum), 0);
 }
 
-function isContextGeneratedElement(element: Element): element is ContextShading {
+/** A Context Shading object the Development sync wrote from a neighbouring model. */
+export function isContextGeneratedElement(element: Element): element is ContextShading {
   return element.type === 'ContextShading' && !!readGeneratedMeta(element);
+}
+
+/**
+ * Why a Context Shading object cannot be split into lines, or null when it can. The lines would all
+ * carry a shared object's id, and the save to the other models keeps one row per id.
+ */
+export function contextShadingSplitRefusal(element: Element): string | null {
+  const points = element.coordinates?.length ?? 0;
+  if (points === 0) return 'Draw the object on the plan to split it.';
+  if (points < 3) return 'A line is already one direction.';
+  if (isContextGeneratedElement(element)) return 'This object comes from a neighbouring model. Change it there.';
+  if (getDevelopmentContextSharedContextShadingId(element)) {
+    return 'This object is shared with the other models in the development, so it cannot be split into lines.';
+  }
+  return null;
 }
 
 export function isDevelopmentContextGeneratedShading(
@@ -192,38 +212,15 @@ export function isDevelopmentContextModelFootprintShading(
   return getDevelopmentContextShadingSourceKind(readGeneratedMeta(element)) === 'model_footprint';
 }
 
-function isFootprintElement(element: Element): boolean {
-  if (element.type === 'ContextShading') return false;
-  return element.type === 'BuildingElementGround' || isWalkableFloorHorizontalPolygon(element);
-}
+const withBounds = (plate: FloorPlate): FootprintCandidate => ({ ...plate, bounds: polygonBounds(plate.element.coordinates)! });
 
 function getFootprintCandidates(elements: Element[], floors: Floor[]): FootprintCandidate[] {
-  const effectiveFloors = withEffectiveStoreyHeights(floors, elements) ?? [];
-  return elements
-    .filter(isFootprintElement)
-    .map((element) => {
-      const coords = element.coordinates ?? [];
-      const bounds = polygonBounds(coords);
-      const areaM2 = Math.abs(calculatePolygonArea(coords));
-      if (!bounds || coords.length < 3 || areaM2 <= 0) return null;
-      return {
-        element,
-        areaM2,
-        baseM: elementBaseElevationMForTb(element, effectiveFloors),
-        bounds,
-      };
-    })
-    .filter((candidate): candidate is FootprintCandidate => Boolean(candidate));
+  return floorPlates(elements, floors).map(withBounds);
 }
 
 function selectLowestOccupiedFootprint(elements: Element[], floors: Floor[]): FootprintCandidate | null {
-  const candidates = getFootprintCandidates(elements, floors);
-  candidates.sort((a, b) => {
-    const baseDelta = a.baseM - b.baseM;
-    if (Math.abs(baseDelta) > SAME_FLOOR_TOLERANCE_M) return baseDelta;
-    return b.areaM2 - a.areaM2;
-  });
-  return candidates[0] ?? null;
+  const largest = lowestOccupiedPlates(elements, floors)[0];
+  return largest ? withBounds(largest) : null;
 }
 
 function normalizePitch180(raw: unknown): number | null {
@@ -419,6 +416,7 @@ function generatedElementSignature(element: ContextShading): string {
     distance: roundToTwoDecimals(element.distance),
     height: roundToTwoDecimals(element.height),
     parent_element: element.parent_element,
+    parts: element.parts,
     coordinates: (element.coordinates ?? []).map(roundCoord),
   });
 }
@@ -526,6 +524,9 @@ function buildGeneratedContextShadingFromCoordinates(args: {
   parent: Element;
   /** The active model's elements, for its wall types. */
   activeElements: readonly Element[];
+  /** The active model's storeys and shading centre (a floor name, or the default centre). */
+  activeFloors: Floor[];
+  centreParent: string;
   sourceModel: DevelopmentContextShadingModel;
   sourceElementId: string;
   sourceKind: DevelopmentContextShadingSourceKind;
@@ -556,17 +557,15 @@ function buildGeneratedContextShadingFromCoordinates(args: {
     end_angle: 0,
     distance: 0,
     height: roundToTwoDecimals(args.heightM),
-    parent_element: args.parent.name,
+    parent_element: args.centreParent,
     coordinates,
   };
-  const angles = calculateContextShadingAngularRangeFromCoordinates(
-    draft,
-    args.parent,
-    args.globalOrientationOffset,
-  );
-  draft.start_angle = roundToTwoDecimals(angles.start_angle);
-  draft.end_angle = roundToTwoDecimals(angles.end_angle);
-  draft.distance = calculateContextShadingDistanceFromCoordinates(draft, args.parent, args.activeElements);
+  // HEM takes only a distance above 0: a part beside the dwelling is left out, the rest kept. With
+  // none left, or a drawing that cannot be split, the distance stays 0 and the object is left out.
+  const derived = deriveContextShadingInModel(draft, [...args.activeElements], args.activeFloors, args.globalOrientationOffset);
+  const fields = derived && !('issue' in derived) ? generatedNeighbourStoredFields(derived) : null;
+  if (fields) Object.assign(draft, fields);
+  if (!draft.parts) delete draft.parts;
 
   const metaWithoutSignature = {
     version: 1 as const,
@@ -600,6 +599,8 @@ function buildGeneratedContextShading(args: {
   parent: Element;
   /** The active model's elements, for its wall types. */
   activeElements: readonly Element[];
+  activeFloors: Floor[];
+  centreParent: string;
   sourceModel: DevelopmentContextShadingModel;
   sourceFootprint: FootprintCandidate;
   sourceVertical: DevelopmentModelVerticalContext;
@@ -614,6 +615,8 @@ function buildGeneratedContextShading(args: {
     name: args.name,
     parent: args.parent,
     activeElements: args.activeElements,
+    activeFloors: args.activeFloors,
+    centreParent: args.centreParent,
     sourceModel: args.sourceModel,
     sourceElementId: args.sourceFootprint.element.id,
     sourceKind: 'model_footprint',
@@ -652,6 +655,9 @@ export function syncDevelopmentContextShadingElements(
     });
   const activeFloors = withEffectiveStoreyHeights(args.floors, activeElements) ?? [];
   const activeParent = selectLowestOccupiedFootprint(activeElements, activeFloors);
+  // Generated objects measure from the model's centre, as its own objects do, else the default.
+  const centreParent = (activeElements.find((element) => element.type === 'ContextShading') as ContextShading | undefined)?.parent_element
+    || CONTEXT_SHADING_DEFAULT_CENTRE;
   const activeVertical = resolveDevelopmentModelVerticalContext({
     elements: activeElements,
     zones: args.zones,
@@ -727,7 +733,9 @@ export function syncDevelopmentContextShadingElements(
             id: existing?.id ?? generatedElementId(key),
             name,
             parent: activeParent.element,
-          activeElements,
+            activeElements,
+            activeFloors,
+            centreParent,
             sourceModel: model,
             sourceFootprint,
             sourceVertical,
@@ -760,6 +768,8 @@ export function syncDevelopmentContextShadingElements(
           name,
           parent: activeParent.element,
           activeElements,
+          activeFloors,
+          centreParent,
           sourceModel: model,
           sourceElementId: sourceContext.id,
           sourceKind: 'explicit_context_shading',

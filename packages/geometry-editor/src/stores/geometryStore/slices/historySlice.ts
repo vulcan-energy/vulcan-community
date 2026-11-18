@@ -35,7 +35,46 @@ export type HistoryEntry = {
   floors: Floor[];
   currentFloorId: string | null;
   label: string;
+  /**
+   * The selection while the document was in this state; undo and redo restore it. A restore
+   * re-parses the text, so an element comes back under the id its name matched, not always the
+   * one it had: `selectedKeys` names each selected element (zone, type, name) to find it again.
+   */
+  selection: GeometryState['selection'];
+  selectedElementIds: string[];
+  selectedKeys: Record<string, string>;
 };
+
+const elementKey = (state: Pick<GeometryState, 'zones' | 'elementsById'>, id: string): string | undefined => {
+  const element = state.elementsById[id];
+  const zone = state.zones.find((candidate) => candidate.id === element?.zoneId);
+  return element && `${zone?.name ?? ''}\u0000${element.type}\u0000${element.name}`;
+};
+
+/** The selection of `state` as a history entry keeps it. */
+const entrySelection = (state: GeometryState): Pick<HistoryEntry, 'selection' | 'selectedElementIds' | 'selectedKeys'> => {
+  const ids = state.selection ? [...state.selectedElementIds, state.selection.id] : state.selectedElementIds;
+  const selectedKeys: Record<string, string> = {};
+  for (const id of ids) {
+    const key = elementKey(state, id);
+    if (key) selectedKeys[id] = key;
+  }
+  return { selection: state.selection, selectedElementIds: state.selectedElementIds, selectedKeys };
+};
+
+/** The selection a state keeps: ids that no longer exist drop out. */
+export function survivingSelection(state: Pick<GeometryState, 'selection' | 'selectedElementIds' | 'zones' | 'elementsById'>) {
+  const sel = state.selection;
+  const survives =
+    !sel ||
+    sel.type === 'global' ||
+    sel.type === 'dormer' ||
+    (sel.type === 'zone' ? state.zones.some((zone) => zone.id === sel.id) : sel.id in state.elementsById);
+  return {
+    selectedElementIds: state.selectedElementIds.filter((id) => id in state.elementsById),
+    selection: survives ? sel : null,
+  };
+}
 
 /**
  * Who a store write is for. `user` and `preset:<name>` are the user's gesture: they mark the model
@@ -117,6 +156,8 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   // Keyed by state identity: any store change misses, history bookkeeping keeps it.
   let documentCsvCache: { state: GeometryState; csv: string } | null = null;
   let captureTimer: ReturnType<typeof setTimeout> | null = null;
+  // The selection before the document edits now pending a step: it belongs to the step they leave.
+  let selectionBeforeEdit: ReturnType<typeof entrySelection> | null = null;
   // Depth of the editor's own writes in progress; the change subscriber starts no capture during them.
   let systemWriteDepth = 0;
   let systemIntent: WriteIntent = 'user';
@@ -166,16 +207,20 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
     const head = state.history[state.historyIndex];
     if (head?.csv === csv) {
       // Same document; an empty floor added or removed since still belongs to this step.
-      if (head.floors !== state.floors) {
+      selectionBeforeEdit = null;
+      if (head.floors !== state.floors || head.selection !== state.selection || head.selectedElementIds !== state.selectedElementIds) {
         const history = state.history.slice();
-        history[state.historyIndex] = { ...head, floors: state.floors };
+        history[state.historyIndex] = { ...head, floors: state.floors, ...entrySelection(state) };
         setHistory({ history });
       }
       return;
     }
+    const kept = state.history.slice(0, state.historyIndex + 1);
+    if (head && selectionBeforeEdit) kept[state.historyIndex] = { ...head, ...selectionBeforeEdit };
+    selectionBeforeEdit = null;
     const history = [
-      ...state.history.slice(0, state.historyIndex + 1),
-      { csv, floors: state.floors, currentFloorId: state.currentFloorId, label },
+      ...kept,
+      { csv, floors: state.floors, currentFloorId: state.currentFloorId, label, ...entrySelection(state) },
     ].slice(-state.maxHistorySize);
     setHistory({
       history,
@@ -199,6 +244,21 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
       console.error('[GeometryHistory] could not restore history entry:', error);
       return;
     }
+    const restored = get();
+    // The id itself when it still names the same element (the usual case); else the id its key matched.
+    let idByKey: Map<string | undefined, string> | null = null;
+    const current = (id: string) => {
+      const key = entry.selectedKeys[id];
+      if (!key || elementKey(restored, id) === key) return id;
+      idByKey ??= new Map(restored.elementIds.map((candidate) => [elementKey(restored, candidate), candidate]));
+      return idByKey.get(key) ?? id;
+    };
+    // A step that had a selection brings it back; one that had none keeps what survives.
+    set(survivingSelection(entry.selection || entry.selectedElementIds.length > 0 ? {
+      ...restored,
+      selection: entry.selection && { ...entry.selection, id: current(entry.selection.id) },
+      selectedElementIds: entry.selectedElementIds.map(current),
+    } : restored));
     // Restoring a step is not an edit: no capture is pending after it.
     if (captureTimer !== null) {
       clearTimeout(captureTimer);
@@ -270,6 +330,7 @@ export const createHistorySlice: GeometryStoreSlice = (set, get, api) => {
   api.subscribe((state, previous) => {
     if (systemWriteDepth > 0 || isHistoryOnlyChange(state, previous)) return;
     if (state.elementsById !== previous.elementsById) {
+      selectionBeforeEdit ??= entrySelection(previous);
       const provenance = recordProvenance(
         state.provenance,
         previous.elementsById,

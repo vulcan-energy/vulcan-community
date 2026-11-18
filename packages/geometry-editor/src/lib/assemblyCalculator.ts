@@ -444,7 +444,7 @@ export function validateAssemblyLayerLayout(layers: AssemblyLayer[]): string[] {
  * Move layer at `from` to gap `insertAt` in the original ordering (0 = before first … n = after last).
  * Used for drag-and-drop when the user drops on a **line** between positions.
  */
-export function moveLayerToGap(layers: AssemblyLayer[], from: number, insertAt: number): AssemblyLayer[] {
+export function moveLayerToGap<T>(layers: T[], from: number, insertAt: number): T[] {
   const n = layers.length;
   if (n === 0 || from < 0 || from >= n || insertAt < 0 || insertAt > n) return layers;
   const next = [...layers];

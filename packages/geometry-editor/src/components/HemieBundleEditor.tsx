@@ -45,7 +45,7 @@ import './HemieBundleEditor.css';
 type Parameters = Omit<BayParameters, 'roof'> & Omit<ConservatoryParameters, 'roof'> & {
   roof?: BayParameters['roof'] | ConservatoryParameters['roof'];
 };
-type Edits = Partial<Record<keyof Parameters, unknown>>;
+type Edits = Partial<Record<keyof Parameters | keyof RoofParameters, unknown>>;
 
 const SPACE_TYPES = ['corridor', 'garage', 'roof void', 'stairwell'] as const;
 const fmt = (n: number) => String(roundToTwoDecimals(n));
@@ -191,10 +191,12 @@ export function HemieBundleEditor({
   /** Refits the roof with these parameters (undefined clears one). */
   const commitRoof = (next: Partial<RoofParameters>) => {
     const parameters = Object.fromEntries(
-      Object.entries({ ...roofParameters(store.getState().elementsById[anchor.id] ?? anchor), ...next }).filter(([, value]) => value !== undefined),
+      Object.entries({ ...roofParameters(store.getState().elementsById[anchor.id] ?? anchor), ...edits, ...next }).filter(([, value]) => value !== undefined),
     ) as unknown as RoofParameters;
     const drawn = drawRoofPart(store.getState(), parameters, store.getState().elementsById[anchor.id] ?? anchor);
     setProblems((p) => ({ ...p, roof: 'problem' in drawn ? drawn.problem : null }));
+    // Typed values stay on screen while they cannot be drawn, as for the other parts.
+    setEdits('problem' in drawn ? { ...edits, ...next } : {});
     if (!('problem' in drawn)) onRedrawn(getHemieBundleMembers(Object.values(store.getState().elementsById), tag.bundle_id).map((member) => member.id));
   };
 
@@ -276,7 +278,7 @@ export function HemieBundleEditor({
       </div>
       {/* Just after placing, GeometryCanvas focuses this field (a choice: its first option). */}
       <div className="part-editor__body" data-first-blank={firstBlank}>
-        {roof ? <RoofPartFields view={roof} epc={epc} commit={commitRoof} /> : isBay ? <BayFields kit={kit} /> : <ConservatoryFields kit={kit} />}
+        {roof ? <RoofPartFields view={{ ...roof, parameters: { ...roof.parameters, ...edits } as RoofParameters }} epc={epc} commit={commitRoof} /> : isBay ? <BayFields kit={kit} /> : <ConservatoryFields kit={kit} />}
         {renameProblem ?? (roof ? roofNotice : notice)
           ? <div className="field-source-note part-editor__notice" role="alert">{renameProblem ?? (roof ? roofNotice : notice)}</div>
           : null}
@@ -300,6 +302,22 @@ export function HemieBundleEditor({
           {roof && epc && roof.parameters.use === 'vaulted' ? (
             // HEM:EPC has no default for a vaulted ceiling: Fabric › Pitched roof holds loft fields only.
             <div className="field-source-note">Give the slopes a U-value: HEM:EPC has no default for a vaulted ceiling.</div>
+          ) : roof && roof.parameters.use === 'room' ? (
+            <div className="field-source-note">
+              Slopes from{' '}
+              <button type="button" className="field-source-note__link" onClick={() => openFabricTab(epc ? hemieConstructionSetting('heated_pitched_roof') : undefined)}>
+                Fabric › Heated pitched roof
+              </button>
+              {members.some((m) => getHemieBundle(m)?.role.startsWith('void:')) ? (
+                <>
+                  ; voids from{' '}
+                  <button type="button" className="field-source-note__link" onClick={() => openFabricTab(epc ? hemieConstructionSetting('unheated_pitched_roof') : undefined)}>
+                    Pitched roof
+                  </button>
+                </>
+              ) : null}
+              .
+            </div>
           ) : roof ? (
             <div className="field-source-note">
               {roof.parameters.use === 'vaulted' ? 'Slopes' : 'Loft insulation'} from{' '}

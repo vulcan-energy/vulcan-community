@@ -128,6 +128,13 @@ describe('window shading distance', () => {
   });
 });
 
+it('asks a new plant system for its category in plain words', () => {
+  const system = { id: 'sys', name: 'System', zoneId: 'zone-1', floorId: 'floor-0', type: 'System',
+    coordinates: [{ x: 0, y: 0, z: 0 }], isPlaceholder: false } as unknown as Element;
+  expect(validateElementCore(system, { schemaPort: unavailableGeometrySchemaPort } as never).issues)
+    .toContainEqual(expect.objectContaining({ fieldKey: 'subcategory', message: expect.stringMatching(/: Choose a category$/) }));
+});
+
 describe('electric storage heater output tables', () => {
   const heater = (rows: unknown) => ({
     id: 'sys', name: 'Heater', zoneId: 'zone-1', floorId: 'floor-0', type: 'System', subcategory: 'SpaceHeatSystem', system_preset: 'heater',

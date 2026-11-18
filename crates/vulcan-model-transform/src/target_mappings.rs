@@ -63,6 +63,50 @@ pub(crate) fn map_named_cold_appliances(model: &mut Value, contract: crate::Inpu
     }
 }
 
+/// The name the HEM:EPC wrapper reads the main hot water source by.
+pub(crate) const MAIN_HOT_WATER_SOURCE: &str = "hw cylinder";
+
+/// The single hot water source takes the name the wrapper reads it by, and every outlet that
+/// names it follows. Several sources keep their names (`validate_target_input` refuses them).
+/// Returns the name the user gave the renamed source.
+pub(crate) fn map_main_hot_water_source_name(
+    model: &mut Value,
+    contract: crate::InputContract,
+) -> Option<String> {
+    if !contract.names_main_hot_water_source {
+        return None;
+    }
+    let sources = model
+        .get_mut("HotWaterSource")
+        .and_then(Value::as_object_mut)?;
+    if sources.len() != 1 || sources.contains_key(MAIN_HOT_WATER_SOURCE) {
+        return None;
+    }
+    let (authored, source) = sources
+        .iter()
+        .next()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .unwrap();
+    sources.clear();
+    sources.insert(MAIN_HOT_WATER_SOURCE.into(), source);
+    for kind in ["Shower", "Bath", "Other"] {
+        let Some(outlets) = model
+            .pointer_mut(&format!("/HotWaterDemand/{kind}"))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        for outlet in outlets.values_mut() {
+            if let Some(name) = outlet.get_mut("HotWaterSource") {
+                if *name == authored.as_str() {
+                    *name = Value::String(MAIN_HOT_WATER_SOURCE.into());
+                }
+            }
+        }
+    }
+    Some(authored)
+}
+
 /// Pinned Python a8/a9 (hem_core `src/hem_core/external_conditions.py` at f2ab6cf7 and 918addad,
 /// `ExternalConditions.diffuse_shading_reduction_factor`) loop over `shading_segments` in input
 /// order with `f_sky_new += f_sky_front + f_sky_rear`. For a flat element `f_sky` is 1.0,
@@ -1514,6 +1558,82 @@ mod tests {
             &a8_version(),
         )
         .is_empty());
+    }
+    /// The wrapper classifies water heating by its one main source, so several sources stop
+    /// before the run on each of them.
+    #[test]
+    fn epc_refuses_several_hot_water_sources() {
+        let model = json!({"HotWaterSource":{"Cylinder":{"type":"StorageTank"},"Combi":{"type":"CombiBoiler"}}});
+        let errors = crate::validate_target_input(
+            &model,
+            crate::ConversionProfile::EpcFullInputV1,
+            &a8_version(),
+        );
+        let found: Vec<_> = errors
+            .iter()
+            .map(|e| (e.code.as_str(), e.path.as_str(), e.message.as_str()))
+            .collect();
+        let message = "HEM:EPC takes one hot water system, and this model has 2: \"Cylinder\", \"Combi\". Keep one and remove the others.";
+        assert_eq!(
+            found,
+            [
+                (
+                    "E_EPC_HOT_WATER_SOURCES",
+                    "/HotWaterSource/Cylinder",
+                    message
+                ),
+                ("E_EPC_HOT_WATER_SOURCES", "/HotWaterSource/Combi", message),
+            ]
+        );
+        // Not a rename: neither takes the wrapper's name.
+        let mut renamed = model.clone();
+        assert_eq!(
+            map_main_hot_water_source_name(
+                &mut renamed,
+                crate::ConversionProfile::EpcFullInputV1.input_contract()
+            ),
+            None
+        );
+        assert_eq!(renamed, model);
+        assert!(crate::validate_target_input(
+            &model,
+            crate::ConversionProfile::PythonFhsA9,
+            &a8_version()
+        )
+        .iter()
+        .all(|e| e.code != "E_EPC_HOT_WATER_SOURCES"));
+    }
+    /// Each outlet that names the single source follows its rename; one naming no source, or
+    /// another name, is left alone.
+    #[test]
+    fn epc_outlets_that_name_the_hot_water_source_follow_its_rename() {
+        let mut model = json!({
+            "HotWaterSource": {"Hot water": {"type": "StorageTank"}},
+            "HotWaterDemand": {
+                "Shower": {"mixer": {"type": "MixerShower", "HotWaterSource": "Hot water"}},
+                "Bath": {"bath": {"size": 180, "HotWaterSource": "Hot water"}},
+                "Other": {"sink": {"flowrate": 8, "HotWaterSource": "Hot water"}, "tap": {"flowrate": 6}}
+            }
+        });
+        assert_eq!(
+            map_main_hot_water_source_name(
+                &mut model,
+                crate::ConversionProfile::EpcFullInputV1.input_contract()
+            )
+            .as_deref(),
+            Some("Hot water")
+        );
+        assert_eq!(
+            model,
+            json!({
+                "HotWaterSource": {"hw cylinder": {"type": "StorageTank"}},
+                "HotWaterDemand": {
+                    "Shower": {"mixer": {"type": "MixerShower", "HotWaterSource": "hw cylinder"}},
+                    "Bath": {"bath": {"size": 180, "HotWaterSource": "hw cylinder"}},
+                    "Other": {"sink": {"flowrate": 8, "HotWaterSource": "hw cylinder"}, "tap": {"flowrate": 6}}
+                }
+            })
+        );
     }
     #[test]
     fn python_fhs_requires_main_hot_water_name_without_rejecting_point_of_use() {

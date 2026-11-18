@@ -330,7 +330,7 @@ export function hemieConstructionKeys(constructionType: string): string[] {
  * no other input takes them, so another target leaves them out.
  */
 export const HEMIE_ELEMENT_KEYS = [
-  'age_band', HEMIE_FRONT_DOOR, 'wall_construction_type', 'glazing_type', 'frame_material', 'glazing_gap',
+  'age_band', HEMIE_FRONT_DOOR, 'wall_construction_type', 'wall_layers', 'glazing_type', 'frame_material', 'glazing_gap',
   'insulation_location', 'construction_weight', 'retrofit_insulation', 'insulation_thickness', 'adjacent_space_type',
   'basement_depth_descriptor', 'basement_air_volume', 'thatched', 'insulation_type', 'insulation_thermal_conductivity',
   'ceiling_thickness', 'ceiling_thermal_conductivity', 'joist_depth', 'percentage_area_of_timber_joists', 'roof_characteristics',
@@ -390,6 +390,8 @@ export function hemieValueLabel(field: string, value: unknown, constructionType?
     if (label) return label;
   }
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  // Edited wall layers: their count.
+  if (Array.isArray(value)) return `${value.length} layers`;
   return typeof value === 'number' ? `${value}${UNITS[field] ? ` ${UNITS[field]}` : ''}` : words(String(value));
 }
 
